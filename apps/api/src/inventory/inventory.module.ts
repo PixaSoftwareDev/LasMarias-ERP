@@ -1,0 +1,15 @@
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { WarehouseEntity } from './warehouse.entity';
+import { InventoryMovementEntity } from './inventory-movement.entity';
+import { InventoryService } from './inventory.service';
+import { InventoryController } from './inventory.controller';
+import { BatchesModule } from '../batches/batches.module';
+
+@Module({
+  imports: [TypeOrmModule.forFeature([WarehouseEntity, InventoryMovementEntity]), BatchesModule],
+  providers: [InventoryService],
+  controllers: [InventoryController],
+  exports: [InventoryService, TypeOrmModule],
+})
+export class InventoryModule {}

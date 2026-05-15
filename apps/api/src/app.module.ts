@@ -9,6 +9,16 @@ import { ProductsModule } from './products/products.module';
 import { BatchesModule } from './batches/batches.module';
 import { ProducersModule } from './producers/producers.module';
 import { MilkReceptionsModule } from './milk-receptions/milk-receptions.module';
+import { RecipesModule } from './recipes/recipes.module';
+import { ProductionModule } from './production/production.module';
+import { InventoryModule } from './inventory/inventory.module';
+import { DeliveryModule } from './delivery/delivery.module';
+import { SalesModule } from './sales/sales.module';
+import { InvoicesModule } from './invoices/invoices.module';
+import { SuppliersModule } from './suppliers/suppliers.module';
+import { HrModule } from './hr/hr.module';
+import { ReportsModule } from './reports/reports.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -16,6 +26,7 @@ import { HealthModule } from './health/health.module';
     ConfigModule,
     DatabaseModule,
     QueueModule,
+    NotificationsModule, // global, debe ir temprano
     AuthModule,
     UsersModule,
     ClientsModule,
@@ -23,6 +34,15 @@ import { HealthModule } from './health/health.module';
     BatchesModule,
     ProducersModule,
     MilkReceptionsModule,
+    RecipesModule,
+    ProductionModule,
+    InventoryModule,
+    DeliveryModule,
+    SalesModule,
+    InvoicesModule,
+    SuppliersModule,
+    HrModule,
+    ReportsModule,
     HealthModule,
   ],
 })

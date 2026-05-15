@@ -50,7 +50,7 @@ describe('evaluateMilkQuality', () => {
   });
 
   it('ignora campos no provistos sin marcarlos como problema', () => {
-    const result = evaluateMilkQuality({ liters: undefined as never });
+    const result = evaluateMilkQuality({});
     expect(result.acceptable).toBe(true);
   });
 });

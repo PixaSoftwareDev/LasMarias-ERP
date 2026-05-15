@@ -2,6 +2,7 @@
   "extends": "@lasmarias/tsconfig/nest.json",
   "compilerOptions": {
     "outDir": "./dist",
+    "rootDir": "./src",
     "baseUrl": "./",
     "paths": {
       "@/*": ["src/*"]

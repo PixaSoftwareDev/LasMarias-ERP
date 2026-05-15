@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { uuidSchema, isoDateTimeSchema } from './common.js';
+import { uuidSchema, isoDateTimeSchema } from './common';
 
 // Roles del sistema (CLAUDE.md §4.10)
 export const userRoleSchema = z.enum([

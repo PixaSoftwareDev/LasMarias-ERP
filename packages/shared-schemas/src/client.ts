@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { cuitSchema, emailSchema, isoDateTimeSchema, phoneSchema, uuidSchema } from './common.js';
+import { cuitSchema, emailSchema, isoDateTimeSchema, phoneSchema, uuidSchema } from './common';
 
 // Cliente comercial — minorista, mayorista, distribuidor.
 

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isoDateTimeSchema, uuidSchema } from './common.js';
+import { isoDateTimeSchema, uuidSchema } from './common';
 
 // Lote — unidad mínima de trazabilidad bidireccional (CLAUDE.md §4.4).
 // Aplica tanto a leche cruda (recepción) como a productos terminados.

@@ -34,9 +34,10 @@ const preset: Partial<Config> = {
         danger: colors.danger,
         info: colors.info,
       },
-      fontFamily: typography.fontFamily,
-      fontSize: typography.fontSize,
-      fontWeight: typography.fontWeight,
+      // Casts a tipos mutables porque los tokens usan `as const`
+      fontFamily: typography.fontFamily as unknown as Record<string, string[]>,
+      fontSize: typography.fontSize as unknown as Record<string, [string, { lineHeight: string }]>,
+      fontWeight: typography.fontWeight as unknown as Record<string, string>,
       borderRadius: {
         sm: radius.sm,
         DEFAULT: radius.md,

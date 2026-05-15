@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isoDateTimeSchema, uuidSchema } from './common.js';
+import { isoDateTimeSchema, uuidSchema } from './common';
 
 // Recepción de leche cruda en planta (CLAUDE.md §4.1).
 // Cada ingreso es una recepción; al guardarse genera un lote de leche cruda.

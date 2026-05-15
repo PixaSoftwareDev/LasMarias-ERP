@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isoDateTimeSchema, uuidSchema } from './common.js';
+import { isoDateTimeSchema, uuidSchema } from './common';
 
 // Producto final del catálogo (queso cremoso, ricota, etc).
 
