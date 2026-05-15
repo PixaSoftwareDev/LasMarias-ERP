@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LogOut, Milk } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import type { User } from '@lasmarias/shared-schemas';
 import { visibleFor } from '@/lib/navigation';
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
+import { BrandLogo } from './brand-logo';
 
 // CLAUDE.md §5.3:
 // - Desktop (md+): sidebar fija con todos los módulos visibles según rol.
@@ -30,9 +31,8 @@ export function AppShell({ user, onLogout, children }: Props) {
     <div className="flex min-h-screen flex-col bg-background md:flex-row">
       {/* Sidebar — solo desktop */}
       <aside className="hidden border-r border-border-subtle bg-surface-elevated md:flex md:w-64 md:flex-col">
-        <div className="flex h-16 items-center gap-2 border-b border-border-subtle px-6">
-          <Milk className="h-6 w-6 text-primary-600" aria-hidden="true" />
-          <span className="text-base font-semibold">Las Marías</span>
+        <div className="flex h-16 items-center border-b border-border-subtle px-6">
+          <BrandLogo size={32} withWordmark />
         </div>
         <nav aria-label="Navegación principal" className="flex-1 overflow-y-auto p-3">
           <ul className="space-y-1">
@@ -72,10 +72,7 @@ export function AppShell({ user, onLogout, children }: Props) {
 
       {/* Header mobile */}
       <header className="flex h-14 items-center justify-between border-b border-border-subtle bg-surface-elevated px-4 md:hidden">
-        <div className="flex items-center gap-2">
-          <Milk className="h-5 w-5 text-primary-600" aria-hidden="true" />
-          <span className="text-sm font-semibold">Las Marías</span>
-        </div>
+        <BrandLogo size={28} withWordmark />
         <button
           type="button"
           onClick={onLogout}

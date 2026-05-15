@@ -1,5 +1,5 @@
 import type { Config } from 'tailwindcss';
-import { colors, typography, radius, shadow } from './index.js';
+import { colors, typography, radius, shadow } from './index';
 
 // Preset Tailwind compartido — apps/web y futuros frontends lo extienden.
 // Materializa los tokens de design-tokens como utilidades Tailwind.
@@ -26,8 +26,9 @@ const preset: Partial<Config> = {
           subtle: colors.border.subtle,
           strong: colors.border.strong,
         },
-        // Primario completo
+        // Primario y secundario oficiales Las Marías
         primary: colors.primary,
+        secondary: colors.secondary,
         // Semánticos
         success: colors.success,
         warning: colors.warning,

@@ -6,7 +6,10 @@
       "PowerShell(git *)",
       "PowerShell(pnpm install *)",
       "PowerShell(pnpm typecheck *)",
-      "PowerShell(pnpm *)"
+      "PowerShell(pnpm *)",
+      "WebFetch(domain:lacteoslasmarias.com)",
+      "PowerShell($resp = Invoke-WebRequest -Uri \"https://lacteoslasmarias.com/\" -UseBasicParsing -UserAgent \"Mozilla/5.0\"; $resp.Content.Substring\\(0, [Math]::Min\\(3000, $resp.Content.Length\\)\\))",
+      "PowerShell($css = \\(Invoke-WebRequest -Uri \"https://lacteoslasmarias.com/wp-content/litespeed/css/0c88288d2a7072269c26a9642e1cc578.css?ver=069ca\" -UseBasicParsing -UserAgent \"Mozilla/5.0\"\\).Content; $matches = [regex]::Matches\\($css, '#[0-9a-fA-F]{6}'\\); $counts = $matches | Group-Object Value | Sort-Object Count -Descending | Select-Object -First 25; $counts | Format-Table Count, Name)"
     ]
   }
 }
