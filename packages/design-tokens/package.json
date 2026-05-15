@@ -2,16 +2,22 @@
   "name": "@lasmarias/design-tokens",
   "version": "0.0.1",
   "private": true,
-  "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./tailwind-preset": "./src/tailwind-preset.ts",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./tailwind-preset": {
+      "types": "./dist/tailwind-preset.d.ts",
+      "default": "./dist/tailwind-preset.js"
+    },
     "./globals.css": "./src/globals.css"
   },
-  "files": ["src"],
+  "files": ["dist", "src"],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "lint": "echo 'no lint'",
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist .turbo"

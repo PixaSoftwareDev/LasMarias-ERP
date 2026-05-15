@@ -5,7 +5,7 @@
 import 'reflect-metadata';
 import 'dotenv/config';
 import * as bcrypt from 'bcryptjs';
-import { AppDataSource } from './data-source';
+import AppDataSource from './data-source';
 import { UserEntity } from '../users/user.entity';
 
 const SEED_EMAIL = process.env.SEED_ADMIN_EMAIL ?? 'admin@lasmarias.local';

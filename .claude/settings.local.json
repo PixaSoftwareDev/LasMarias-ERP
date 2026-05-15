@@ -9,7 +9,30 @@
       "PowerShell(pnpm *)",
       "WebFetch(domain:lacteoslasmarias.com)",
       "PowerShell($resp = Invoke-WebRequest -Uri \"https://lacteoslasmarias.com/\" -UseBasicParsing -UserAgent \"Mozilla/5.0\"; $resp.Content.Substring\\(0, [Math]::Min\\(3000, $resp.Content.Length\\)\\))",
-      "PowerShell($css = \\(Invoke-WebRequest -Uri \"https://lacteoslasmarias.com/wp-content/litespeed/css/0c88288d2a7072269c26a9642e1cc578.css?ver=069ca\" -UseBasicParsing -UserAgent \"Mozilla/5.0\"\\).Content; $matches = [regex]::Matches\\($css, '#[0-9a-fA-F]{6}'\\); $counts = $matches | Group-Object Value | Sort-Object Count -Descending | Select-Object -First 25; $counts | Format-Table Count, Name)"
+      "PowerShell($css = \\(Invoke-WebRequest -Uri \"https://lacteoslasmarias.com/wp-content/litespeed/css/0c88288d2a7072269c26a9642e1cc578.css?ver=069ca\" -UseBasicParsing -UserAgent \"Mozilla/5.0\"\\).Content; $matches = [regex]::Matches\\($css, '#[0-9a-fA-F]{6}'\\); $counts = $matches | Group-Object Value | Sort-Object Count -Descending | Select-Object -First 25; $counts | Format-Table Count, Name)",
+      "PowerShell(docker version --format '{{.Server.Version}}' 2>&1; docker compose version 2>&1)",
+      "PowerShell(docker compose *)",
+      "PowerShell(Copy-Item *)",
+      "PowerShell(\"apps/api/.env exists: $\\(Test-Path apps\\\\api\\\\.env\\)\"; \"apps/web/.env.local exists: $\\(Test-Path apps\\\\web\\\\.env.local\\)\"; \"root .env exists: $\\(Test-Path .env\\)\")",
+      "PowerShell(docker exec lasmarias-postgres *)",
+      "PowerShell(docker exec *)",
+      "PowerShell(docker run *)",
+      "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\(\"apps\\\\api\\\\.env\"\\); $bytes.Length; $bytes[0..3] | ForEach-Object { \"{0:X2}\" -f $_ })",
+      "PowerShell(node \"C:\\\\tmp\\\\pg-test.js\" 2>&1)",
+      "PowerShell(node apps\\\\api\\\\test-pg.cjs 2>&1)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Set-Content *)",
+      "PowerShell(Get-ChildItem apps\\\\api\\\\dist -Recurse -File | Where-Object { $_.Extension -eq '.js' } | Select-Object -First 15 -ExpandProperty FullName | ForEach-Object { $_.Replace\\(\\(Get-Location\\).Path + '\\\\', ''\\) })",
+      "PowerShell(Get-ChildItem apps\\\\api\\\\dist\\\\config -Recurse 2>&1; \"---\"; Test-Path apps\\\\api\\\\dist\\\\config\\\\config.module.js)",
+      "PowerShell($dirs = Get-ChildItem apps\\\\api\\\\dist -Directory -Force; foreach \\($d in $dirs\\) { Write-Host $d.Name })",
+      "PowerShell(Remove-Item *)",
+      "PowerShell($dirs = Get-ChildItem apps\\\\api\\\\dist -Directory; \"Dirs en dist: $\\($dirs.Count\\)\"; foreach \\($d in $dirs\\) { Write-Host \"  $\\($d.Name\\)\" }; \"---\"; \"config existe: $\\(Test-Path apps\\\\api\\\\dist\\\\config\\\\config.module.js\\)\"; \"health existe: $\\(Test-Path apps\\\\api\\\\dist\\\\health\\\\health.module.js\\)\"; \"queues existe: $\\(Test-Path apps\\\\api\\\\dist\\\\queues\\\\queue.module.js\\)\")",
+      "PowerShell(try { $r = Invoke-RestMethod -Uri \"http://localhost:4000/health\" -TimeoutSec 5; $r | ConvertTo-Json -Depth 3 } catch { \"ERROR: $\\($_.Exception.Message\\)\" })",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"http://localhost:4000/health\" -TimeoutSec 5 -ErrorAction SilentlyContinue; $r.Content } catch { $_.Exception.Response.StatusCode; $reader = New-Object System.IO.StreamReader\\($_.Exception.Response.GetResponseStream\\(\\)\\); $reader.ReadToEnd\\(\\) })",
+      "PowerShell(node apps\\\\api\\\\test-api.cjs 2>&1)",
+      "PowerShell(Stop-Process *)",
+      "PowerShell(Start-Sleep -Seconds 6; try { $r = Invoke-WebRequest -Uri \"http://localhost:3000/login\" -TimeoutSec 10 -UseBasicParsing; \"Status: $\\($r.StatusCode\\)\"; \"Contiene 'Las Marías': $\\($r.Content -match 'Las Mar'\\)\"; \"Contiene logo verde \\(#009\\): $\\($r.Content -match '#009B00|#009b00'\\)\"; \"Contiene 'Industria': $\\($r.Content -match 'Industria'\\)\" } catch { \"ERROR: $\\($_.Exception.Message\\)\" })"
     ]
   }
 }

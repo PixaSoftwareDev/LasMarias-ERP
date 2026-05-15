@@ -244,13 +244,16 @@ export class ProductionService {
     });
   }
 
+  // Secuencia atómica por día con pg_advisory_xact_lock (mismo patrón que recepciones).
+  // Lock key prefijada con 1 para no colisionar con la de leche.
   private async nextOrderCode(manager: import('typeorm').EntityManager, date: Date) {
     const start = new Date(date); start.setHours(0, 0, 0, 0);
     const end = new Date(date); end.setHours(23, 59, 59, 999);
+    const lockKey = 1_00000000 + date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
+    await manager.query('SELECT pg_advisory_xact_lock($1)', [lockKey]);
     const count = await manager
       .getRepository(ProductionOrderEntity)
       .createQueryBuilder('o')
-      .setLock('pessimistic_write')
       .where('o.started_at BETWEEN :start AND :end', { start, end })
       .getCount();
     const yyyy = date.getFullYear();

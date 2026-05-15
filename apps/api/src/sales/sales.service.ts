@@ -176,12 +176,10 @@ export class SalesService {
     return this.getOrder(orderId);
   }
 
+  // Secuencia global de pedidos con advisory lock (Postgres rechaza FOR UPDATE con agregados).
   private async nextOrderCode(manager: import('typeorm').EntityManager) {
-    const count = await manager
-      .getRepository(SalesOrderEntity)
-      .createQueryBuilder('o')
-      .setLock('pessimistic_write')
-      .getCount();
+    await manager.query('SELECT pg_advisory_xact_lock(2000000001)');
+    const count = await manager.getRepository(SalesOrderEntity).count();
     return `PED-${String(count + 1).padStart(6, '0')}`;
   }
 

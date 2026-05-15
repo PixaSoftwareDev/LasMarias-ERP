@@ -114,18 +114,21 @@ export class MilkReceptionsService {
     });
   }
 
-  // Calcula el próximo código secuencial del día de forma atómica usando LOCK en
-  // las recepciones del día. Suficiente para volumen de planta (decenas de recepciones/día).
+  // Próximo código secuencial del día. Usa pg_advisory_xact_lock para evitar
+  // races entre transacciones concurrentes. La clave de lock es YYYYMMDD del día.
+  // (Postgres no permite FOR UPDATE en queries con agregados como COUNT.)
   private async nextBatchCode(manager: import('typeorm').EntityManager, date: Date) {
     const start = new Date(date);
     start.setHours(0, 0, 0, 0);
     const end = new Date(date);
     end.setHours(23, 59, 59, 999);
 
+    const lockKey = date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
+    await manager.query('SELECT pg_advisory_xact_lock($1)', [lockKey]);
+
     const count = await manager
       .getRepository(MilkReceptionEntity)
       .createQueryBuilder('r')
-      .setLock('pessimistic_write')
       .where('r.received_at BETWEEN :start AND :end', { start, end })
       .getCount();
 

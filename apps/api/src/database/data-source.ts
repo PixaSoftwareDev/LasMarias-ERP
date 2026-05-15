@@ -9,7 +9,7 @@ import { entities } from './entities';
 
 const env = loadEnv();
 
-export const AppDataSource = new DataSource({
+const AppDataSource = new DataSource({
   type: 'postgres',
   host: env.POSTGRES_HOST,
   port: env.POSTGRES_PORT,
