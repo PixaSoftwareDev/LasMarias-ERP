@@ -1,0 +1,51 @@
+name: lasmarias-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lasmarias-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lasmarias}
+      POSTGRES_USER: ${POSTGRES_USER:-lasmarias}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lasmarias_dev}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lasmarias} -d ${POSTGRES_DB:-lasmarias}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lasmarias
+
+  redis:
+    image: redis:7-alpine
+    container_name: lasmarias-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - lasmarias
+
+volumes:
+  postgres_data:
+    name: lasmarias_postgres_data
+  redis_data:
+    name: lasmarias_redis_data
+
+networks:
+  lasmarias:
+    name: lasmarias-network

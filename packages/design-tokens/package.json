@@ -1,0 +1,28 @@
+{
+  "name": "@lasmarias/design-tokens",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tailwind-preset": "./src/tailwind-preset.ts",
+    "./globals.css": "./src/globals.css"
+  },
+  "files": ["src"],
+  "scripts": {
+    "lint": "echo 'no lint'",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist .turbo"
+  },
+  "devDependencies": {
+    "@lasmarias/tsconfig": "workspace:*",
+    "rimraf": "^6.0.1",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2"
+  },
+  "peerDependencies": {
+    "tailwindcss": "^3.4.0"
+  }
+}

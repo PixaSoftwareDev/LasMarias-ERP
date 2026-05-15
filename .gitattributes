@@ -1,0 +1,11 @@
+# Normalizar line endings en todo el repo. Evita ruido entre Windows / Linux / Mac.
+* text=auto eol=lf
+
+# Binarios — sin tocar
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary

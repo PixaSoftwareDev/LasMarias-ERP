@@ -1,0 +1,43 @@
+/* Reset base + variables del sistema de diseño de Lácteos Las Marías. */
+/* Las apps importan este archivo después de @tailwind directives. */
+
+:root {
+  /* Surfaces */
+  --color-background: 250 250 249; /* #FAFAF9 */
+  --color-surface-subtle: 245 245 244;
+  --color-surface-elevated: 255 255 255;
+
+  /* Texto */
+  --color-foreground: 12 10 9;
+  --color-foreground-muted: 87 83 78;
+  --color-foreground-subtle: 168 162 158;
+
+  /* Borders */
+  --color-border-subtle: 231 229 228;
+  --color-border-default: 214 211 209;
+
+  /* Primario */
+  --color-primary: 22 163 74;     /* #16A34A */
+  --color-primary-hover: 21 128 61;
+
+  /* Semánticos */
+  --color-success: 22 163 74;
+  --color-warning: 234 179 8;
+  --color-danger: 220 38 38;
+  --color-info: 37 99 235;
+}
+
+html, body {
+  background-color: rgb(var(--color-background));
+  color: rgb(var(--color-foreground));
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* CLAUDE.md §5.1 — foco visible, accesibilidad */
+*:focus-visible {
+  outline: 2px solid rgb(var(--color-primary));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
