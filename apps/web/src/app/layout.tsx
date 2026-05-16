@@ -1,15 +1,24 @@
 import type { Metadata, Viewport } from 'next';
-import { Roboto } from 'next/font/google';
+import { Roboto, Inter } from 'next/font/google';
 import { Toaster } from 'sonner';
 import { QueryProvider } from '@/providers/query-provider';
 import './globals.css';
 
-// Tipografía oficial de la marca — Roboto en pesos 400/500/700.
+// Cuerpo — Roboto (legibilidad en formularios, tablas, datos densos).
 const roboto = Roboto({
   subsets: ['latin', 'latin-ext'],
   weight: ['400', '500', '700'],
   display: 'swap',
   variable: '--font-roboto',
+});
+
+// Display — Inter para wordmark y títulos de página: sans moderna,
+// la fuente de referencia SaaS actual (CLAUDE.md §5.2).
+const inter = Inter({
+  subsets: ['latin', 'latin-ext'],
+  weight: ['400', '500', '600', '700'],
+  display: 'swap',
+  variable: '--font-display',
 });
 
 export const metadata: Metadata = {
@@ -31,7 +40,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es-AR" className={`h-full ${roboto.variable}`}>
+    <html lang="es-AR" className={`h-full ${roboto.variable} ${inter.variable}`}>
       <body className="h-full font-sans antialiased">
         <QueryProvider>{children}</QueryProvider>
         <Toaster

@@ -57,8 +57,10 @@ export const colors = {
 
 export const typography = {
   fontFamily: {
-    // Roboto es la fuente oficial del sitio web de Las Marías.
-    sans: ['Roboto', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+    // Roboto para body — legibilidad en formularios, tablas, datos densos.
+    sans: ['var(--font-roboto)', 'Roboto', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+    // Inter para wordmark y títulos — sans SaaS moderna por excelencia.
+    display: ['var(--font-display)', 'Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
     mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace'],
   },
   fontSize: {

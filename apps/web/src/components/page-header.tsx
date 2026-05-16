@@ -39,7 +39,7 @@ export function PageHeader({ title, description, breadcrumbs, action, className 
             </ol>
           </nav>
         )}
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{title}</h1>
+        <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{title}</h1>
         {description && <p className="mt-1 text-sm text-foreground-muted">{description}</p>}
       </div>
       {action && <div className="flex flex-shrink-0 items-center gap-2">{action}</div>}

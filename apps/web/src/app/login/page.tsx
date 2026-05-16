@@ -42,7 +42,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center text-center">
           <BrandLogo size={64} />
-          <h1 className="mt-4 text-2xl font-bold text-foreground">Lácteos Las Marías</h1>
+          <h1 className="mt-4 font-display text-3xl font-semibold tracking-tight text-secondary-700">Lácteos Las Marías</h1>
           <p className="mt-1 text-xs uppercase tracking-widest text-primary-700">Industria Láctea Especializada</p>
           <p className="mt-4 text-sm text-foreground-muted">Ingresá para entrar al sistema</p>
         </div>

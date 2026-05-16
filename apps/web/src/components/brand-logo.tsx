@@ -34,7 +34,7 @@ export function BrandLogo({ size = 32, withWordmark = false, className }: Props)
       </svg>
       {withWordmark && (
         <div className="flex flex-col leading-tight">
-          <span className="text-base font-bold tracking-tight text-foreground">Las Marías</span>
+          <span className="font-display text-lg font-semibold tracking-tight text-secondary-700">Las Marías</span>
           <span className="text-[10px] uppercase tracking-wider text-foreground-muted">Industria Láctea</span>
         </div>
       )}
