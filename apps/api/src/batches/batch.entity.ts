@@ -40,6 +40,10 @@ export class BatchEntity extends BaseEntity {
   @Column({ type: 'uuid', name: 'parent_batch_id', nullable: true })
   parentBatchId!: string | null;
 
+  // Orden de producción que generó este lote. Permite trazabilidad inversa producto → leche.
+  @Column({ type: 'uuid', name: 'production_order_id', nullable: true })
+  productionOrderId!: string | null;
+
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
 }

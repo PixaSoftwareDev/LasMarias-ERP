@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './database/database.module';
 import { QueueModule } from './queues/queue.module';
@@ -20,9 +22,12 @@ import { HrModule } from './hr/hr.module';
 import { ReportsModule } from './reports/reports.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { HealthModule } from './health/health.module';
+import { ReturnableContainersModule } from './returnable-containers/returnable-containers.module';
+import { MaturationModule } from './maturation/maturation.module';
 
 @Module({
   imports: [
+    ThrottlerModule.forRoot({ throttlers: [{ ttl: 60_000, limit: 300 }] }),
     ConfigModule,
     DatabaseModule,
     QueueModule,
@@ -44,6 +49,9 @@ import { HealthModule } from './health/health.module';
     HrModule,
     ReportsModule,
     HealthModule,
+    ReturnableContainersModule,
+    MaturationModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

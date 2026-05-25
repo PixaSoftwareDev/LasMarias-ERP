@@ -3,8 +3,10 @@
 import type {
   Client,
   CreateClientInput,
+  CreateDeliveryExceptionInput,
   CreateDeliveryZoneInput,
   CreateEmployeeInput,
+  DeliveryException,
   CreatePriceListInput,
   CreateProductInput,
   CreatePurchaseOrderInput,
@@ -34,17 +36,23 @@ import { api } from '@/lib/api-client';
 export const productsApi = {
   list: () => api<Product[]>('/api/products'),
   create: (input: CreateProductInput) => api<Product>('/api/products', { method: 'POST', body: input }),
+  listPresentations: (productId: string) => api<Array<{ id: string; productId: string; name: string; sku: string; netWeightG?: number; isActive: boolean; createdAt: string; updatedAt: string }>>(`/api/products/${productId}/presentations`),
+  createPresentation: (productId: string, input: { name: string; sku: string; netWeightG?: number }) =>
+    api(`/api/products/${productId}/presentations`, { method: 'POST', body: input }),
 };
 
 export const clientsApi = {
   list: () => api<Client[]>('/api/clients'),
   create: (input: CreateClientInput) => api<Client>('/api/clients', { method: 'POST', body: input }),
+  update: (id: string, input: Partial<CreateClientInput>) => api<Client>(`/api/clients/${id}`, { method: 'PATCH', body: input }),
 };
 
 export const producersApi = {
   list: () => api<ProducerDto[]>('/api/producers'),
-  create: (input: { name: string; agreedPricePerLiter?: number; phone?: string; city?: string }) =>
+  create: (input: { name: string; agreedPricePerLiter?: number; phone?: string; city?: string; renspa?: string; notes?: string }) =>
     api<ProducerDto>('/api/producers', { method: 'POST', body: input }),
+  update: (id: string, input: { name?: string; agreedPricePerLiter?: number; phone?: string; city?: string; renspa?: string; notes?: string }) =>
+    api<ProducerDto>(`/api/producers/${id}`, { method: 'PATCH', body: input }),
 };
 
 export const recipesApi = {
@@ -74,6 +82,11 @@ export const deliveryApi = {
   listZones: () => api<DeliveryZone[]>('/api/delivery/zones'),
   createZone: (input: CreateDeliveryZoneInput) =>
     api<DeliveryZone>('/api/delivery/zones', { method: 'POST', body: input }),
+  listExceptions: (zoneId?: string) =>
+    api<DeliveryException[]>(`/api/delivery/exceptions${zoneId ? `?zoneId=${zoneId}` : ''}`),
+  createException: (input: CreateDeliveryExceptionInput) =>
+    api<DeliveryException>('/api/delivery/exceptions', { method: 'POST', body: input }),
+  nextDate: (zoneId: string) => api<string>(`/api/delivery/zones/${zoneId}/next-date`),
 };
 
 export const salesApi = {
@@ -119,4 +132,34 @@ export const notificationsApi = {
   list: (unreadOnly = false) => api<Notification[]>(`/api/notifications?unreadOnly=${unreadOnly}`),
   unreadCount: () => api<{ count: number }>('/api/notifications/unread-count'),
   markRead: (id: string) => api<Notification>(`/api/notifications/${id}/read`, { method: 'PATCH' }),
+};
+
+export const returnableContainersApi = {
+  list: () => api('/api/returnable-containers'),
+  create: (input: { name: string; code: string }) =>
+    api('/api/returnable-containers', { method: 'POST', body: input }),
+  listMovements: (clientId: string) =>
+    api(`/api/returnable-containers/movements?clientId=${clientId}`),
+  balance: (clientId: string) =>
+    api(`/api/returnable-containers/balance?clientId=${clientId}`),
+  createMovement: (input: {
+    containerId: string;
+    clientId: string;
+    salesOrderId?: string;
+    quantityOut: number;
+    quantityIn: number;
+    movementDate: string;
+    notes?: string;
+  }) => api('/api/returnable-containers/movements', { method: 'POST', body: input }),
+};
+
+export const maturationApi = {
+  listByBatch: (batchId: string) => api(`/api/maturation/records?batchId=${batchId}`),
+  create: (input: {
+    batchId: string;
+    warehouseId?: string;
+    checkedAt: string;
+    weightKg: number;
+    notes?: string;
+  }) => api('/api/maturation/records', { method: 'POST', body: input }),
 };

@@ -138,6 +138,7 @@ export class ProductionService {
       if (!order) throw new NotFoundException('Orden no encontrada');
       if (order.status === 'closed') throw new ForbiddenException('La orden ya está cerrada');
       if (order.status === 'cancelled') throw new ForbiddenException('La orden fue cancelada');
+      if (order.status !== 'open') throw new BadRequestException(`La orden está en estado "${order.status}" y no se puede cerrar`);
 
       const recipe = order.recipe;
       const version = order.recipeVersion;
@@ -183,6 +184,7 @@ export class ProductionService {
           unit: 'kg',
           status: 'activo',
           parentBatchId: order.milkInputs[0]?.batchId ?? null,
+          productionOrderId: order.id,
           notes: `Producido en ${order.code}`,
         }),
       );

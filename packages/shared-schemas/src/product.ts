@@ -22,7 +22,9 @@ export const productSchema = z.object({
   description: z.string().max(1000).optional(),
   category: productCategorySchema,
   unit: productUnitSchema,
-  trackBatches: z.boolean(), // ¿se trabaja por lote?
+  trackBatches: z.boolean(),
+  // Alícuota de IVA argentina. Lácteos procesados: 10.5%; leche fluida: 0%; dulce de leche: 21%.
+  ivaRatePercent: z.number().min(0).max(100).default(10.5),
   isActive: z.boolean(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
@@ -42,3 +44,23 @@ export const updateProductInputSchema = createProductInputSchema.partial().exten
   isActive: z.boolean().optional(),
 });
 export type UpdateProductInput = z.infer<typeof updateProductInputSchema>;
+
+// Presentación de envase de un producto (400g, 1kg, 4kg del mismo queso).
+export const productPresentationSchema = z.object({
+  id: uuidSchema,
+  productId: uuidSchema,
+  name: z.string().min(1).max(120),
+  sku: z.string().min(1).max(50),
+  netWeightG: z.number().positive().optional(),
+  isActive: z.boolean(),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+});
+export type ProductPresentation = z.infer<typeof productPresentationSchema>;
+
+export const createProductPresentationInputSchema = z.object({
+  name: z.string().min(1, 'Ingresá el nombre de la presentación').max(120),
+  sku: z.string().min(1, 'Ingresá el SKU').max(50),
+  netWeightG: z.number().positive().optional(),
+});
+export type CreateProductPresentationInput = z.infer<typeof createProductPresentationInputSchema>;

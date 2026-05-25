@@ -1,5 +1,5 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
-import type { MilkQualityAnalysis, MilkReceptionStatus } from '@lasmarias/shared-schemas';
+import type { MilkAnalysisStatus, MilkQualityAnalysis, MilkReceptionStatus } from '@lasmarias/shared-schemas';
 import { BaseEntity } from '../database/base.entity';
 import { ProducerEntity } from '../producers/producer.entity';
 import { BatchEntity } from '../batches/batch.entity';
@@ -32,8 +32,18 @@ export class MilkReceptionEntity extends BaseEntity {
   @Column({ type: 'varchar', length: 120, name: 'driver_name', nullable: true })
   driverName!: string | null;
 
+  @Column({ type: 'varchar', length: 30, name: 'tank_number', nullable: true })
+  tankNumber!: string | null;
+
   @Column({ type: 'numeric', precision: 14, scale: 3 })
   liters!: string;
+
+  // 'complete' cuando los análisis se hacen en planta; 'pending' cuando el UFC va a lab externo.
+  @Column({ type: 'varchar', length: 16, name: 'analysis_status', default: 'complete' })
+  analysisStatus!: MilkAnalysisStatus;
+
+  @Column({ type: 'date', name: 'lab_results_expected_date', nullable: true })
+  labResultsExpectedDate!: string | null;
 
   // Análisis de calidad — JSONB. CLAUDE.md menciona uso de JSONB para campos flexibles.
   // Estructura validada por shared-schemas.milkQualityAnalysisSchema.

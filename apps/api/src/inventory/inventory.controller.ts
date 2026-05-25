@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, DefaultValuePipe, Get, Param, ParseIntPipe, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import {
   createWarehouseInputSchema,
   stockCountInputSchema,
@@ -37,8 +37,11 @@ export class InventoryController {
 
   @Get('movements')
   @Roles('admin', 'gerente', 'operario')
-  movements() {
-    return this.inventory.listMovements();
+  movements(
+    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit?: number,
+    @Query('offset', new DefaultValuePipe(0), ParseIntPipe) offset?: number,
+  ) {
+    return this.inventory.listMovements(limit, offset);
   }
 
   @Get('traceback/:batchId')

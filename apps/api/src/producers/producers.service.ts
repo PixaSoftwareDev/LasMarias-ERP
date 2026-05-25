@@ -11,6 +11,7 @@ export interface ProducerDto {
   address?: string;
   city?: string;
   agreedPricePerLiter?: number;
+  renspa?: string;
   notes?: string;
   isActive: boolean;
   createdAt: string;
@@ -24,6 +25,7 @@ export interface CreateProducerInput {
   address?: string;
   city?: string;
   agreedPricePerLiter?: number;
+  renspa?: string;
   notes?: string;
 }
 
@@ -45,6 +47,24 @@ export class ProducersService {
     return p;
   }
 
+  async update(id: string, input: Partial<CreateProducerInput>): Promise<ProducerDto> {
+    const p = await this.repo.findOne({ where: { id } });
+    if (!p) throw new NotFoundException('Productor no encontrado');
+    Object.assign(p, {
+      ...(input.name !== undefined && { name: input.name }),
+      ...(input.taxId !== undefined && { taxId: input.taxId }),
+      ...(input.phone !== undefined && { phone: input.phone }),
+      ...(input.address !== undefined && { address: input.address }),
+      ...(input.city !== undefined && { city: input.city }),
+      ...(input.agreedPricePerLiter !== undefined && {
+        agreedPricePerLiter: input.agreedPricePerLiter != null ? String(input.agreedPricePerLiter) : null,
+      }),
+      ...(input.renspa !== undefined && { renspa: input.renspa }),
+      ...(input.notes !== undefined && { notes: input.notes }),
+    });
+    return this.toDto(await this.repo.save(p));
+  }
+
   async create(input: CreateProducerInput): Promise<ProducerDto> {
     const entity = this.repo.create({
       name: input.name,
@@ -53,6 +73,7 @@ export class ProducersService {
       address: input.address ?? null,
       city: input.city ?? null,
       agreedPricePerLiter: input.agreedPricePerLiter != null ? String(input.agreedPricePerLiter) : null,
+      renspa: input.renspa ?? null,
       notes: input.notes ?? null,
       isActive: true,
     });
@@ -68,6 +89,7 @@ export class ProducersService {
       address: e.address ?? undefined,
       city: e.city ?? undefined,
       agreedPricePerLiter: e.agreedPricePerLiter ? Number(e.agreedPricePerLiter) : undefined,
+      renspa: e.renspa ?? undefined,
       notes: e.notes ?? undefined,
       isActive: e.isActive,
       createdAt: e.createdAt.toISOString(),

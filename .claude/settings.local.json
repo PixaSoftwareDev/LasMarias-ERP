@@ -39,7 +39,21 @@
       "Bash(git push *)",
       "Bash(find . -name \"*.example\" -not -path \"*/node_modules/*\")",
       "Bash(find . -name \"*.md\" -not -path \"*/node_modules/*\")",
-      "Bash(find . \\\\\\( -name \"*smoke*\" -o -name \"*.test.*\" -o -name \"*.spec.*\" \\\\\\) -not -path \"*/node_modules/*\")"
+      "Bash(find . \\\\\\( -name \"*smoke*\" -o -name \"*.test.*\" -o -name \"*.spec.*\" \\\\\\) -not -path \"*/node_modules/*\")",
+      "Bash(cp .env.example .env)",
+      "Bash(cp apps/api/.env.example apps/api/.env)",
+      "Bash(cp apps/web/.env.example apps/web/.env.local)",
+      "Bash(awk '{print $NF}')",
+      "Bash(timeout 30 npx tsc --noEmit)",
+      "Bash(PGPASSWORD=lasmarias_dev psql -h localhost -p 5433 -U lasmarias -d lasmarias_dev -c \"\\\\d milk_receptions\")",
+      "Bash(curl -s -X POST http://localhost:4000/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"admin@lasmarias.local\",\"password\":\"Admin123!Cambiar\"}')",
+      "Bash(python3 -c ' *)",
+      "Bash(curl *)",
+      "Bash(fuser -k 4000/tcp)",
+      "Bash(pnpm --filter api dev)",
+      "Bash(echo \"API PID: $!\")",
+      "Bash(PGPASSWORD=lasmarias_dev psql *)",
+      "Bash(git rebase *)"
     ]
   }
 }

@@ -126,26 +126,38 @@ export class InventoryService {
     });
   }
 
-  async listMovements(): Promise<InventoryMovement[]> {
+  async listMovements(limit = 100, offset = 0): Promise<InventoryMovement[]> {
     const rows = await this.movements.find({
       relations: { batch: true, product: true, warehouse: true },
       order: { createdAt: 'DESC' },
-      take: 500,
+      take: Math.min(limit, 500),
+      skip: offset,
     });
     return rows.map((m) => this.movementToDto(m));
   }
 
-  // Trazabilidad ascendente: dado un lote, devuelve el árbol de lotes padre.
+  // Trazabilidad ascendente con recursive CTE — una sola query, sin N+1.
   async traceback(batchId: string): Promise<BatchEntity[]> {
-    const chain: BatchEntity[] = [];
-    let current: BatchEntity | null = await this.batches.findOne({ where: { id: batchId } });
-    while (current) {
-      chain.push(current);
-      if (!current.parentBatchId) break;
-      const parentId: string = current.parentBatchId;
-      current = await this.batches.findOne({ where: { id: parentId } });
-    }
-    return chain;
+    const rows: { id: string }[] = await this.dataSource.query(
+      `WITH RECURSIVE ancestry AS (
+         SELECT id, code, product_id, parent_batch_id, production_order_id,
+                production_date, expiration_date, initial_quantity,
+                remaining_quantity, unit, status, notes,
+                created_at, updated_at
+         FROM batches WHERE id = $1
+         UNION ALL
+         SELECT b.id, b.code, b.product_id, b.parent_batch_id, b.production_order_id,
+                b.production_date, b.expiration_date, b.initial_quantity,
+                b.remaining_quantity, b.unit, b.status, b.notes,
+                b.created_at, b.updated_at
+         FROM batches b
+         INNER JOIN ancestry a ON b.id = a.parent_batch_id
+       )
+       SELECT * FROM ancestry`,
+      [batchId],
+    );
+    // Mapear a BatchEntity-compatible shape
+    return rows as unknown as BatchEntity[];
   }
 
   warehouseToDto(w: WarehouseEntity): Warehouse {

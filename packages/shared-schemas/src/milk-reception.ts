@@ -47,16 +47,24 @@ export const milkReceptionStatusSchema = z.enum([
 ]);
 export type MilkReceptionStatus = z.infer<typeof milkReceptionStatusSchema>;
 
+// Estado del análisis de calidad. 'pending' cuando el UFC va a lab externo y
+// los resultados llegan 24-48h después (la leche ya fue procesada cuando llegan).
+export const milkAnalysisStatusSchema = z.enum(['complete', 'pending']);
+export type MilkAnalysisStatus = z.infer<typeof milkAnalysisStatusSchema>;
+
 export const milkReceptionSchema = z.object({
   id: uuidSchema,
-  code: z.string().min(1).max(50), // código de lote generado
+  code: z.string().min(1).max(50),
   receivedAt: isoDateTimeSchema,
   producerId: uuidSchema,
-  producerName: z.string().min(1).max(200), // denormalizado para reportes
+  producerName: z.string().min(1).max(200),
   vehiclePlate: z.string().max(20).optional(),
   driverName: z.string().max(120).optional(),
+  tankNumber: z.string().max(30).optional(),
   liters: z.number().positive('Los litros tienen que ser mayor a 0'),
   quality: milkQualityAnalysisSchema,
+  analysisStatus: milkAnalysisStatusSchema,
+  labResultsExpectedDate: z.string().optional(),
   status: milkReceptionStatusSchema,
   blockedReason: z.string().max(500).optional(),
   notes: z.string().max(1000).optional(),
@@ -75,10 +83,13 @@ export const createMilkReceptionInputSchema = z.object({
   producerId: uuidSchema,
   vehiclePlate: z.string().max(20).optional(),
   driverName: z.string().max(120).optional(),
+  tankNumber: z.string().max(30).optional(),
   liters: z
     .number({ invalid_type_error: 'Los litros tienen que ser un número' })
     .positive('Los litros tienen que ser mayor a 0'),
   quality: milkQualityAnalysisSchema,
+  analysisStatus: milkAnalysisStatusSchema.default('complete'),
+  labResultsExpectedDate: z.string().optional(),
   notes: z.string().max(1000).optional(),
 });
 

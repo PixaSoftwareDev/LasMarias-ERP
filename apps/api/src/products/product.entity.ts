@@ -24,6 +24,10 @@ export class ProductEntity extends BaseEntity {
   @Column({ type: 'boolean', name: 'track_batches', default: true })
   trackBatches!: boolean;
 
+  // Alícuota de IVA argentina. Lácteos procesados: 10.5%; leche fluida: 0%; dulce de leche: 21%.
+  @Column({ type: 'numeric', precision: 6, scale: 2, name: 'iva_rate_percent', default: 10.5 })
+  ivaRatePercent!: string;
+
   @Column({ type: 'boolean', name: 'is_active', default: true })
   isActive!: boolean;
 }

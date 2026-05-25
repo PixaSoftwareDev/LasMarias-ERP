@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import type {
   CreateInvoiceFromOrderInput,
   Invoice,
@@ -11,11 +11,17 @@ import { SalesOrderEntity } from '../sales/sales-order.entity';
 
 @Injectable()
 export class InvoicesService {
+  // Punto de venta fijo hasta integrar multi-sucursal (§4.6).
+  private static readonly SALES_POINT = '0001';
+  // Lock key diferente a las demás para no colisionar.
+  private static readonly INVOICE_LOCK_KEY = 3_000_000_001;
+
   constructor(
     @InjectRepository(InvoiceEntity)
     private readonly repo: Repository<InvoiceEntity>,
     @InjectRepository(SalesOrderEntity)
     private readonly orders: Repository<SalesOrderEntity>,
+    private readonly dataSource: DataSource,
   ) {}
 
   async list(): Promise<Invoice[]> {
@@ -70,7 +76,11 @@ export class InvoicesService {
     const tax = Math.round(subtotal * (input.taxPercent / 100) * 100) / 100;
     const total = Math.round((subtotal + tax) * 100) / 100;
 
-    const number = await this.nextInvoiceNumber();
+    const number = await this.dataSource.transaction(async (manager) => {
+      await manager.query('SELECT pg_advisory_xact_lock($1)', [InvoicesService.INVOICE_LOCK_KEY]);
+      const count = await manager.getRepository(InvoiceEntity).count();
+      return `${InvoicesService.SALES_POINT}-${String(count + 1).padStart(8, '0')}`;
+    });
 
     const entity = this.repo.create({
       number,
@@ -99,20 +109,6 @@ export class InvoicesService {
     if (input.notes) inv.notes = [inv.notes, `${input.method.toUpperCase()}: ${input.notes}`].filter(Boolean).join(' | ');
     await this.repo.save(inv);
     return this.get(invoiceId);
-  }
-
-  private async nextInvoiceNumber() {
-    // Formato simple: 0001-NNNNNNNN. Punto de venta 0001 hardcoded.
-    const last = await this.repo
-      .createQueryBuilder('i')
-      .orderBy('i.created_at', 'DESC')
-      .getOne();
-    let next = 1;
-    if (last) {
-      const parts = last.number.split('-');
-      next = Number(parts[1] ?? '0') + 1;
-    }
-    return `0001-${String(next).padStart(8, '0')}`;
   }
 
   toDto(e: InvoiceEntity): Invoice {

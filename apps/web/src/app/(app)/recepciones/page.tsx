@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Milk, Plus } from 'lucide-react';
+import { FlaskConical, Milk, Plus } from 'lucide-react';
 import type { MilkReception } from '@lasmarias/shared-schemas';
+import { ShieldOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -11,6 +12,7 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge, type Status } from '@/components/ui/status-badge';
 import { formatDateTime, formatLiters } from '@/lib/utils';
 import { receptionsApi } from '@/features/receptions/api';
+import { ApiError } from '@/lib/api-client';
 
 function statusToBadge(s: MilkReception['status']): { variant: Status; label: string } {
   switch (s) {
@@ -53,11 +55,22 @@ export default function ReceptionsPage() {
         </div>
       )}
 
-      {error && (
+      {error && (error instanceof ApiError && error.status === 403 ? (
+        <EmptyState
+          icon={ShieldOff}
+          title="Sin acceso"
+          description="Tu rol no tiene permiso para ver esta sección. Pedile acceso a un administrador."
+          action={
+            <Button asChild variant="outline">
+              <Link href="/dashboard">Ir al inicio</Link>
+            </Button>
+          }
+        />
+      ) : (
         <Card className="border-danger/40 p-4 text-sm text-danger">
           No pudimos cargar las recepciones. Probá de nuevo en un momento.
         </Card>
-      )}
+      ))}
 
       {data && data.length === 0 && (
         <EmptyState
@@ -97,6 +110,12 @@ export default function ReceptionsPage() {
                   {r.blockedReason && (
                     <p className="mt-2 rounded-md bg-red-50 px-2 py-1 text-xs text-danger">{r.blockedReason}</p>
                   )}
+                  {r.analysisStatus === 'pending' && (
+                    <p className="mt-2 flex items-center gap-1 rounded-md bg-warning-50 px-2 py-1 text-xs text-warning-700">
+                      <FlaskConical className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      Lab externo pendiente{r.labResultsExpectedDate ? ` — esperado el ${new Date(r.labResultsExpectedDate).toLocaleDateString('es-AR')}` : ''}
+                    </p>
+                  )}
                 </Card>
               );
             })}
@@ -111,6 +130,7 @@ export default function ReceptionsPage() {
                   <th className="px-4 py-3 font-medium">Fecha y hora</th>
                   <th className="px-4 py-3 font-medium">Productor</th>
                   <th className="px-4 py-3 font-medium text-right">Litros</th>
+                  <th className="px-4 py-3 font-medium">Análisis</th>
                   <th className="px-4 py-3 font-medium">Estado</th>
                 </tr>
               </thead>
@@ -123,6 +143,16 @@ export default function ReceptionsPage() {
                       <td className="px-4 py-3 text-sm text-foreground-muted">{formatDateTime(r.receivedAt)}</td>
                       <td className="px-4 py-3 text-sm">{r.producerName}</td>
                       <td className="px-4 py-3 text-right text-sm font-semibold">{formatLiters(r.liters)}</td>
+                      <td className="px-4 py-3">
+                        {r.analysisStatus === 'pending' ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-warning-50 px-2 py-0.5 text-xs text-warning-700">
+                            <FlaskConical className="h-3 w-3" aria-hidden="true" />
+                            Pendiente
+                          </span>
+                        ) : (
+                          <span className="text-xs text-foreground-muted">Completo</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <StatusBadge status={s.variant}>{s.label}</StatusBadge>
                       </td>

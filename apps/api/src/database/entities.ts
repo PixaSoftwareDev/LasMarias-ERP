@@ -21,6 +21,10 @@ import { EmployeeEntity } from '../hr/employee.entity';
 import { AttendanceEventEntity } from '../hr/attendance-event.entity';
 import { NotificationEntity } from '../notifications/notification.entity';
 import { AuditLogEntity } from '../notifications/audit-log.entity';
+import { ProductPresentationEntity } from '../products/product-presentation.entity';
+import { ReturnableContainerEntity } from '../returnable-containers/returnable-container.entity';
+import { ReturnableContainerMovementEntity } from '../returnable-containers/returnable-container-movement.entity';
+import { MaturationRecordEntity } from '../maturation/maturation-record.entity';
 
 export const entities = [
   UserEntity,
@@ -47,4 +51,8 @@ export const entities = [
   AttendanceEventEntity,
   NotificationEntity,
   AuditLogEntity,
+  ProductPresentationEntity,
+  ReturnableContainerEntity,
+  ReturnableContainerMovementEntity,
+  MaturationRecordEntity,
 ];

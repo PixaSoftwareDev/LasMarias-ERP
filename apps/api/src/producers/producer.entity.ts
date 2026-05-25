@@ -28,6 +28,10 @@ export class ProducerEntity extends BaseEntity {
   @Column({ type: 'numeric', precision: 12, scale: 4, name: 'agreed_price_per_liter', nullable: true })
   agreedPricePerLiter!: string | null;
 
+  // RENSPA — Registro Nacional Sanitario de Productores Agropecuarios (SENASA obligatorio).
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  renspa!: string | null;
+
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
 

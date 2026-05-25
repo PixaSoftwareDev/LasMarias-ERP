@@ -8,6 +8,20 @@ import type {
   SalesOrder,
   SalesOrderLine,
 } from '@lasmarias/shared-schemas';
+
+// Clave única para advisory lock en generación de códigos de pedido.
+const SALES_ORDER_LOCK_KEY = 2_000_000_001;
+
+// Transiciones válidas de estado para pedidos.
+const VALID_STATUS_TRANSITIONS: Record<SalesOrder['status'], SalesOrder['status'][]> = {
+  taken:       ['confirmed', 'cancelled'],
+  confirmed:   ['prepared', 'cancelled'],
+  prepared:    ['loaded', 'cancelled'],
+  loaded:      ['in_delivery'],
+  in_delivery: ['delivered', 'cancelled'],
+  delivered:   [],
+  cancelled:   [],
+};
 import { PriceListEntity, PriceListItemEntity } from './price-list.entity';
 import { SalesOrderEntity } from './sales-order.entity';
 import { ClientsService } from '../clients/clients.service';
@@ -129,6 +143,11 @@ export class SalesService {
       let subtotal = 0;
       for (const l of input.lines) {
         const product = await this.products.get(l.productId);
+        if (!['queso', 'subproducto'].includes(product.category)) {
+          throw new BadRequestException(
+            `"${product.name}" no es un producto vendible (categoría: ${product.category})`,
+          );
+        }
         const unitPrice = await this.resolvePriceFor(client.id, l.productId);
         const lineSubtotal = unitPrice * l.quantity;
         subtotal += lineSubtotal;
@@ -168,17 +187,24 @@ export class SalesService {
     });
   }
 
-  async updateStatus(orderId: string, status: SalesOrder['status']): Promise<SalesOrder> {
+  async updateStatus(orderId: string, newStatus: SalesOrder['status']): Promise<SalesOrder> {
     const o = await this.orders.findOne({ where: { id: orderId } });
     if (!o) throw new NotFoundException('Pedido no encontrado');
-    o.status = status;
+
+    const allowed = VALID_STATUS_TRANSITIONS[o.status];
+    if (!allowed.includes(newStatus)) {
+      throw new BadRequestException(
+        `No se puede cambiar el pedido de "${o.status}" a "${newStatus}"`,
+      );
+    }
+
+    o.status = newStatus;
     await this.orders.save(o);
     return this.getOrder(orderId);
   }
 
-  // Secuencia global de pedidos con advisory lock (Postgres rechaza FOR UPDATE con agregados).
   private async nextOrderCode(manager: import('typeorm').EntityManager) {
-    await manager.query('SELECT pg_advisory_xact_lock(2000000001)');
+    await manager.query('SELECT pg_advisory_xact_lock($1)', [SALES_ORDER_LOCK_KEY]);
     const count = await manager.getRepository(SalesOrderEntity).count();
     return `PED-${String(count + 1).padStart(6, '0')}`;
   }

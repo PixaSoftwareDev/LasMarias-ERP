@@ -1,8 +1,10 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import {
   createProductInputSchema,
+  createProductPresentationInputSchema,
   updateProductInputSchema,
   type CreateProductInput,
+  type CreateProductPresentationInput,
   type UpdateProductInput,
 } from '@lasmarias/shared-schemas';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -39,5 +41,19 @@ export class ProductsController {
     @Body(new ZodValidationPipe(updateProductInputSchema)) body: UpdateProductInput,
   ) {
     return this.products.update(id, body);
+  }
+
+  @Get(':id/presentations')
+  listPresentations(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.products.listPresentations(id);
+  }
+
+  @Post(':id/presentations')
+  @Roles('admin', 'gerente')
+  createPresentation(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(createProductPresentationInputSchema)) body: CreateProductPresentationInput,
+  ) {
+    return this.products.createPresentation(id, body);
   }
 }

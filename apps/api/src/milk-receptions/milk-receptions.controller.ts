@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, DefaultValuePipe, Get, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import {
   createMilkReceptionInputSchema,
@@ -23,8 +23,11 @@ export class MilkReceptionsController {
 
   @Get()
   @Roles('admin', 'gerente', 'operario')
-  list() {
-    return this.receptions.list();
+  list(
+    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit?: number,
+    @Query('offset', new DefaultValuePipe(0), ParseIntPipe) offset?: number,
+  ) {
+    return this.receptions.list(limit, offset);
   }
 
   @Get('volume-by-producer')

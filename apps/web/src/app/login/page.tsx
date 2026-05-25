@@ -18,11 +18,17 @@ export default function LoginPage() {
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<LoginInput>({
     resolver: zodResolver(loginInputSchema),
     mode: 'onBlur',
   });
+
+  function fillDemo() {
+    setValue('email', 'admin@lasmarias.local', { shouldValidate: false });
+    setValue('password', 'Admin123!Cambiar', { shouldValidate: false });
+  }
 
   async function onSubmit(values: LoginInput) {
     try {
@@ -70,6 +76,14 @@ export default function LoginPage() {
           <Button type="submit" size="lg" block loading={isSubmitting} loadingText="Entrando...">
             Entrar
           </Button>
+
+          <button
+            type="button"
+            onClick={fillDemo}
+            className="text-xs text-foreground-muted underline underline-offset-2 hover:text-foreground transition-colors"
+          >
+            Usar credenciales de demo
+          </button>
         </form>
       </div>
     </div>

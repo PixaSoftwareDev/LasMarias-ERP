@@ -21,8 +21,12 @@ export class MilkReceptionsService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async list(): Promise<MilkReception[]> {
-    const rows = await this.repo.find({ order: { receivedAt: 'DESC' }, take: 200 });
+  async list(limit = 100, offset = 0): Promise<MilkReception[]> {
+    const rows = await this.repo.find({
+      order: { receivedAt: 'DESC' },
+      take: Math.min(limit, 500),
+      skip: offset,
+    });
     return rows.map((r) => this.toDto(r));
   }
 
@@ -101,8 +105,11 @@ export class MilkReceptionsService {
         producerName: producer.name,
         vehiclePlate: input.vehiclePlate ?? null,
         driverName: input.driverName ?? null,
+        tankNumber: input.tankNumber ?? null,
         liters: String(input.liters),
         quality: input.quality,
+        analysisStatus: input.analysisStatus ?? 'complete',
+        labResultsExpectedDate: input.labResultsExpectedDate ?? null,
         status,
         blockedReason,
         notes: input.notes ?? null,
@@ -144,8 +151,11 @@ export class MilkReceptionsService {
       producerName: e.producerName,
       vehiclePlate: e.vehiclePlate ?? undefined,
       driverName: e.driverName ?? undefined,
+      tankNumber: e.tankNumber ?? undefined,
       liters: Number(e.liters),
       quality: e.quality,
+      analysisStatus: e.analysisStatus,
+      labResultsExpectedDate: e.labResultsExpectedDate ?? undefined,
       status: e.status,
       blockedReason: e.blockedReason ?? undefined,
       notes: e.notes ?? undefined,

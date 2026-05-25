@@ -19,6 +19,7 @@ import {
 // con offset local en el submit.
 const formSchema = createMilkReceptionInputSchema.extend({
   receivedAt: z.string().min(1, 'Ingresá la fecha y hora'),
+  producerId: z.string().uuid('Seleccioná un productor'),
 });
 type FormValues = z.infer<typeof formSchema>;
 import { Button } from '@/components/ui/button';
@@ -171,8 +172,12 @@ export default function NewReceptionPage() {
               <Input placeholder="AB123CD" {...register('vehiclePlate')} />
             </Field>
 
-            <Field label="Conductor" htmlFor="driverName" error={errors.driverName?.message} className="sm:col-span-2">
+            <Field label="Conductor" htmlFor="driverName" error={errors.driverName?.message}>
               <Input placeholder="Nombre y apellido" {...register('driverName')} />
+            </Field>
+
+            <Field label="N° de tanque" htmlFor="tankNumber" error={errors.tankNumber?.message} hint="Número de tanque del camión (opcional)">
+              <Input placeholder="Ej: T-01" {...register('tankNumber')} />
             </Field>
           </CardContent>
         </Card>
@@ -254,6 +259,22 @@ export default function NewReceptionPage() {
               <input type="checkbox" className="h-5 w-5 rounded border-border" {...register('quality.antibioticsDetected')} />
               <span>Se detectaron antibióticos</span>
             </label>
+
+            <div className="sm:col-span-2 border-t border-border-subtle pt-4">
+              <label className="flex items-center gap-3 text-sm font-medium mb-3">
+                <input
+                  type="checkbox"
+                  className="h-5 w-5 rounded border-border"
+                  {...register('analysisStatus', {
+                    setValueAs: (v: boolean) => (v ? 'pending' : 'complete'),
+                  })}
+                />
+                <span>UFC va a laboratorio externo — resultado pendiente</span>
+              </label>
+              <Field label="Fecha estimada de resultado del lab" htmlFor="labResultsExpectedDate" hint="Completar si el análisis UFC quedó pendiente">
+                <Input type="date" {...register('labResultsExpectedDate')} />
+              </Field>
+            </div>
           </CardContent>
         </Card>
 

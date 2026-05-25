@@ -2,7 +2,7 @@
   "name": "lasmarias",
   "version": "0.1.0",
   "private": true,
-  "description": "Sistema de Gestión Láctea — Lácteos Las Marías (Pergamino, Argentina)",
+  "description": "Sistema de Gesti\u00f3n L\u00e1ctea \u2014 L\u00e1cteos Las Mar\u00edas (Pergamino, Argentina)",
   "engines": {
     "node": ">=22.0.0",
     "pnpm": ">=10.0.0"
@@ -29,5 +29,12 @@
     "rimraf": "^6.0.1",
     "turbo": "^2.3.3",
     "typescript": "^5.7.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "msgpackr-extract",
+      "unrs-resolver"
+    ]
   }
 }
