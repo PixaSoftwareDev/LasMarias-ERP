@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge, type Status } from '@/components/ui/status-badge';
 import { inventoryApi } from '@/features/api';
 import { formatDateTime } from '@/lib/utils';
+import { labelOr, movementReasonLabel, movementTypeLabel } from '@/lib/labels';
 import type { StockSummary } from '@lasmarias/shared-schemas';
 
 function alertBadge(level?: StockSummary['alertLevel']): { variant: Status; label: string } {
@@ -55,6 +56,7 @@ export default function InventoryPage() {
       <section>
         <h2 className="mb-3 text-xl font-semibold">Últimos movimientos</h2>
         {movementsQuery.isLoading ? <Card className="h-40 animate-pulse bg-surface-subtle" /> : (
+          <>
           <DataTable
             data={movementsQuery.data?.slice(0, 50) ?? []}
             getKey={(m) => m.id}
@@ -65,13 +67,19 @@ export default function InventoryPage() {
               { key: 'product', header: 'Producto', render: (m) => m.productName || '—' },
               { key: 'type', header: 'Movimiento', render: (m) => (
                 <StatusBadge status={m.type === 'in' ? 'success' : m.type === 'out' ? 'info' : 'warning'}>
-                  {m.type === 'in' ? 'Entrada' : m.type === 'out' ? 'Salida' : m.type === 'adjustment' ? 'Ajuste' : 'Transferencia'}
+                  {labelOr(movementTypeLabel, m.type)}
                 </StatusBadge>
               )},
               { key: 'qty', header: 'Cantidad', render: (m) => `${m.quantity} ${m.unit}`, align: 'right' },
-              { key: 'reason', header: 'Motivo', render: (m) => m.reason },
+              { key: 'reason', header: 'Motivo', render: (m) => labelOr(movementReasonLabel, m.reason) },
             ]}
           />
+          {(movementsQuery.data?.length ?? 0) > 50 && (
+            <p className="mt-2 text-center text-xs text-foreground-subtle">
+              Mostrando los últimos 50 de {movementsQuery.data!.length} movimientos.
+            </p>
+          )}
+          </>
         )}
       </section>
     </div>

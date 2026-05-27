@@ -1,12 +1,12 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
 import { z } from 'zod';
 import {
@@ -28,6 +28,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/page-header';
 import { receptionsApi, producersApi } from '@/features/receptions/api';
 import { ApiError } from '@/lib/api-client';
+import { evaluateQuality } from '@/lib/milk-quality';
 
 // Pantalla de nueva recepción. CLAUDE.md §5.3:
 // - Una columna en mobile, dos en desktop.
@@ -46,6 +47,7 @@ function nowLocalInput(): string {
 export default function NewReceptionPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const [savedCode, setSavedCode] = useState<string | null>(null);
 
   const producersQuery = useQuery({
     queryKey: ['producers'],
@@ -55,6 +57,7 @@ export default function NewReceptionPage() {
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors, isSubmitting, isValid },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -63,7 +66,9 @@ export default function NewReceptionPage() {
       receivedAt: '',
       producerId: '',
       liters: undefined as unknown as number,
-      quality: {},
+      // La leche normalmente pasa la prueba de alcohol; el operario la desmarca sólo si falló.
+      // Evita bloquear toda recepción por defecto (el back trata false como rechazo).
+      quality: { alcoholTestPassed: true },
     },
   });
 
@@ -72,11 +77,13 @@ export default function NewReceptionPage() {
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ['receptions'] });
       if (r.status === 'aceptada') {
-        toast.success(`Recepción ${r.code} cargada correctamente.`);
+        // Confirmación visual fuerte para planta (CLAUDE.md §5.4): check verde a pantalla completa.
+        setSavedCode(r.code);
+        setTimeout(() => router.push('/recepciones'), 1300);
       } else {
         toast.warning(`Recepción ${r.code} quedó bloqueada: ${r.blockedReason}`);
+        router.push('/recepciones');
       }
-      router.push('/recepciones');
     },
     onError: (err) => {
       if (err instanceof ApiError) toast.error(err.message);
@@ -88,8 +95,20 @@ export default function NewReceptionPage() {
 
   const defaultDateTime = useMemo(() => nowLocalInput(), []);
 
+  // Evaluación de calidad EN VIVO: avisa antes de guardar si la recepción se bloqueará.
+  const quality = watch('quality');
+  const qualityIssues = evaluateQuality(quality ?? {});
+  const hasQualityData = !!quality && Object.values(quality).some((v) => v !== undefined && v !== null);
+
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 p-4 pb-32 sm:p-6">
+      {savedCode && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-primary-600 px-6 text-center text-white">
+          <CheckCircle2 className="h-24 w-24" aria-hidden="true" />
+          <p className="font-display text-3xl font-semibold">¡Recepción guardada!</p>
+          <p className="text-lg text-primary-100">Lote {savedCode}</p>
+        </div>
+      )}
       <PageHeader
         title="Nueva recepción de leche"
         description="Cargá los datos de este ingreso. El sistema genera el código de lote automáticamente."
@@ -254,6 +273,24 @@ export default function NewReceptionPage() {
               <input type="checkbox" className="h-5 w-5 rounded border-border" {...register('quality.antibioticsDetected')} />
               <span>Se detectaron antibióticos</span>
             </label>
+
+            {/* Aviso en vivo: el operario sabe ANTES de guardar si quedará bloqueada. */}
+            {qualityIssues.length > 0 ? (
+              <div className="sm:col-span-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                <div>
+                  <p className="font-medium">Con estos valores, la recepción quedará bloqueada al guardar:</p>
+                  <ul className="mt-1 list-inside list-disc text-amber-700">
+                    {qualityIssues.map((r) => <li key={r}>{r}</li>)}
+                  </ul>
+                </div>
+              </div>
+            ) : hasQualityData ? (
+              <div className="sm:col-span-2 flex items-center gap-2 rounded-lg border border-primary-100 bg-primary-50 p-3 text-sm text-primary-700">
+                <CheckCircle2 className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                <span>Calidad dentro de los límites — la recepción se aceptará.</span>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 

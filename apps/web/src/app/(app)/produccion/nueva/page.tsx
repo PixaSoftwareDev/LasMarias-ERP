@@ -73,6 +73,18 @@ export default function NewProductionPage() {
     if (!user) router.replace('/login');
   }, [user, router]);
 
+  function removeInput(idx: number) {
+    const prev = inputs;
+    const removed = inputs[idx];
+    const next = inputs.filter((_, i) => i !== idx);
+    setInputs(next.length ? next : [{ batchId: '', liters: 0 }]);
+    if (removed?.batchId) {
+      toast('Lote quitado de la orden', {
+        action: { label: 'Deshacer', onClick: () => setInputs(prev) },
+      });
+    }
+  }
+
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 p-4 sm:p-6">
       <PageHeader
@@ -120,9 +132,14 @@ export default function NewProductionPage() {
                   <Input type="number" inputMode="decimal" step="0.1" placeholder="Litros" value={row.liters || ''} onChange={(e) => {
                     const next = [...inputs]; next[idx]!.liters = Number(e.target.value); setInputs(next);
                   }} />
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setInputs(inputs.filter((_, i) => i !== idx))}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => removeInput(idx)}
+                    aria-label="Quitar lote"
+                    className="flex min-h-touch min-w-touch items-center justify-center rounded-md text-foreground-muted transition-colors hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  </button>
                 </div>
               ))}
             </div>

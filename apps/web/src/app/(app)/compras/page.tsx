@@ -15,6 +15,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { suppliersApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { formatDateTime } from '@/lib/utils';
+import { labelOr, purchaseOrderStatusLabel, purchaseOrderStatusTone } from '@/lib/labels';
 
 interface SupplierForm {
   businessName: string;
@@ -39,7 +40,7 @@ export default function PurchasingPage() {
       form.reset();
       setShowForm(false);
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar el proveedor. Probá de nuevo.'),
   });
 
   return (
@@ -101,7 +102,7 @@ export default function PurchasingPage() {
               { key: 'supplier', header: 'Proveedor', render: (o) => o.supplierName, secondary: true },
               { key: 'ordered', header: 'Fecha', render: (o) => formatDateTime(o.orderedAt) },
               { key: 'total', header: 'Total', render: (o) => `$${o.total.toLocaleString('es-AR', { maximumFractionDigits: 2 })}`, align: 'right' },
-              { key: 'status', header: 'Estado', render: (o) => <StatusBadge status={o.status === 'received' || o.status === 'invoiced' ? 'success' : 'info'}>{o.status}</StatusBadge> },
+              { key: 'status', header: 'Estado', render: (o) => <StatusBadge status={purchaseOrderStatusTone[o.status] ?? 'info'}>{labelOr(purchaseOrderStatusLabel, o.status)}</StatusBadge> },
             ]}
           />
         )}

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Milk, Plus } from 'lucide-react';
+import { AlertTriangle, Milk, Plus } from 'lucide-react';
 import type { MilkReception } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -54,8 +54,9 @@ export default function ReceptionsPage() {
       )}
 
       {error && (
-        <Card className="border-danger/40 p-4 text-sm text-danger">
-          No pudimos cargar las recepciones. Probá de nuevo en un momento.
+        <Card className="flex items-start gap-2 border-danger/40 p-4 text-sm text-danger">
+          <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
+          <span>No pudimos cargar las recepciones. Revisá tu conexión a internet y recargá la página. Si el problema sigue, avisá al soporte.</span>
         </Card>
       )}
 

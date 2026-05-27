@@ -25,8 +25,8 @@ export default function PriceListsPage() {
       {isLoading ? <Card className="h-40 animate-pulse bg-surface-subtle" /> : data.length === 0 ? (
         <EmptyState
           icon={Tag}
-          title="Sin listas configuradas"
-          description="Las listas se crean vía API por ahora. Próximamente: form de alta con ítems."
+          title="Todavía no hay listas de precios"
+          description="Acá vas a ver una lista por tipo de cliente (minorista, mayorista, distribuidor). El formulario para cargarlas está en camino."
         />
       ) : (
         <DataTable
