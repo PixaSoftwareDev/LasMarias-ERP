@@ -48,3 +48,6 @@ infra/data/
 
 # Generated
 .eslintcache
+
+# Artefactos de Playwright MCP (capturas/snapshots de verificación)
+.playwright-mcp/

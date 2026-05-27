@@ -18,6 +18,7 @@
     "migration:run": "typeorm-ts-node-commonjs migration:run -d src/database/data-source.ts",
     "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/database/data-source.ts",
     "seed": "ts-node src/database/seed.ts",
+    "seed:demo": "ts-node src/database/seed-demo.ts",
     "clean": "rimraf dist .turbo"
   },
   "dependencies": {
