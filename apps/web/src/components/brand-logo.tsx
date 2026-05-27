@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils';
 
 // Logo de marca para Lácteos Las Marías.
-// Una gota de leche en blanco sobre un círculo verde oficial (#009B00),
+// Una gota de leche en blanco sobre un círculo verde esmeralda (#059669),
 // con remate azul (#1C3076) que refuerza la identidad doble del sitio.
 
 interface Props {
@@ -21,7 +21,7 @@ export function BrandLogo({ size = 32, withWordmark = false, className }: Props)
         xmlns="http://www.w3.org/2000/svg"
         aria-hidden="true"
       >
-        <circle cx="24" cy="24" r="22" fill="#009B00" />
+        <circle cx="24" cy="24" r="22" fill="#059669" />
         <path
           d="M24 11c-3 4.5-7 9-7 14a7 7 0 0014 0c0-5-4-9.5-7-14z"
           fill="#FFFFFF"

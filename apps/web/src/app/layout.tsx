@@ -1,24 +1,17 @@
 import type { Metadata, Viewport } from 'next';
-import { Roboto, Inter } from 'next/font/google';
+import { Inter } from 'next/font/google';
 import { Toaster } from 'sonner';
 import { QueryProvider } from '@/providers/query-provider';
 import './globals.css';
 
-// Cuerpo — Roboto (legibilidad en formularios, tablas, datos densos).
-const roboto = Roboto({
-  subsets: ['latin', 'latin-ext'],
-  weight: ['400', '500', '700'],
-  display: 'swap',
-  variable: '--font-roboto',
-});
-
-// Display — Inter para wordmark y títulos de página: sans moderna,
-// la fuente de referencia SaaS actual (CLAUDE.md §5.2).
+// Inter en toda la app — body, títulos y wordmark. Sans SaaS moderna,
+// la fuente de referencia actual (CLAUDE.md §5.2). Se expone como --font-sans;
+// el token `display` apunta a la misma variable.
 const inter = Inter({
   subsets: ['latin', 'latin-ext'],
   weight: ['400', '500', '600', '700'],
   display: 'swap',
-  variable: '--font-display',
+  variable: '--font-sans',
 });
 
 export const metadata: Metadata = {
@@ -35,12 +28,12 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 5,
-  themeColor: '#009B00',
+  themeColor: '#059669',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es-AR" className={`h-full ${roboto.variable} ${inter.variable}`}>
+    <html lang="es-AR" className={`h-full ${inter.variable}`}>
       <body className="h-full font-sans antialiased">
         <QueryProvider>{children}</QueryProvider>
         <Toaster

@@ -6,8 +6,6 @@ import { LogOut } from 'lucide-react';
 import type { User } from '@lasmarias/shared-schemas';
 import { visibleFor } from '@/lib/navigation';
 import { cn } from '@/lib/utils';
-import { Button } from './ui/button';
-import { BrandLogo } from './brand-logo';
 
 // CLAUDE.md §5.3:
 // - Desktop (md+): sidebar fija con todos los módulos visibles según rol.
@@ -29,10 +27,13 @@ export function AppShell({ user, onLogout, children }: Props) {
 
   return (
     <div className="flex min-h-screen flex-col bg-background md:flex-row">
-      {/* Sidebar — solo desktop */}
-      <aside className="hidden border-r border-border-subtle bg-surface-elevated md:flex md:w-64 md:flex-col">
-        <div className="flex h-16 items-center border-b border-border-subtle px-6">
-          <BrandLogo size={32} withWordmark />
+      {/* Sidebar — solo desktop. Oscura (azul marino de marca) con activo en verde. */}
+      <aside className="hidden bg-gradient-to-b from-secondary-800 to-secondary-900 md:flex md:w-64 md:flex-col">
+        <div className="flex h-16 items-center border-b border-white/10 px-5">
+          <div className="flex flex-col leading-none">
+            <span className="text-[10px] font-medium uppercase tracking-[0.25em] text-primary-300">Lácteos</span>
+            <span className="mt-1 font-display text-lg font-semibold tracking-tight text-white">Las Marías</span>
+          </div>
         </div>
         <nav aria-label="Navegación principal" className="flex-1 overflow-y-auto p-3">
           <ul className="space-y-1">
@@ -44,10 +45,10 @@ export function AppShell({ user, onLogout, children }: Props) {
                   <Link
                     href={item.href}
                     className={cn(
-                      'flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors',
+                      'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
                       active
-                        ? 'bg-primary-50 text-primary-700'
-                        : 'text-foreground-muted hover:bg-surface-subtle hover:text-foreground',
+                        ? 'bg-primary-600 text-white shadow-sm'
+                        : 'text-secondary-100 hover:bg-white/10 hover:text-white',
                     )}
                   >
                     <Icon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
@@ -58,21 +59,34 @@ export function AppShell({ user, onLogout, children }: Props) {
             })}
           </ul>
         </nav>
-        <div className="border-t border-border-subtle p-3">
-          <div className="mb-2 px-2">
-            <p className="text-sm font-medium text-foreground">{user.fullName}</p>
-            <p className="text-xs text-foreground-muted capitalize">{user.role}</p>
+        <div className="border-t border-white/10 p-3">
+          <div className="flex items-center gap-3 px-1">
+            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-white/10 text-sm font-semibold text-white">
+              {user.fullName.charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-white">{user.fullName}</p>
+              <p className="text-xs capitalize text-secondary-200">{user.role}</p>
+            </div>
+            <button
+              type="button"
+              onClick={onLogout}
+              aria-label="Cerrar sesión"
+              title="Cerrar sesión"
+              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-secondary-200 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <LogOut className="h-4 w-4" aria-hidden="true" />
+            </button>
           </div>
-          <Button variant="ghost" size="sm" block onClick={onLogout}>
-            <LogOut className="h-4 w-4" aria-hidden="true" />
-            <span>Cerrar sesión</span>
-          </Button>
         </div>
       </aside>
 
       {/* Header mobile */}
       <header className="flex h-14 items-center justify-between border-b border-border-subtle bg-surface-elevated px-4 md:hidden">
-        <BrandLogo size={28} withWordmark />
+        <div className="flex flex-col leading-none">
+          <span className="text-[9px] font-medium uppercase tracking-[0.25em] text-primary-700">Lácteos</span>
+          <span className="mt-0.5 font-display text-base font-semibold tracking-tight text-foreground">Las Marías</span>
+        </div>
         <button
           type="button"
           onClick={onLogout}

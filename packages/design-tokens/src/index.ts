@@ -2,38 +2,44 @@
 // Identidad oficial extraída de https://lacteoslasmarias.com (2026-05-15):
 //   - Verde primario: #009b00
 //   - Azul secundario: #1c3076
-//   - Tipografía: Roboto (400 / 700)
+//   - Tipografía: Inter en toda la app (body + títulos). Decisión de producto
+//     por un look SaaS moderno (CLAUDE.md §5.2 ya la recomienda); reemplaza al
+//     Roboto del sitio institucional, que daba un aire anticuado.
 // La escala 50-900 del verde está construida alrededor de #009b00 como tono 600.
 
 export const colors = {
+  // Neutros SLATE (gris azulado frío) — estándar SaaS moderno; reemplaza al
+  // stone cálido que daba un negro/gris anticuado. Combina con navy + esmeralda.
   background: {
-    primary: '#FAFAF9',
-    secondary: '#F5F5F4',
+    primary: '#F8FAFC',   // slate-50
+    secondary: '#F1F5F9', // slate-100
     elevated: '#FFFFFF',
   },
   text: {
-    primary: '#0C0A09',
-    secondary: '#57534E',
-    tertiary: '#A8A29E',
-    inverse: '#FAFAF9',
+    primary: '#0F172A',   // slate-900 — títulos/números (no negro puro)
+    secondary: '#475569', // slate-600 — texto secundario
+    tertiary: '#94A3B8',  // slate-400 — metadatos/placeholder
+    inverse: '#F8FAFC',
   },
   border: {
-    subtle: '#E7E5E4',
-    default: '#D6D3D1',
-    strong: '#A8A29E',
+    subtle: '#E2E8F0',    // slate-200
+    default: '#CBD5E1',   // slate-300
+    strong: '#94A3B8',    // slate-400
   },
-  // Primario — verde oficial Las Marías (#009b00) como tono 600.
+  // Primario — verde ESMERALDA moderno (escala emerald de Tailwind) como verde
+  // de interacción: botones, foco de campos, ítem activo. Reemplaza al verde
+  // semáforo #009B00 del sitio institucional, que se percibía saturado/anticuado.
   primary: {
-    50:  '#E6F7E6',
-    100: '#C1EBC1',
-    200: '#8FD98F',
-    300: '#5CC65C',
-    400: '#2EB72E',
-    500: '#11A911',
-    600: '#009B00', // base — verde oficial
-    700: '#008300',
-    800: '#006B00',
-    900: '#004D00',
+    50:  '#ECFDF5',
+    100: '#D1FAE5',
+    200: '#A7F3D0',
+    300: '#6EE7B7',
+    400: '#34D399',
+    500: '#10B981',
+    600: '#059669', // base — verde esmeralda
+    700: '#047857',
+    800: '#065F46',
+    900: '#064E3B',
   },
   // Secundario — azul oficial Las Marías para acentos y elementos de marca.
   secondary: {
@@ -48,8 +54,8 @@ export const colors = {
     800: '#152560',
     900: '#0E1947',
   },
-  // Semánticos — verde de éxito usa el mismo de marca para coherencia visual.
-  success: '#009B00',
+  // Semánticos — verde de éxito alineado al esmeralda primario.
+  success: '#059669',
   warning: '#EAB308',
   danger: '#DC2626',
   info: '#1C3076',
@@ -57,10 +63,10 @@ export const colors = {
 
 export const typography = {
   fontFamily: {
-    // Roboto para body — legibilidad en formularios, tablas, datos densos.
-    sans: ['var(--font-roboto)', 'Roboto', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
-    // Inter para wordmark y títulos — sans SaaS moderna por excelencia.
-    display: ['var(--font-display)', 'Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+    // Inter en toda la app — sans SaaS moderna, legible en formularios y datos densos.
+    sans: ['var(--font-sans)', 'Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+    // Display comparte Inter (mismo tipo); reservado para wordmark y títulos.
+    display: ['var(--font-sans)', 'Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
     mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace'],
   },
   fontSize: {
@@ -81,10 +87,11 @@ export const typography = {
   },
 } as const;
 
+// Radios generosos para un look moderno/suave (estilo SaaS actual).
 export const radius = {
-  sm: '6px',
-  md: '8px',
-  lg: '12px',
+  sm: '8px',
+  md: '12px',
+  lg: '16px',
   full: '9999px',
 } as const;
 

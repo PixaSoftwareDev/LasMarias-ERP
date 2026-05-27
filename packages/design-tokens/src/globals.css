@@ -3,31 +3,31 @@
 /* Las apps importan este archivo después de las directivas @tailwind. */
 
 :root {
-  /* Surfaces */
-  --color-background: 250 250 249;        /* #FAFAF9 */
-  --color-surface-subtle: 245 245 244;
+  /* Surfaces — slate (gris azulado frío, SaaS moderno) */
+  --color-background: 248 250 252;        /* #F8FAFC slate-50 */
+  --color-surface-subtle: 241 245 249;    /* #F1F5F9 slate-100 */
   --color-surface-elevated: 255 255 255;
 
-  /* Texto */
-  --color-foreground: 12 10 9;
-  --color-foreground-muted: 87 83 78;
-  --color-foreground-subtle: 168 162 158;
+  /* Texto — slate */
+  --color-foreground: 15 23 42;           /* #0F172A slate-900 */
+  --color-foreground-muted: 71 85 105;    /* #475569 slate-600 */
+  --color-foreground-subtle: 148 163 184; /* #94A3B8 slate-400 */
 
-  /* Borders */
-  --color-border-subtle: 231 229 228;
-  --color-border-default: 214 211 209;
+  /* Borders — slate */
+  --color-border-subtle: 226 232 240;     /* #E2E8F0 slate-200 */
+  --color-border-default: 203 213 225;    /* #CBD5E1 slate-300 */
 
-  /* Marca — verde oficial Las Marías */
-  --color-primary: 0 155 0;               /* #009B00 */
-  --color-primary-hover: 0 131 0;         /* #008300 — tono 700 */
-  --color-primary-soft: 230 247 230;      /* #E6F7E6 — tono 50, fondos suaves */
+  /* Marca — verde esmeralda moderno (escala emerald) */
+  --color-primary: 5 150 105;             /* #059669 — emerald-600 */
+  --color-primary-hover: 4 120 87;        /* #047857 — emerald-700 */
+  --color-primary-soft: 236 253 245;      /* #ECFDF5 — emerald-50, fondos suaves */
 
   /* Marca — azul oficial */
   --color-secondary: 28 48 118;           /* #1C3076 */
   --color-secondary-hover: 21 37 96;      /* #152560 */
 
   /* Semánticos */
-  --color-success: 0 155 0;               /* alineado al verde de marca */
+  --color-success: 5 150 105;             /* #059669 — alineado al esmeralda primario */
   --color-warning: 234 179 8;
   --color-danger: 220 38 38;
   --color-info: 28 48 118;                /* alineado al azul de marca */
@@ -36,9 +36,16 @@
 html, body {
   background-color: rgb(var(--color-background));
   color: rgb(var(--color-foreground));
-  font-family: 'Roboto', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans), 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Controles nativos (checkbox, radio, range) en el verde de marca */
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'] {
+  accent-color: rgb(var(--color-primary));
 }
 
 /* Foco visible accesible — usa el verde de marca */

@@ -1,12 +1,12 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
-// CLAUDE.md §5.2 — radius 8px (rounded-md), shadow-sm en reposo, padding generoso.
+// CLAUDE.md §5.2 — radio generoso (rounded-lg, 16px), shadow-sm en reposo, padding amplio.
 export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cn(
-        'rounded-md border border-border-subtle bg-surface-elevated shadow-sm',
+        'rounded-lg border border-border-subtle bg-surface-elevated shadow-sm',
         className,
       )}
       {...props}

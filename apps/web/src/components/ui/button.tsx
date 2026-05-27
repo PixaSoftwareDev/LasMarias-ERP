@@ -14,10 +14,13 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary: 'bg-primary-600 text-white hover:bg-primary-700 active:bg-primary-800',
-        secondary: 'bg-surface-elevated text-foreground border border-border hover:bg-surface-subtle',
+        // Gradiente verde profundo (no chillón) + sombra suave para un acabado moderno.
+        primary:
+          'bg-gradient-to-br from-primary-600 to-primary-800 text-white shadow-sm ' +
+          'hover:from-primary-700 hover:to-primary-900 active:from-primary-800 active:to-primary-900',
+        secondary: 'bg-surface-elevated text-foreground border border-border shadow-sm hover:bg-surface-subtle',
         ghost: 'text-foreground hover:bg-surface-subtle',
-        danger: 'bg-danger text-white hover:bg-red-700',
+        danger: 'bg-danger text-white shadow-sm hover:bg-red-700',
       },
       size: {
         // Min-h 44px en todos para cumplir CLAUDE.md §5.1
