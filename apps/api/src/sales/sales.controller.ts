@@ -55,6 +55,13 @@ export class SalesController {
     return this.sales.createOrder(body, user.sub);
   }
 
+  // Cotización en vivo (precios + total) sin crear el pedido.
+  @Post('orders/quote')
+  @Roles('admin', 'gerente', 'vendedor')
+  quoteOrder(@Body(new ZodValidationPipe(createSalesOrderInputSchema)) body: CreateSalesOrderInput) {
+    return this.sales.quoteOrder(body);
+  }
+
   @Patch('orders/:id/status')
   @Roles('admin', 'gerente', 'vendedor', 'repartidor')
   updateStatus(

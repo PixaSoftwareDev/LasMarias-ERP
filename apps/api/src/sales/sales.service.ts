@@ -85,6 +85,51 @@ export class SalesService {
     return Number(item.unitPrice);
   }
 
+  // Igual que resolvePriceFor pero devuelve null en vez de lanzar — para cotización en vivo.
+  async tryResolvePriceFor(clientId: string, productId: string): Promise<number | null> {
+    try {
+      return await this.resolvePriceFor(clientId, productId);
+    } catch {
+      return null;
+    }
+  }
+
+  // Cotización sin persistir: precios, subtotales y total para mostrar en vivo
+  // mientras el vendedor arma el pedido. CLAUDE.md §4.6.1 / §5.4.
+  async quoteOrder(input: CreateSalesOrderInput) {
+    const client = await this.clients.get(input.clientId);
+    const lines: Array<{
+      productId: string;
+      productName: string;
+      sku: string;
+      unit: string;
+      quantity: number;
+      unitPrice: number | null;
+      subtotal: number | null;
+    }> = [];
+    const missingPrices: string[] = [];
+    let subtotal = 0;
+    for (const l of input.lines) {
+      const product = await this.products.get(l.productId);
+      const unitPrice = await this.tryResolvePriceFor(client.id, l.productId);
+      const lineSubtotal = unitPrice != null ? Math.round(unitPrice * l.quantity * 100) / 100 : null;
+      if (unitPrice == null) missingPrices.push(product.name);
+      else subtotal += lineSubtotal!;
+      lines.push({
+        productId: product.id,
+        productName: product.name,
+        sku: product.sku,
+        unit: product.unit,
+        quantity: l.quantity,
+        unitPrice,
+        subtotal: lineSubtotal,
+      });
+    }
+    const discountPercent = input.discountPercent ?? 0;
+    const total = Math.round(subtotal * (1 - discountPercent / 100) * 100) / 100;
+    return { lines, subtotal: Math.round(subtotal * 100) / 100, discountPercent, total, missingPrices };
+  }
+
   async listOrders(): Promise<SalesOrder[]> {
     const rows = await this.orders.find({
       relations: { client: true, zone: true },

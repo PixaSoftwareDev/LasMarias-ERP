@@ -76,6 +76,24 @@ export const deliveryApi = {
     api<DeliveryZone>('/api/delivery/zones', { method: 'POST', body: input }),
 };
 
+// Cotización en vivo del pedido (precios + total sin persistir).
+export interface SalesQuoteLine {
+  productId: string;
+  productName: string;
+  sku: string;
+  unit: string;
+  quantity: number;
+  unitPrice: number | null;
+  subtotal: number | null;
+}
+export interface SalesQuote {
+  lines: SalesQuoteLine[];
+  subtotal: number;
+  discountPercent: number;
+  total: number;
+  missingPrices: string[];
+}
+
 export const salesApi = {
   listPriceLists: () => api<PriceList[]>('/api/sales/price-lists'),
   createPriceList: (input: CreatePriceListInput) =>
@@ -83,6 +101,8 @@ export const salesApi = {
   listOrders: () => api<SalesOrder[]>('/api/sales/orders'),
   createOrder: (input: CreateSalesOrderInput) =>
     api<SalesOrder>('/api/sales/orders', { method: 'POST', body: input }),
+  quote: (input: CreateSalesOrderInput) =>
+    api<SalesQuote>('/api/sales/orders/quote', { method: 'POST', body: input }),
   updateStatus: (id: string, status: SalesOrder['status']) =>
     api<SalesOrder>(`/api/sales/orders/${id}/status`, { method: 'PATCH', body: { status } }),
 };
