@@ -1,40 +1,9 @@
 import { z } from 'zod';
 import { isoDateTimeSchema, uuidSchema } from './common';
+import { clientTypeSchema } from './client';
 
-// CLAUDE.md §4.6 — Ventas, listas de precios, pedidos con calendario.
-
-export const priceListSchema = z.object({
-  id: uuidSchema,
-  name: z.string(),
-  description: z.string().optional(),
-  clientType: z.enum(['minorista', 'mayorista', 'distribuidor']),
-  validFrom: isoDateTimeSchema.optional(),
-  validTo: isoDateTimeSchema.optional(),
-  isActive: z.boolean(),
-  createdAt: isoDateTimeSchema,
-  updatedAt: isoDateTimeSchema,
-});
-export type PriceList = z.infer<typeof priceListSchema>;
-
-export const priceListItemSchema = z.object({
-  id: uuidSchema,
-  priceListId: uuidSchema,
-  productId: uuidSchema,
-  productName: z.string(),
-  unitPrice: z.number().nonnegative(),
-});
-export type PriceListItem = z.infer<typeof priceListItemSchema>;
-
-export const salesOrderStatusSchema = z.enum([
-  'taken',
-  'confirmed',
-  'prepared',
-  'loaded',
-  'in_delivery',
-  'delivered',
-  'cancelled',
-]);
-export type SalesOrderStatus = z.infer<typeof salesOrderStatusSchema>;
+// Fase comercial — Despacho de mercadería: cliente + líneas con precio (lista por
+// tipo de cliente, editable a mano) → baja de stock + cargo en cuenta corriente.
 
 export const salesOrderLineSchema = z.object({
   productId: uuidSchema,
@@ -52,14 +21,11 @@ export const salesOrderSchema = z.object({
   code: z.string(),
   clientId: uuidSchema,
   clientName: z.string(),
-  zoneId: uuidSchema.optional(),
-  status: salesOrderStatusSchema,
-  takenAt: isoDateTimeSchema,
-  deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  dispatchedAt: isoDateTimeSchema,
   lines: z.array(salesOrderLineSchema),
   total: z.number().nonnegative(),
-  discountPercent: z.number().min(0).max(100).default(0),
   notes: z.string().max(1000).optional(),
+  documentType: z.enum(['remito']).default('remito'), // remito interno (NO fiscal)
   createdById: uuidSchema,
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
@@ -68,7 +34,118 @@ export type SalesOrder = z.infer<typeof salesOrderSchema>;
 
 export const createSalesOrderInputSchema = z.object({
   clientId: uuidSchema,
-  deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  lines: z
+    .array(
+      z.object({
+        productId: uuidSchema,
+        quantity: z.number().positive('La cantidad tiene que ser mayor a 0'),
+        unitPrice: z.number().nonnegative('El precio no puede ser negativo'),
+      }),
+    )
+    .min(1, 'Cargá al menos un ítem'),
+  notes: z.string().max(1000).optional(),
+  // Condición de pago de este despacho. Si se omite, se usa la del cliente
+  // (paymentTermDays). Si es contado, además se registra el cobro → saldo 0.
+  paymentMode: z.enum(['contado', 'cuenta_corriente']).optional(),
+});
+export type CreateSalesOrderInput = z.infer<typeof createSalesOrderInputSchema>;
+
+// --- Listas de precio por tipo de cliente (editable a mano) ---
+// Un precio por (tipo de cliente, producto). Sin vigencias: la fila vigente es is_active.
+export const priceListItemSchema = z.object({
+  id: uuidSchema,
+  clientType: clientTypeSchema,
+  productId: uuidSchema,
+  productName: z.string(),
+  sku: z.string(),
+  unit: z.string(),
+  unitPrice: z.number().nonnegative(),
+  isActive: z.boolean(),
+});
+export type PriceListItem = z.infer<typeof priceListItemSchema>;
+
+// Upsert masivo: reemplaza los precios vigentes del tipo de cliente indicado.
+export const upsertPriceListInputSchema = z.object({
+  clientType: clientTypeSchema,
+  items: z
+    .array(
+      z.object({
+        productId: uuidSchema,
+        unitPrice: z.number().nonnegative('El precio no puede ser negativo'),
+      }),
+    )
+    .min(1, 'Cargá al menos un precio'),
+});
+export type UpsertPriceListInput = z.infer<typeof upsertPriceListInputSchema>;
+
+// --- Cuenta corriente ---
+export const accountMovementKindSchema = z.enum(['charge', 'payment', 'credit_note']);
+export type AccountMovementKind = z.infer<typeof accountMovementKindSchema>;
+
+export const accountMovementSchema = z.object({
+  id: uuidSchema,
+  clientId: uuidSchema,
+  kind: accountMovementKindSchema,
+  amount: z.number().nonnegative(), // siempre positivo; el signo lo da el kind
+  referenceType: z.string().nullable(),
+  referenceId: uuidSchema.nullable(),
+  occurredAt: isoDateTimeSchema,
+  dueDate: isoDateTimeSchema.nullable(),
+  notes: z.string().nullable(),
+  createdById: uuidSchema.nullable(),
+});
+export type AccountMovement = z.infer<typeof accountMovementSchema>;
+
+// Saldo por cliente (vista lista de cuentas corrientes).
+export const accountBalanceSchema = z.object({
+  clientId: uuidSchema,
+  clientName: z.string(),
+  balance: z.number(), // Σcharge − Σpayment − Σcredit_note (puede ser negativo = saldo a favor)
+  warnings: z.array(z.string()),
+});
+export type AccountBalance = z.infer<typeof accountBalanceSchema>;
+
+// Antigüedad de saldo por tramos (sobre cargos impagos, imputación FIFO).
+export const accountAgingSchema = z.object({
+  current: z.number(), // 0-30 días (≤30)
+  d31to60: z.number(), // 31-60
+  over60: z.number(), // 60+
+});
+export type AccountAging = z.infer<typeof accountAgingSchema>;
+
+export const accountDetailSchema = z.object({
+  clientId: uuidSchema,
+  clientName: z.string(),
+  balance: z.number(),
+  aging: accountAgingSchema,
+  movements: z.array(accountMovementSchema),
+  warnings: z.array(z.string()),
+});
+export type AccountDetail = z.infer<typeof accountDetailSchema>;
+
+export const registerPaymentInputSchema = z.object({
+  clientId: uuidSchema,
+  amount: z.number().positive('El cobro tiene que ser mayor a 0'),
+  occurredAt: isoDateTimeSchema.optional(),
+  method: z.string().max(40).optional(),
+  notes: z.string().max(1000).optional(),
+});
+export type RegisterPaymentInput = z.infer<typeof registerPaymentInputSchema>;
+
+// --- Devoluciones / Nota de crédito ---
+export const creditNoteSchema = z.object({
+  id: uuidSchema,
+  code: z.string(),
+  salesOrderId: uuidSchema,
+  clientId: uuidSchema,
+  lines: z.array(salesOrderLineSchema),
+  total: z.number().nonnegative(),
+  createdById: uuidSchema,
+  createdAt: isoDateTimeSchema,
+});
+export type CreditNote = z.infer<typeof creditNoteSchema>;
+
+export const createReturnInputSchema = z.object({
   lines: z
     .array(
       z.object({
@@ -76,25 +153,7 @@ export const createSalesOrderInputSchema = z.object({
         quantity: z.number().positive('La cantidad tiene que ser mayor a 0'),
       }),
     )
-    .min(1, 'Cargá al menos un ítem'),
-  discountPercent: z.number().min(0).max(100).default(0).optional(),
+    .min(1, 'Cargá al menos un ítem a devolver'),
   notes: z.string().max(1000).optional(),
 });
-export type CreateSalesOrderInput = z.infer<typeof createSalesOrderInputSchema>;
-
-export const createPriceListInputSchema = z.object({
-  name: z.string().min(1).max(120),
-  description: z.string().max(500).optional(),
-  clientType: z.enum(['minorista', 'mayorista', 'distribuidor']),
-  validFrom: isoDateTimeSchema.optional(),
-  validTo: isoDateTimeSchema.optional(),
-  items: z
-    .array(
-      z.object({
-        productId: uuidSchema,
-        unitPrice: z.number().nonnegative(),
-      }),
-    )
-    .default([]),
-});
-export type CreatePriceListInput = z.infer<typeof createPriceListInputSchema>;
+export type CreateReturnInput = z.infer<typeof createReturnInputSchema>;

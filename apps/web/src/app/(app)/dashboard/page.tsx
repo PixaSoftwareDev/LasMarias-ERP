@@ -1,103 +1,344 @@
 'use client';
 
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Factory, Milk, Receipt, ShoppingCart, Wallet } from 'lucide-react';
+import {
+  Banknote,
+  CalendarClock,
+  CheckCircle2,
+  ChevronRight,
+  Package,
+  PackageX,
+  ShoppingCart,
+  TrendingUp,
+  TriangleAlert,
+  Wallet,
+  type LucideIcon,
+} from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
-import { api } from '@/lib/api-client';
+import { MonthCalendar } from '@/components/month-calendar';
+import { useAuth } from '@/hooks/use-auth';
+import { homeApi, inventoryApi, salesApi } from '@/features/api';
+import type { HomeCalendarEvent, StockSummary, AccountBalance } from '@lasmarias/shared-schemas';
 
-interface DashboardData {
-  milkReceivedTodayLiters: number;
-  receptionsToday: number;
-  productionsClosedToday: number;
-  ordersTakenToday: number;
-  openInvoicesCount: number;
-  openInvoicesAmount: number;
-  stockAlerts: number;
+// Home "Centro de comando" (CLAUDE.md §5.3 / §5.4): panel administrativo denso
+// y ordenado. Izquierda (2/3): saludo + KPIs en chips + "Para resolver" (lo
+// accionable). Derecha (1/3): mini calendario + "Próximos".
+
+const money = (n: number) =>
+  `$${n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+const num = (n: number) => n.toLocaleString('es-AR');
+
+function currentMonthKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-// Tonos de los chips de ícono — paleta de marca (esmeralda + azul) + semánticos.
-// Clases literales para que Tailwind no las purgue.
-const TONES = {
-  emerald: 'bg-primary-50 text-primary-700',
-  navy: 'bg-secondary-50 text-secondary-700',
-  amber: 'bg-amber-50 text-amber-600',
-  red: 'bg-red-50 text-red-600',
-} as const;
-type Tone = keyof typeof TONES;
+// Fecha relativa en lenguaje claro: "hoy", "mañana", "en 2 días", "hace 1 día".
+function relativeDate(dateStr: string): string {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(`${dateStr}T00:00:00`);
+  const diff = Math.round((target.getTime() - today.getTime()) / 86_400_000);
+  if (diff === 0) return 'hoy';
+  if (diff === 1) return 'mañana';
+  if (diff === -1) return 'ayer';
+  if (diff > 1) return `en ${diff} días`;
+  return `hace ${Math.abs(diff)} días`;
+}
 
+// ─── KPIs compactos (chips que envuelven) ────────────────────────────────────
+interface Kpi {
+  href: string;
+  label: string;
+  value: string;
+  icon: LucideIcon;
+  tone: 'primary' | 'amber' | 'secondary' | 'danger';
+}
+
+const KPI_TONE: Record<Kpi['tone'], string> = {
+  primary: 'bg-primary-50 text-primary-700',
+  amber: 'bg-amber-50 text-amber-700',
+  secondary: 'bg-secondary-50 text-secondary-700',
+  danger: 'bg-red-50 text-red-700',
+};
+
+function KpiChip({ kpi }: { kpi: Kpi }) {
+  const Icon = kpi.icon;
+  return (
+    <Link
+      href={kpi.href}
+      className="group flex min-w-[11rem] flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm transition-all hover:border-primary-300 hover:shadow-md"
+    >
+      <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${KPI_TONE[kpi.tone]}`}>
+        <Icon className="h-4 w-4" aria-hidden="true" />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-[11px] uppercase tracking-wide text-foreground-muted">{kpi.label}</span>
+        <span className="block font-display text-lg font-bold tracking-tight text-foreground">{kpi.value}</span>
+      </span>
+    </Link>
+  );
+}
+
+function KpiChipSkeleton() {
+  return <div className="h-[60px] min-w-[11rem] flex-1 animate-pulse rounded-lg bg-surface-subtle" />;
+}
+
+// ─── "Para resolver" — fila accionable ───────────────────────────────────────
+type Severity = 'danger' | 'warning';
+
+interface Pending {
+  key: string;
+  severity: Severity;
+  icon: LucideIcon;
+  text: string;
+  href: string;
+}
+
+const SEVERITY_RANK: Record<Severity, number> = { danger: 0, warning: 1 };
+
+const PENDING_ICON_STYLE: Record<Severity, string> = {
+  danger: 'bg-red-50 text-red-700',
+  warning: 'bg-amber-50 text-amber-700',
+};
+
+function buildPending(stock: StockSummary[] | undefined, accounts: AccountBalance[] | undefined): Pending[] {
+  const items: Pending[] = [];
+
+  for (const it of stock ?? []) {
+    if (it.alertLevel === 'critical' || it.alertLevel === 'expiring') {
+      items.push({
+        key: `vto-${it.productId}`,
+        severity: it.alertLevel === 'critical' ? 'danger' : 'warning',
+        icon: PackageX,
+        text: `Lote por vencer: ${it.productName}`,
+        href: '/inventario',
+      });
+    } else if (it.alertLevel === 'low') {
+      items.push({
+        key: `low-${it.productId}`,
+        severity: 'warning',
+        icon: Package,
+        text: `Stock bajo de ${it.productName}`,
+        href: '/inventario',
+      });
+    }
+  }
+
+  for (const acc of accounts ?? []) {
+    if (acc.balance > 0) {
+      items.push({
+        key: `deuda-${acc.clientId}`,
+        severity: 'danger',
+        icon: Banknote,
+        text: `${acc.clientName} debe ${money(acc.balance)}`,
+        href: '/cuentas',
+      });
+    }
+  }
+
+  return items.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
+}
+
+function PendingRow({ item }: { item: Pending }) {
+  const Icon = item.icon;
+  return (
+    <Link
+      href={item.href}
+      className="group flex items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-3 py-2.5 transition-colors hover:border-primary-300 hover:bg-surface-subtle/40"
+    >
+      <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${PENDING_ICON_STYLE[item.severity]}`}>
+        <Icon className="h-4 w-4" aria-hidden="true" />
+      </span>
+      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{item.text}</span>
+      <ChevronRight className="h-4 w-4 flex-shrink-0 text-foreground-muted transition-colors group-hover:text-foreground" aria-hidden="true" />
+    </Link>
+  );
+}
+
+function PendingRowSkeleton() {
+  return <div className="h-12 animate-pulse rounded-lg bg-surface-subtle" />;
+}
+
+// ─── "Próximos" — eventos cronológicos cercanos ──────────────────────────────
+const EVENT_DOT: Record<HomeCalendarEvent['type'], string> = {
+  cobro: 'bg-amber-500',
+  vencimiento_lote: 'bg-red-500',
+  despacho: 'bg-secondary-500',
+};
+
+function nextEvents(events: HomeCalendarEvent[] | undefined): HomeCalendarEvent[] {
+  if (!events) return [];
+  // Fecha de hoy YYYY-MM-DD para filtrar eventos pasados.
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return [...events]
+    .filter((e) => e.date >= today)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 5);
+}
+
+function UpcomingRow({ ev }: { ev: HomeCalendarEvent }) {
+  return (
+    <li className="flex items-center gap-2.5 py-1.5">
+      <span className={`h-2 w-2 flex-shrink-0 rounded-full ${EVENT_DOT[ev.type]}`} aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{ev.label}</span>
+      <span className="flex-shrink-0 text-xs text-foreground-muted">{relativeDate(ev.date)}</span>
+    </li>
+  );
+}
+
+// ─── Página ──────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const { data, isLoading } = useQuery({
-    queryKey: ['dashboard'],
-    queryFn: () => api<DashboardData>('/api/reports/dashboard'),
-    refetchInterval: 60_000,
+  const { user } = useAuth();
+  const [month, setMonth] = useState(currentMonthKey);
+
+  const summaryQuery = useQuery({ queryKey: ['home', 'summary'], queryFn: () => homeApi.summary() });
+  const calendarQuery = useQuery({
+    queryKey: ['home', 'calendar', month],
+    queryFn: () => homeApi.calendar(month),
   });
+  const stockQuery = useQuery({ queryKey: ['inventory', 'stock'], queryFn: () => inventoryApi.stock() });
+  const accountsQuery = useQuery({ queryKey: ['sales', 'accounts'], queryFn: () => salesApi.accounts() });
 
-  const kpis: { label: string; value: string | number; unit: string; icon: typeof Milk; tone: Tone }[] = [
-    { label: 'Leche recibida hoy', value: data ? data.milkReceivedTodayLiters.toLocaleString('es-AR', { maximumFractionDigits: 0 }) : '—', unit: 'litros', icon: Milk, tone: 'emerald' },
-    { label: 'Recepciones del día', value: data ? data.receptionsToday : '—', unit: '', icon: Milk, tone: 'navy' },
-    { label: 'Producciones cerradas', value: data ? data.productionsClosedToday : '—', unit: 'hoy', icon: Factory, tone: 'emerald' },
-    { label: 'Pedidos tomados', value: data ? data.ordersTakenToday : '—', unit: 'hoy', icon: ShoppingCart, tone: 'navy' },
-    { label: 'A cobrar', value: data ? `$${data.openInvoicesAmount.toLocaleString('es-AR', { maximumFractionDigits: 0 })}` : '—', unit: `(${data?.openInvoicesCount ?? 0} comprobantes)`, icon: Wallet, tone: 'amber' },
-    { label: 'Alertas de stock', value: data ? data.stockAlerts : '—', unit: '', icon: AlertTriangle, tone: data && data.stockAlerts > 0 ? 'red' : 'emerald' },
-  ];
+  const s = summaryQuery.data;
+  const kpis: Kpi[] = s
+    ? [
+        { href: '/cuentas', label: 'A cobrar', value: money(s.saldoTotalPorCobrar), icon: Wallet, tone: 'danger' },
+        { href: '/caja', label: 'Caja del mes', value: money(s.cajaNetaMes), icon: Banknote, tone: s.cajaNetaMes < 0 ? 'danger' : 'primary' },
+        { href: '/ventas', label: 'Ventas del mes', value: money(s.ventasMes), icon: TrendingUp, tone: 'primary' },
+        { href: '/ventas', label: 'Despachos hoy', value: num(s.despachosHoy), icon: ShoppingCart, tone: 'secondary' },
+        { href: '/inventario', label: 'Lotes por vencer', value: num(s.lotesPorVencer), icon: TriangleAlert, tone: s.lotesPorVencer > 0 ? 'amber' : 'primary' },
+      ]
+    : [];
 
-  const shortcuts = [
-    { href: '/recepciones/nueva', label: 'Nueva recepción', icon: Milk },
-    { href: '/produccion', label: 'Producción', icon: Factory },
-    { href: '/ventas/nuevo', label: 'Nuevo pedido', icon: ShoppingCart },
-    { href: '/comprobantes', label: 'Comprobantes', icon: Receipt },
-  ];
+  const pending = useMemo(
+    () => buildPending(stockQuery.data, accountsQuery.data),
+    [stockQuery.data, accountsQuery.data],
+  );
+  const pendingLoading = stockQuery.isLoading || accountsQuery.isLoading;
+  const pendingError = stockQuery.isError && accountsQuery.isError;
+
+  const upcoming = useMemo(() => nextEvents(calendarQuery.data?.events), [calendarQuery.data]);
+
+  const firstName = user?.fullName?.trim().split(' ')[0] ?? '';
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-8 p-4 sm:p-6">
-      <PageHeader title="Inicio" description="Vista general de la planta hoy." />
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title={firstName ? `Hola, ${firstName}` : 'Inicio'}
+        description="Tu centro de comando: todo lo de hoy y lo que hay que resolver, a la vista."
+      />
 
-      <section aria-label="Indicadores" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {kpis.map((k) => {
-          const Icon = k.icon;
-          return (
-            <div
-              key={k.label}
-              className="rounded-lg border border-border-subtle bg-surface-elevated p-5 shadow-sm transition-shadow hover:shadow-md"
-            >
-              <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${TONES[k.tone]}`}>
-                <Icon className="h-5 w-5" aria-hidden="true" />
-              </div>
-              <p className="mt-4 text-sm font-medium text-foreground-muted">{k.label}</p>
-              {isLoading ? (
-                <span className="mt-2 inline-block h-8 w-24 animate-pulse rounded bg-surface-subtle" />
-              ) : (
-                <p className="mt-1 font-display text-3xl font-bold tracking-tight text-foreground">
-                  {k.value}
-                  {k.unit && <span className="ml-1.5 text-sm font-medium text-foreground-subtle">{k.unit}</span>}
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </section>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* ── Columna principal ── */}
+        <div className="flex flex-col gap-6 lg:col-span-2">
+          {/* KPIs compactos (chips que envuelven). */}
+          <section aria-label="Indicadores" className="flex flex-wrap gap-3">
+            {summaryQuery.isLoading ? (
+              Array.from({ length: 5 }, (_, i) => <KpiChipSkeleton key={i} />)
+            ) : summaryQuery.isError || !s ? (
+              <Card className="w-full">
+                <CardContent className="py-5 text-center text-sm text-danger">
+                  No se pudieron cargar los indicadores. Probá de nuevo en un momento.
+                </CardContent>
+              </Card>
+            ) : (
+              kpis.map((kpi) => <KpiChip key={kpi.label} kpi={kpi} />)
+            )}
+          </section>
 
-      <section aria-label="Accesos rápidos">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-foreground-muted">Accesos rápidos</h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {shortcuts.map((s) => {
-            const Icon = s.icon;
-            return (
-              <Link
-                key={s.href}
-                href={s.href}
-                className="group flex items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated p-4 shadow-sm transition-all hover:border-primary-300 hover:shadow-md"
-              >
-                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-700 transition-colors group-hover:bg-primary-600 group-hover:text-white">
-                  <Icon className="h-5 w-5" aria-hidden="true" />
+          {/* Para resolver. */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-xl">
+                <TriangleAlert className="h-5 w-5 text-amber-600" aria-hidden="true" />
+                Para resolver
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {pendingLoading ? (
+                <div className="flex flex-col gap-2">
+                  {Array.from({ length: 4 }, (_, i) => (
+                    <PendingRowSkeleton key={i} />
+                  ))}
                 </div>
-                <span className="text-sm font-medium text-foreground">{s.label}</span>
-              </Link>
-            );
-          })}
+              ) : pendingError ? (
+                <p className="py-4 text-center text-sm text-danger">
+                  No se pudieron cargar los pendientes. Probá de nuevo en un momento.
+                </p>
+              ) : pending.length === 0 ? (
+                <EmptyState
+                  icon={CheckCircle2}
+                  title="Todo en orden"
+                  description="No hay pendientes urgentes. Stock sano y cuentas al día."
+                  className="py-8"
+                />
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {pending.map((item) => (
+                    <PendingRow key={item.key} item={item} />
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
-      </section>
+
+        {/* ── Columna lateral (angosta) ── */}
+        <aside className="flex flex-col gap-6">
+          {/* Mini calendario. */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <CalendarClock className="h-4 w-4 text-primary-700" aria-hidden="true" />
+                Calendario
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {calendarQuery.isError ? (
+                <p className="py-4 text-center text-sm text-danger">No se pudo cargar el calendario.</p>
+              ) : (
+                <MonthCalendar
+                  compact
+                  month={month}
+                  onMonthChange={setMonth}
+                  events={calendarQuery.data?.events ?? []}
+                  loading={calendarQuery.isLoading || calendarQuery.isFetching}
+                />
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Próximos. */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Próximos</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {calendarQuery.isLoading ? (
+                <div className="flex flex-col gap-2">
+                  {Array.from({ length: 4 }, (_, i) => (
+                    <div key={i} className="h-7 animate-pulse rounded bg-surface-subtle" />
+                  ))}
+                </div>
+              ) : upcoming.length === 0 ? (
+                <p className="py-2 text-sm text-foreground-muted">No hay eventos próximos este mes.</p>
+              ) : (
+                <ul className="divide-y divide-border-subtle">
+                  {upcoming.map((ev, i) => (
+                    <UpcomingRow key={`${ev.refId ?? 'x'}-${i}`} ev={ev} />
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </aside>
+      </div>
     </div>
   );
 }

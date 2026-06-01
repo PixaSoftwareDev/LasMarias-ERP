@@ -1,51 +1,62 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { z } from 'zod';
 import {
-  createPriceListInputSchema,
+  Body,
+  Controller,
+  Get,
+  Header,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+  Query,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
+import type { Response } from 'express';
+import {
+  clientTypeSchema,
+  createReturnInputSchema,
   createSalesOrderInputSchema,
-  salesOrderStatusSchema,
-  type CreatePriceListInput,
+  registerPaymentInputSchema,
+  upsertPriceListInputSchema,
+  type CreateReturnInput,
   type CreateSalesOrderInput,
+  type RegisterPaymentInput,
+  type UpsertPriceListInput,
 } from '@lasmarias/shared-schemas';
+import { z } from 'zod';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, type JwtUserPayload } from '../common/decorators/current-user.decorator';
 import { SalesService } from './sales.service';
+import { PricingService } from './pricing.service';
+import { AccountsService } from './accounts.service';
 
-const updateStatusSchema = z.object({ status: salesOrderStatusSchema });
+const clientTypeQuerySchema = z.object({ clientType: clientTypeSchema });
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('sales')
 export class SalesController {
-  constructor(private readonly sales: SalesService) {}
-
-  @Get('price-lists')
-  @Roles('admin', 'gerente', 'vendedor')
-  listPriceLists() {
-    return this.sales.listPriceLists();
-  }
-
-  @Post('price-lists')
-  @Roles('admin', 'gerente')
-  createPriceList(@Body(new ZodValidationPipe(createPriceListInputSchema)) body: CreatePriceListInput) {
-    return this.sales.createPriceList(body);
-  }
+  constructor(
+    private readonly sales: SalesService,
+    private readonly pricing: PricingService,
+    private readonly accounts: AccountsService,
+  ) {}
 
   @Get('orders')
-  @Roles('admin', 'gerente', 'vendedor', 'repartidor')
-  listOrders(@Query('deliveryDate') deliveryDate?: string) {
-    if (deliveryDate) return this.sales.listOrdersByDeliveryDate(deliveryDate);
+  @Roles('admin', 'gerente', 'vendedor')
+  listOrders() {
     return this.sales.listOrders();
   }
 
   @Get('orders/:id')
-  @Roles('admin', 'gerente', 'vendedor', 'repartidor')
+  @Roles('admin', 'gerente', 'vendedor')
   getOrder(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.sales.getOrder(id);
   }
 
+  // Crear un despacho: precio a mano por línea, baja stock + cargo en cuenta corriente.
   @Post('orders')
   @Roles('admin', 'gerente', 'vendedor')
   createOrder(
@@ -55,19 +66,64 @@ export class SalesController {
     return this.sales.createOrder(body, user.sub);
   }
 
-  // Cotización en vivo (precios + total) sin crear el pedido.
-  @Post('orders/quote')
-  @Roles('admin', 'gerente', 'vendedor')
-  quoteOrder(@Body(new ZodValidationPipe(createSalesOrderInputSchema)) body: CreateSalesOrderInput) {
-    return this.sales.quoteOrder(body);
+  // Devolución de un despacho → nota de crédito + reposición de stock.
+  @Post('orders/:id/returns')
+  @Roles('admin', 'gerente')
+  createReturn(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(createReturnInputSchema)) body: CreateReturnInput,
+    @CurrentUser() user: JwtUserPayload,
+  ) {
+    return this.sales.createReturn(id, body, user.sub);
   }
 
-  @Patch('orders/:id/status')
-  @Roles('admin', 'gerente', 'vendedor', 'repartidor')
-  updateStatus(
-    @Param('id', new ParseUUIDPipe()) id: string,
-    @Body(new ZodValidationPipe(updateStatusSchema)) body: { status: 'taken' | 'confirmed' | 'prepared' | 'loaded' | 'in_delivery' | 'delivered' | 'cancelled' },
+  // --- Listas de precio por tipo de cliente ---
+  @Get('price-list')
+  @Roles('admin', 'gerente', 'vendedor')
+  priceList(
+    @Query(new ZodValidationPipe(clientTypeQuerySchema))
+    q: { clientType: 'minorista' | 'mayorista' | 'distribuidor' },
   ) {
-    return this.sales.updateStatus(id, body.status);
+    return this.pricing.listByClientType(q.clientType);
+  }
+
+  @Put('price-list')
+  @Roles('admin', 'gerente')
+  upsertPriceList(
+    @Body(new ZodValidationPipe(upsertPriceListInputSchema)) body: UpsertPriceListInput,
+  ) {
+    return this.pricing.upsert(body);
+  }
+
+  // --- Cuenta corriente ---
+  @Get('accounts')
+  @Roles('admin', 'gerente', 'vendedor')
+  accountsList() {
+    return this.accounts.listBalances();
+  }
+
+  @Get('accounts/:clientId')
+  @Roles('admin', 'gerente', 'vendedor')
+  accountDetail(@Param('clientId', new ParseUUIDPipe()) clientId: string) {
+    return this.accounts.getDetail(clientId);
+  }
+
+  @Post('payments')
+  @Roles('admin', 'gerente', 'vendedor')
+  registerPayment(
+    @Body(new ZodValidationPipe(registerPaymentInputSchema)) body: RegisterPaymentInput,
+    @CurrentUser() user: JwtUserPayload,
+  ) {
+    return this.accounts.registerPayment(body, user.sub);
+  }
+
+  // --- Export CSV ---
+  @Get('export/accounts.csv')
+  @Roles('admin', 'gerente')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="cuentas-corrientes.csv"')
+  async exportAccounts(@Res() res: Response) {
+    const csv = await this.accounts.exportBalancesCsv();
+    res.send(csv);
   }
 }

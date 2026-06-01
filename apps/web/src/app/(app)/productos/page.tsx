@@ -1,17 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus } from 'lucide-react';
-import { createProductInputSchema, type CreateProductInput } from '@lasmarias/shared-schemas';
+import Link from 'next/link';
+import { ArrowLeft, Pencil, Plus, Power } from 'lucide-react';
+import { createProductInputSchema, type CreateProductInput, type Product } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/data-table';
+import { RowActions } from '@/components/ui/row-actions';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { productsApi } from '@/features/api';
@@ -20,6 +22,7 @@ import { ApiError } from '@/lib/api-client';
 export default function ProductsPage() {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<Product | null>(null);
 
   const { data = [], isLoading } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
 
@@ -29,25 +32,61 @@ export default function ProductsPage() {
     defaultValues: { category: 'queso', unit: 'kg', trackBatches: true },
   });
 
-  const create = useMutation({
-    mutationFn: (i: CreateProductInput) => productsApi.create(i),
+  // Precarga del form al pasar a modo edición.
+  useEffect(() => {
+    if (editing) {
+      form.reset({
+        sku: editing.sku,
+        name: editing.name,
+        description: editing.description,
+        category: editing.category,
+        unit: editing.unit,
+        trackBatches: editing.trackBatches,
+        minStockLevel: editing.minStockLevel,
+      });
+    }
+  }, [editing, form]);
+
+  function closeForm() {
+    setShowForm(false);
+    setEditing(null);
+    form.reset({ category: 'queso', unit: 'kg', trackBatches: true });
+  }
+
+  const save = useMutation({
+    mutationFn: (i: CreateProductInput) =>
+      editing ? productsApi.update(editing.id, i) : productsApi.create(i),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
-      toast.success('Producto creado');
-      form.reset();
-      setShowForm(false);
+      toast.success(editing ? 'Producto actualizado' : 'Producto creado');
+      closeForm();
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al crear'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al guardar'),
   });
 
+  const toggleActive = useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) => productsApi.update(id, { isActive }),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      toast.success(vars.isActive ? 'Producto activado' : 'Producto desactivado');
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al actualizar'),
+  });
+
+  function onDeactivate(p: Product) {
+    if (!window.confirm(`¿Desactivar "${p.name}"? Dejará de aparecer para usarse en nuevas operaciones.`)) return;
+    toggleActive.mutate({ id: p.id, isActive: false });
+  }
+
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 p-4 sm:p-6">
+    <div className="flex flex-col gap-6">
+      <Button asChild variant="ghost" size="sm" className="self-start">
+        <Link href="/admin"><ArrowLeft className="h-4 w-4" /> Datos maestros</Link>
+      </Button>
       <PageHeader
         title="Productos"
-        description="Catálogo de productos terminados, materias primas e insumos."
-        breadcrumbs={[{ href: '/dashboard', label: 'Inicio' }, { label: 'Productos' }]}
-        action={
-          <Button onClick={() => setShowForm((s) => !s)}>
+        description="Catálogo de productos terminados, materias primas e insumos."        action={
+          <Button onClick={() => (showForm ? closeForm() : setShowForm(true))}>
             <Plus className="h-4 w-4" /> {showForm ? 'Cerrar' : 'Nuevo producto'}
           </Button>
         }
@@ -55,9 +94,9 @@ export default function ProductsPage() {
 
       {showForm && (
         <Card>
-          <CardHeader><CardTitle>Nuevo producto</CardTitle></CardHeader>
+          <CardHeader><CardTitle>{editing ? 'Editar producto' : 'Nuevo producto'}</CardTitle></CardHeader>
           <CardContent>
-            <form onSubmit={form.handleSubmit((v) => create.mutateAsync(v))} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <form onSubmit={form.handleSubmit((v) => save.mutateAsync(v))} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="SKU" htmlFor="sku" required error={form.formState.errors.sku?.message}>
                 <Input placeholder="QC-001" {...form.register('sku')} />
               </Field>
@@ -67,6 +106,7 @@ export default function ProductsPage() {
               <Field label="Categoría" htmlFor="category" required error={form.formState.errors.category?.message}>
                 <select id="category" className="min-h-touch w-full rounded-md border border-border px-3" {...form.register('category')}>
                   <option value="queso">Queso</option>
+                  <option value="intermedio">Masa (intermedio)</option>
                   <option value="subproducto">Subproducto</option>
                   <option value="materia_prima">Materia prima</option>
                   <option value="envase">Envase</option>
@@ -80,13 +120,23 @@ export default function ProductsPage() {
                   <option value="unidad">unidad</option>
                 </select>
               </Field>
+              <Field label="Stock mínimo" htmlFor="minStockLevel" error={form.formState.errors.minStockLevel?.message} hint="Opcional. Avisa cuando el stock baja de este valor (útil en insumos, envases y materia prima).">
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min={0}
+                  placeholder="Ej: 50"
+                  {...form.register('minStockLevel', { setValueAs: (v) => (v === '' || v === null || Number.isNaN(Number(v)) ? undefined : Number(v)) })}
+                />
+              </Field>
               <label className="flex items-center gap-2 sm:col-span-2">
-                <input type="checkbox" className="h-5 w-5" defaultChecked {...form.register('trackBatches')} />
+                <input type="checkbox" className="h-5 w-5" {...form.register('trackBatches')} />
                 <span className="text-sm">Trabajar por lote (trazabilidad)</span>
               </label>
               <div className="flex justify-end gap-2 sm:col-span-2">
-                <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>Cancelar</Button>
-                <Button type="submit" loading={create.isPending}>Guardar</Button>
+                <Button type="button" variant="ghost" onClick={closeForm}>Cancelar</Button>
+                <Button type="submit" loading={save.isPending}>Guardar</Button>
               </div>
             </form>
           </CardContent>
@@ -107,6 +157,17 @@ export default function ProductsPage() {
             { key: 'unit', header: 'Unidad', render: (p) => p.unit },
             { key: 'status', header: 'Estado', render: (p) => (
               <StatusBadge status={p.isActive ? 'success' : 'neutral'}>{p.isActive ? 'Activo' : 'Inactivo'}</StatusBadge>
+            )},
+            { key: 'actions', header: '', align: 'right', render: (p) => (
+              <RowActions
+                label={`Acciones de ${p.name}`}
+                actions={[
+                  { label: 'Editar', icon: Pencil, onClick: () => { setEditing(p); setShowForm(true); } },
+                  p.isActive
+                    ? { label: 'Desactivar', icon: Power, onClick: () => onDeactivate(p), destructive: true }
+                    : { label: 'Activar', icon: Power, onClick: () => toggleActive.mutate({ id: p.id, isActive: true }) },
+                ]}
+              />
             )},
           ]}
         />

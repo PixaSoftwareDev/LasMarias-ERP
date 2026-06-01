@@ -8,6 +8,7 @@ export type ProductUnit = z.infer<typeof productUnitSchema>;
 
 export const productCategorySchema = z.enum([
   'queso',
+  'intermedio',   // masa — producto en proceso que es stock y luego se elabora (ej: mozzarella)
   'subproducto',  // ricota, suero
   'materia_prima',
   'envase',
@@ -23,6 +24,8 @@ export const productSchema = z.object({
   category: productCategorySchema,
   unit: productUnitSchema,
   trackBatches: z.boolean(), // ¿se trabaja por lote?
+  // Stock mínimo: cuando el stock total cae a este valor o menos, se alerta (CLAUDE.md §4.4).
+  minStockLevel: z.number().nonnegative().optional(),
   isActive: z.boolean(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,

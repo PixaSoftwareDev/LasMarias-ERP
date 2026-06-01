@@ -27,8 +27,10 @@ import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/page-header';
 import { receptionsApi, producersApi } from '@/features/receptions/api';
+import { inventoryApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { evaluateQuality } from '@/lib/milk-quality';
+import { cn } from '@/lib/utils';
 
 // Pantalla de nueva recepción. CLAUDE.md §5.3:
 // - Una columna en mobile, dos en desktop.
@@ -52,6 +54,11 @@ export default function NewReceptionPage() {
   const producersQuery = useQuery({
     queryKey: ['producers'],
     queryFn: () => producersApi.list(),
+  });
+
+  const warehousesQuery = useQuery({
+    queryKey: ['warehouses'],
+    queryFn: () => inventoryApi.listWarehouses(),
   });
 
   const {
@@ -92,6 +99,7 @@ export default function NewReceptionPage() {
   });
 
   const producerOptions = useMemo(() => producersQuery.data ?? [], [producersQuery.data]);
+  const warehouseOptions = useMemo(() => warehousesQuery.data ?? [], [warehousesQuery.data]);
 
   const defaultDateTime = useMemo(() => nowLocalInput(), []);
 
@@ -100,8 +108,20 @@ export default function NewReceptionPage() {
   const qualityIssues = evaluateQuality(quality ?? {});
   const hasQualityData = !!quality && Object.values(quality).some((v) => v !== undefined && v !== null);
 
+  // Diferencia de litros EN VIVO: recibidos − declarados (sólo cuando ambos están cargados).
+  const litersDiffTolerance = 5; // L: hasta acá lo tratamos como diferencia menor (ámbar), más es rojo.
+  const watchedLiters = watch('liters');
+  const watchedDeclared = watch('declaredLiters');
+  const litersDiff =
+    typeof watchedLiters === 'number' &&
+    !Number.isNaN(watchedLiters) &&
+    typeof watchedDeclared === 'number' &&
+    !Number.isNaN(watchedDeclared)
+      ? watchedLiters - watchedDeclared
+      : null;
+
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6 p-4 pb-32 sm:p-6">
+    <div className="flex flex-col gap-6 pb-32">
       {savedCode && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-primary-600 px-6 text-center text-white">
           <CheckCircle2 className="h-24 w-24" aria-hidden="true" />
@@ -112,11 +132,6 @@ export default function NewReceptionPage() {
       <PageHeader
         title="Nueva recepción de leche"
         description="Cargá los datos de este ingreso. El sistema genera el código de lote automáticamente."
-        breadcrumbs={[
-          { href: '/dashboard', label: 'Inicio' },
-          { href: '/recepciones', label: 'Recepción de leche' },
-          { label: 'Nueva' },
-        ]}
         action={
           <Button asChild variant="ghost" size="sm">
             <Link href="/recepciones">
@@ -175,6 +190,46 @@ export default function NewReceptionPage() {
               </select>
             </Field>
 
+            <Field
+              label="Cámara / sector destino"
+              htmlFor="warehouseId"
+              error={errors.warehouseId?.message}
+              hint="Opcional — dónde se guarda el lote de leche cruda"
+            >
+              <select
+                id="warehouseId"
+                className="flex min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                {...register('warehouseId', { setValueAs: (v) => (v === '' || v == null ? undefined : v) })}
+              >
+                <option value="">Sin asignar</option>
+                {warehouseOptions.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="N° de remito" htmlFor="remito" error={errors.remito?.message}>
+              <Input placeholder="Ej: 0001-00012345" {...register('remito')} />
+            </Field>
+
+            <Field
+              label="Litros declarados (remito)"
+              htmlFor="declaredLiters"
+              error={errors.declaredLiters?.message}
+              hint="Lo que dice el papel del transporte"
+            >
+              <Input
+                type="number"
+                inputMode="decimal"
+                step="0.1"
+                min={0}
+                placeholder="Ej: 1200"
+                {...register('declaredLiters', { setValueAs: (v) => (v === '' || Number.isNaN(Number(v)) ? undefined : Number(v)) })}
+              />
+            </Field>
+
             <Field label="Litros recibidos" htmlFor="liters" required error={errors.liters?.message}>
               <Input
                 type="number"
@@ -186,13 +241,34 @@ export default function NewReceptionPage() {
               />
             </Field>
 
-            <Field label="Patente del vehículo" htmlFor="vehiclePlate" error={errors.vehiclePlate?.message}>
-              <Input placeholder="AB123CD" {...register('vehiclePlate')} />
-            </Field>
+            {/* Diferencia de litros EN VIVO (CLAUDE.md §5.1 — avisar antes de guardar). */}
+            <div className="flex flex-col justify-end">
+              <p className="mb-1.5 text-sm font-medium text-foreground">Diferencia de litros</p>
+              {litersDiff === null ? (
+                <p className="flex min-h-touch items-center text-sm text-foreground-muted">
+                  Cargá litros recibidos y declarados para verla.
+                </p>
+              ) : (
+                <p
+                  className={cn(
+                    'flex min-h-touch items-center gap-1.5 text-base font-semibold',
+                    litersDiff === 0 && 'text-foreground-muted',
+                    litersDiff !== 0 && Math.abs(litersDiff) <= litersDiffTolerance && 'text-amber-600',
+                    Math.abs(litersDiff) > litersDiffTolerance && 'text-red-600',
+                  )}
+                >
+                  {litersDiff !== 0 && (
+                    <AlertTriangle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                  )}
+                  {litersDiff > 0 ? '+' : ''}
+                  {litersDiff.toLocaleString('es-AR', { maximumFractionDigits: 1 })} L
+                  <span className="text-sm font-normal text-foreground-muted">
+                    {litersDiff === 0 ? '(coincide con el remito)' : '(recibido − declarado)'}
+                  </span>
+                </p>
+              )}
+            </div>
 
-            <Field label="Conductor" htmlFor="driverName" error={errors.driverName?.message} className="sm:col-span-2">
-              <Input placeholder="Nombre y apellido" {...register('driverName')} />
-            </Field>
           </CardContent>
         </Card>
 
@@ -221,6 +297,16 @@ export default function NewReceptionPage() {
                 step="0.01"
                 placeholder="6.5 – 6.9"
                 {...register('quality.ph', { setValueAs: (v) => (v === '' || Number.isNaN(v) ? undefined : Number(v)) })}
+              />
+            </Field>
+
+            <Field label="Acidez (°Dornic)" htmlFor="acidityDornic" error={errors.quality?.acidityDornic?.message}>
+              <Input
+                type="number"
+                inputMode="decimal"
+                step="0.1"
+                placeholder="Ej: 16"
+                {...register('quality.acidityDornic', { setValueAs: (v) => (v === '' || Number.isNaN(v) ? undefined : Number(v)) })}
               />
             </Field>
 
@@ -314,7 +400,7 @@ export default function NewReceptionPage() {
 
       {/* Sticky save bar — CLAUDE.md §5.3 */}
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border-subtle bg-surface-elevated/95 backdrop-blur md:left-64">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <p className="hidden text-sm text-foreground-muted sm:block">
             {isValid ? (
               <span className="flex items-center gap-1.5">

@@ -13,7 +13,12 @@ import { RecipesService } from '../recipes/recipes.service';
 import { BatchEntity } from '../batches/batch.entity';
 import { InventoryMovementEntity } from '../inventory/inventory-movement.entity';
 import { computeByproducts, computeIngredients, computeYield } from '../recipes/yield-calculator';
-import { computeProductionCost } from './cost-calculator';
+import {
+  computeElaborationCost,
+  computeElaborationVariance,
+  type IngredientCost,
+  type PrimaryInput,
+} from './elaboration-cost';
 import { UsersService } from '../users/users.service';
 
 @Injectable()
@@ -142,16 +147,22 @@ export class ProductionService {
       const recipe = order.recipe;
       const version = order.recipeVersion;
 
-      // Descontar leche de los lotes
-      let totalMilkCost = 0; // sin precio de referencia por lote — se queda en 0 hasta que se integre liquidación
+      // --- 1. Descontar la materia prima principal (leche o masa) y recolectar su costo ---
+      // primaryInputs alimenta la calculadora: cada lote consumido con su costo unitario.
+      // En leche→masa son litros de leche ($/litro); en masa→mozzarella son kg de masa
+      // ($/kg) heredados del cierre de la orden anterior vía batch.unitCost.
+      const primaryInputs: PrimaryInput[] = [];
       for (const mi of order.milkInputs) {
         const batch = await manager.getRepository(BatchEntity).findOneByOrFail({ id: mi.batchId });
+        primaryInputs.push({
+          name: batch.code,
+          quantity: String(mi.liters),
+          unitCost: batch.unitCost ?? '0',
+        });
         const remaining = Math.max(0, Number(batch.remainingQuantity) - mi.liters);
         batch.remainingQuantity = String(remaining);
-        if (remaining === 0) batch.status = 'agotado';
-        else batch.status = 'activo';
+        batch.status = remaining === 0 ? 'agotado' : 'activo';
         await manager.getRepository(BatchEntity).save(batch);
-        // Registrar movimiento de inventario de salida
         await manager.getRepository(InventoryMovementEntity).save(
           manager.getRepository(InventoryMovementEntity).create({
             batchId: batch.id,
@@ -159,7 +170,7 @@ export class ProductionService {
             type: 'out',
             reason: 'production',
             quantity: String(mi.liters),
-            unit: 'litro',
+            unit: batch.unit,
             referenceType: 'production_order',
             referenceId: order.id,
             createdById: order.operatorId,
@@ -167,12 +178,74 @@ export class ProductionService {
         );
       }
 
-      // Crear lotes de producto principal + registrar entrada
+      // --- 2. Validar producto principal ---
       const principalProductId = recipe.productId;
-      const principalOutput = input.actualOutputs.find((o) => o.isPrincipal && o.productId === principalProductId);
+      const principalOutput = input.actualOutputs.find(
+        (o) => o.isPrincipal && o.productId === principalProductId,
+      );
       if (!principalOutput || principalOutput.quantity <= 0)
         throw new BadRequestException('Tenés que cargar la cantidad producida del producto principal');
 
+      // --- 3. Calcular el costo real y estándar con la calculadora de elaboración ---
+      const totalLiters = Number(order.totalMilkLiters);
+      const ingredients: IngredientCost[] = version.ingredients.map((ing) => ({
+        name: ing.productName,
+        quantity: String(ing.quantity),
+        unitCost: String(ing.unitCost ?? 0),
+        basis: ing.basis,
+      }));
+
+      // Cantidades reales de subproductos (por nombre, desde lo que carga el operario).
+      const byproductActuals: Record<string, number> = {};
+      for (const o of input.actualOutputs) {
+        if (!o.isPrincipal) {
+          const exp = order.expectedOutputs.find((e) => e.productId === o.productId);
+          if (exp?.productName) byproductActuals[exp.productName] = o.quantity;
+        }
+      }
+
+      const realCost = computeElaborationCost({
+        mode: 'real',
+        litros: String(totalLiters),
+        productKg: String(principalOutput.quantity),
+        primaryInputs,
+        ingredients,
+        byproducts: version.byproducts.map((bp) => ({
+          name: bp.name,
+          quantity: String(byproductActuals[bp.name] ?? 0),
+          valorRecupero: bp.referenceValuePerUnit != null ? String(bp.referenceValuePerUnit) : null,
+        })),
+      });
+
+      // Estándar: mismas entradas, pero con rendimiento y subproductos ESPERADOS de la receta.
+      const expectedYieldKg = computeYield({
+        liters: totalLiters,
+        baseYieldKgPerLiter: Number(version.baseYieldKgPerLiter),
+        yieldSensitivityFat: Number(version.yieldSensitivityFat),
+        yieldSensitivityProtein: Number(version.yieldSensitivityProtein),
+        baselineFatPercent: Number(version.baselineFatPercent),
+        baselineProteinPercent: Number(version.baselineProteinPercent),
+        standardWastePercent: Number(version.standardWastePercent),
+      }).expectedYieldKg;
+      const expectedByproducts = computeByproducts(totalLiters, expectedYieldKg, version.byproducts);
+      const estandarCost = computeElaborationCost({
+        mode: 'estandar',
+        litros: String(totalLiters),
+        productKg: String(expectedYieldKg),
+        primaryInputs,
+        ingredients,
+        byproducts: version.byproducts.map((bp) => {
+          const exp = expectedByproducts.find((e) => e.name === bp.name);
+          return {
+            name: bp.name,
+            quantity: String(exp?.expectedQuantity ?? 0),
+            valorRecupero: bp.referenceValuePerUnit != null ? String(bp.referenceValuePerUnit) : null,
+          };
+        }),
+      });
+      const variance = computeElaborationVariance(estandarCost, realCost);
+
+      // --- 4. Crear el lote de producto, sellando su costo/kg (encadena los dos pasos) ---
       const productionBatch = await manager.getRepository(BatchEntity).save(
         manager.getRepository(BatchEntity).create({
           code: `LM-PP-${order.code.replace('OP-', '')}`,
@@ -183,6 +256,8 @@ export class ProductionService {
           unit: 'kg',
           status: 'activo',
           parentBatchId: order.milkInputs[0]?.batchId ?? null,
+          warehouseId: input.warehouseId ?? null,
+          unitCost: realCost.costoPorKg, // costo/kg heredable al siguiente paso (masa→mozzarella)
           notes: `Producido en ${order.code}`,
         }),
       );
@@ -204,35 +279,20 @@ export class ProductionService {
         productId: o.productId,
         productName: order.expectedOutputs.find((e) => e.productId === o.productId)?.productName ?? '',
         quantity: o.quantity,
-        unit: o.isPrincipal ? 'kg' : 'kg',
+        unit: 'kg',
         isPrincipal: o.isPrincipal,
         batchId: o.isPrincipal ? productionBatch.id : undefined,
         batchCode: o.isPrincipal ? productionBatch.code : undefined,
       }));
 
-      // Costo
-      const byproductActuals: Record<string, number> = {};
-      for (const o of input.actualOutputs) {
-        if (!o.isPrincipal) {
-          const exp = order.expectedOutputs.find((e) => e.productId === o.productId);
-          if (exp?.productName) byproductActuals[exp.productName] = o.quantity;
-        }
-      }
-      const cost = computeProductionCost({
-        totalMilkCost,
-        ingredientsCost: 0, // futuro: leer de movimientos de insumos
-        laborCost: 0,
-        totalPrincipalKg: principalOutput.quantity,
-        byproducts: version.byproducts,
-        byproductActualQuantities: byproductActuals,
-      });
-
+      // --- 5. Cerrar la orden y persistir el costo ---
       order.status = 'closed';
       order.closedAt = new Date();
       order.actualOutputs = actualOutputs;
       order.totalPrincipalKg = String(principalOutput.quantity);
-      order.totalCost = String(cost.totalCost);
-      order.unitCost = String(cost.unitCost);
+      order.totalCost = realCost.costoNeto;
+      order.unitCost = realCost.costoPorKg;
+      order.costBreakdown = { real: realCost, estandar: estandarCost, variance };
       if (input.notes) order.notes = input.notes;
       const saved = await manager.getRepository(ProductionOrderEntity).save(order);
 
@@ -282,6 +342,7 @@ export class ProductionService {
       totalPrincipalKg: e.totalPrincipalKg ? Number(e.totalPrincipalKg) : undefined,
       totalCost: e.totalCost ? Number(e.totalCost) : undefined,
       unitCost: e.unitCost ? Number(e.unitCost) : undefined,
+      costBreakdown: e.costBreakdown ?? undefined,
       notes: e.notes ?? undefined,
       createdAt: e.createdAt.toISOString(),
       updatedAt: e.updatedAt.toISOString(),

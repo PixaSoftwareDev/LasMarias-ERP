@@ -24,6 +24,36 @@ export const productionOutputSchema = z.object({
 });
 export type ProductionOutput = z.infer<typeof productionOutputSchema>;
 
+// Desglose de costo de una elaboración (calculadora — CLAUDE.md §5). Valores DECIMAL como string.
+export const elaborationCostResultSchema = z.object({
+  costoInputs: z.string(), // leche o masa
+  costoInsumos: z.string(),
+  costoBruto: z.string(),
+  valorSubproductos: z.string(),
+  costoNeto: z.string(),
+  rendimiento: z.string().nullable(),
+  costoPorKg: z.string().nullable(),
+  warnings: z.array(z.string()),
+});
+export type ElaborationCostResultDto = z.infer<typeof elaborationCostResultSchema>;
+
+export const elaborationVarianceSchema = z.object({
+  desvioCostoNeto: z.string(),
+  desvioCostoNetoPct: z.string().nullable(),
+  desvioCostoPorKg: z.string().nullable(),
+  desvioCostoPorKgPct: z.string().nullable(),
+  desvioRendimiento: z.string().nullable(),
+  desvioRendimientoPct: z.string().nullable(),
+});
+export type ElaborationVarianceDto = z.infer<typeof elaborationVarianceSchema>;
+
+export const productionCostBreakdownSchema = z.object({
+  real: elaborationCostResultSchema,
+  estandar: elaborationCostResultSchema,
+  variance: elaborationVarianceSchema,
+});
+export type ProductionCostBreakdown = z.infer<typeof productionCostBreakdownSchema>;
+
 export const productionOrderSchema = z.object({
   id: uuidSchema,
   code: z.string(),
@@ -42,6 +72,7 @@ export const productionOrderSchema = z.object({
   totalPrincipalKg: z.number().optional(),
   totalCost: z.number().optional(),
   unitCost: z.number().optional(),
+  costBreakdown: productionCostBreakdownSchema.optional(),
   notes: z.string().max(2000).optional(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
@@ -67,6 +98,8 @@ export const closeProductionInputSchema = z.object({
       isPrincipal: z.boolean(),
     }),
   ),
+  // Cámara/sector donde se almacena el lote de producto resultante (opcional).
+  warehouseId: uuidSchema.optional(),
   notes: z.string().max(2000).optional(),
 });
 export type CloseProductionInput = z.infer<typeof closeProductionInputSchema>;

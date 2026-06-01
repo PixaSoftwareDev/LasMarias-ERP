@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Calculator } from 'lucide-react';
+import { Boxes, Calculator, Gauge, Recycle, SlidersHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -27,18 +27,16 @@ export default function SimulatorPage() {
   });
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 p-4 sm:p-6">
+    <div className="flex flex-col gap-6">
       <PageHeader
         title="Simulador de rendimiento"
-        description="Probá una receta sin abrir orden real."
-        breadcrumbs={[{ href: '/dashboard', label: 'Inicio' }, { href: '/recetas', label: 'Recetas' }, { label: 'Simulador' }]}
-      />
+        description="Probá una receta sin abrir orden real."      />
 
       <Card>
-        <CardHeader><CardTitle>Parámetros</CardTitle></CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <CardHeader><CardTitle className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5 text-primary-700" aria-hidden="true" />Parámetros</CardTitle></CardHeader>
+        <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <Field label="Receta" htmlFor="recipeId" required>
-            <select className="min-h-touch w-full rounded-md border border-border px-3" value={recipeId} onChange={(e) => setRecipeId(e.target.value)}>
+            <select className="flex min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-1" value={recipeId} onChange={(e) => setRecipeId(e.target.value)}>
               <option value="">Elegí una receta</option>
               {recipes.data?.filter((r) => r.activeVersion).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
@@ -62,39 +60,65 @@ export default function SimulatorPage() {
 
       {simulate.data && (
         <Card>
-          <CardHeader><CardTitle>Resultado</CardTitle></CardHeader>
-          <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div>
-              <p className="text-sm text-foreground-muted">Rendimiento aplicado</p>
-              <p className="text-2xl font-bold">{simulate.data.appliedYieldKgPerLiter.toFixed(4)} <span className="text-sm font-normal text-foreground-muted">kg/L</span></p>
+          <CardHeader><CardTitle className="flex items-center gap-2"><Gauge className="h-5 w-5 text-primary-700" aria-hidden="true" />Resultado</CardTitle></CardHeader>
+          <CardContent className="flex flex-col gap-5">
+            {/* Números clave en chips compactos (consistente con el Home). */}
+            <div className="flex flex-wrap gap-3">
+              <div className="flex min-w-[12rem] flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
+                <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-secondary-50 text-secondary-700">
+                  <Gauge className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[11px] uppercase tracking-wide text-foreground-muted">Rendimiento aplicado</span>
+                  <span className="block font-display text-lg font-bold tracking-tight text-foreground">{simulate.data.appliedYieldKgPerLiter.toFixed(4)} <span className="text-sm font-normal text-foreground-muted">kg/L</span></span>
+                </span>
+              </div>
+              <div className="flex min-w-[12rem] flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
+                <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-700">
+                  <Boxes className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[11px] uppercase tracking-wide text-foreground-muted">Producción esperada</span>
+                  <span className="block font-display text-lg font-bold tracking-tight text-foreground">{simulate.data.expectedYieldKg.toFixed(1)} <span className="text-sm font-normal text-foreground-muted">kg</span></span>
+                </span>
+              </div>
             </div>
-            <div className="sm:col-span-2">
-              <p className="text-sm text-foreground-muted">Producción esperada</p>
-              <p className="text-2xl font-bold">{simulate.data.expectedYieldKg.toFixed(1)} <span className="text-sm font-normal text-foreground-muted">kg</span></p>
-            </div>
-            <div className="sm:col-span-3">
-              <p className="mb-2 text-sm font-medium">Insumos requeridos</p>
-              {simulate.data.ingredients.length === 0 ? (
-                <p className="text-sm text-foreground-muted">— sin insumos en la receta —</p>
-              ) : (
-                <ul className="space-y-1 text-sm">
-                  {simulate.data.ingredients.map((i, idx) => (
-                    <li key={idx}>• {i.productName}: <strong>{i.quantity}</strong> {i.unit}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            <div className="sm:col-span-3">
-              <p className="mb-2 text-sm font-medium">Subproductos esperados</p>
-              {simulate.data.byproducts.length === 0 ? (
-                <p className="text-sm text-foreground-muted">— sin subproductos —</p>
-              ) : (
-                <ul className="space-y-1 text-sm">
-                  {simulate.data.byproducts.map((b, idx) => (
-                    <li key={idx}>• {b.name}: <strong>{b.expectedQuantity}</strong> {b.unit}</li>
-                  ))}
-                </ul>
-              )}
+
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+              <div>
+                <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                  <Boxes className="h-4 w-4 text-foreground-muted" aria-hidden="true" /> Insumos requeridos
+                </p>
+                {simulate.data.ingredients.length === 0 ? (
+                  <p className="text-sm text-foreground-muted">Sin insumos en la receta.</p>
+                ) : (
+                  <ul className="divide-y divide-border-subtle">
+                    {simulate.data.ingredients.map((i, idx) => (
+                      <li key={idx} className="flex items-center justify-between gap-2 py-2 text-sm">
+                        <span className="min-w-0 truncate text-foreground">{i.productName}</span>
+                        <span className="flex-shrink-0 font-medium text-foreground">{i.quantity} {i.unit}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                  <Recycle className="h-4 w-4 text-foreground-muted" aria-hidden="true" /> Subproductos esperados
+                </p>
+                {simulate.data.byproducts.length === 0 ? (
+                  <p className="text-sm text-foreground-muted">Sin subproductos.</p>
+                ) : (
+                  <ul className="divide-y divide-border-subtle">
+                    {simulate.data.byproducts.map((b, idx) => (
+                      <li key={idx} className="flex items-center justify-between gap-2 py-2 text-sm">
+                        <span className="min-w-0 truncate text-foreground">{b.name}</span>
+                        <span className="flex-shrink-0 font-medium text-foreground">{b.expectedQuantity} {b.unit}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>

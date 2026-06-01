@@ -10,6 +10,7 @@ export const movementReasonSchema = z.enum([
   'production',
   'purchase',
   'sale',
+  'return',
   'consumption',
   'count',
   'discard',
@@ -58,6 +59,8 @@ export const stockSummarySchema = z.object({
   batchCount: z.number().int(),
   nearestExpiration: isoDateTimeSchema.optional(),
   minStock: z.number().optional(),
+  // Nombres de las cámaras/sectores donde hay lotes de este producto.
+  warehouses: z.array(z.string()).optional(),
   alertLevel: z.enum(['ok', 'low', 'critical', 'expiring']).optional(),
 });
 export type StockSummary = z.infer<typeof stockSummarySchema>;
@@ -69,6 +72,131 @@ export const createWarehouseInputSchema = z.object({
   targetTemperatureCelsius: z.number().optional(),
 });
 export type CreateWarehouseInput = z.infer<typeof createWarehouseInputSchema>;
+
+// Edición de cámara: mismos campos opcionales + activar/desactivar.
+export const updateWarehouseInputSchema = createWarehouseInputSchema
+  .partial()
+  .extend({ isActive: z.boolean().optional() });
+export type UpdateWarehouseInput = z.infer<typeof updateWarehouseInputSchema>;
+
+// --- Trazabilidad bidireccional (CLAUDE.md §4.4)
+// Se construye recorriendo inventory_movements (no parent_batch_id), de modo que
+// resuelve multi-padre (un lote producto hecho de varios lotes de leche) y multi-paso
+// (leche → masa → mozzarella). Protegido contra ciclos.
+
+// Lote dentro de una cadena de trazabilidad.
+export const traceBatchSchema = z.object({
+  id: uuidSchema,
+  code: z.string(),
+  productId: uuidSchema.nullable(),
+  productName: z.string().nullable(),
+  unit: z.string(),
+  quantity: z.number().nullable(), // cantidad consumida/producida en ese vínculo (si aplica)
+  expirationDate: isoDateTimeSchema.optional(),
+  isMilk: z.boolean(), // true si es leche cruda (origen, con recepción asociada)
+});
+export type TraceBatch = z.infer<typeof traceBatchSchema>;
+
+// --- DESCENDENTE: de un lote hacia adelante (qué se hizo con él, a quién se vendió).
+// Despacho a cliente.
+export const traceDispatchSchema = z.object({
+  salesOrderId: uuidSchema,
+  salesOrderCode: z.string(),
+  clientId: uuidSchema.nullable(),
+  clientName: z.string(),
+  quantity: z.number(),
+  unit: z.string(),
+  dispatchedAt: isoDateTimeSchema.optional(),
+});
+export type TraceDispatch = z.infer<typeof traceDispatchSchema>;
+
+// Nodo de la cadena descendente: un lote, las órdenes donde se consumió (con sus
+// lotes producto, recursivos) y los despachos a clientes.
+export interface TraceForwardNode {
+  batch: TraceBatch;
+  // Órdenes de producción donde este lote se consumió.
+  productionOrders: Array<{
+    orderId: string;
+    orderCode: string;
+    // Lotes de producto que salieron de esa orden (recursión descendente).
+    outputs: TraceForwardNode[];
+  }>;
+  // Ventas/despachos directos de este lote.
+  dispatches: TraceDispatch[];
+}
+
+export const traceForwardNodeSchema: z.ZodType<TraceForwardNode> = z.lazy(() =>
+  z.object({
+    batch: traceBatchSchema,
+    productionOrders: z.array(
+      z.object({
+        orderId: uuidSchema,
+        orderCode: z.string(),
+        outputs: z.array(traceForwardNodeSchema),
+      }),
+    ),
+    dispatches: z.array(traceDispatchSchema),
+  }),
+);
+
+export const traceForwardSchema = traceForwardNodeSchema;
+export type TraceForward = TraceForwardNode;
+
+// --- ASCENDENTE: de un lote hacia atrás (de qué leche/lotes se hizo, qué productor).
+export const traceProducerSchema = z.object({
+  producerId: uuidSchema,
+  producerName: z.string(),
+  receptionCode: z.string().optional(),
+});
+export type TraceProducer = z.infer<typeof traceProducerSchema>;
+
+// Nodo de la cadena ascendente: un lote, la orden que lo produjo y los lotes que se
+// consumieron en esa orden (recursión hacia atrás), más el productor si es leche origen.
+export interface TraceBackwardNode {
+  batch: TraceBatch;
+  // Origen del lote: productor (si es leche cruda) o la orden que lo produjo.
+  producer?: TraceProducer;
+  producedBy?: {
+    orderId: string;
+    orderCode: string;
+    // Lotes consumidos en esa orden (recursión ascendente).
+    inputs: TraceBackwardNode[];
+  };
+}
+
+export const traceBackwardNodeSchema: z.ZodType<TraceBackwardNode> = z.lazy(() =>
+  z.object({
+    batch: traceBatchSchema,
+    producer: traceProducerSchema.optional(),
+    producedBy: z
+      .object({
+        orderId: uuidSchema,
+        orderCode: z.string(),
+        inputs: z.array(traceBackwardNodeSchema),
+      })
+      .optional(),
+  }),
+);
+
+export const traceBackwardSchema = traceBackwardNodeSchema;
+export type TraceBackward = TraceBackwardNode;
+
+// --- Sugerencia FEFO (solo lectura, no persiste). CLAUDE.md §4.4.
+export const fefoAllocationSchema = z.object({
+  batchId: uuidSchema,
+  batchCode: z.string(),
+  take: z.number(),
+  expirationDate: isoDateTimeSchema.optional(),
+});
+export type FefoAllocationDto = z.infer<typeof fefoAllocationSchema>;
+
+export const fefoSuggestionSchema = z.object({
+  productId: uuidSchema,
+  quantity: z.number(),
+  allocations: z.array(fefoAllocationSchema),
+  shortage: z.number(), // cantidad que no se pudo cubrir (0 si alcanza el stock)
+});
+export type FefoSuggestion = z.infer<typeof fefoSuggestionSchema>;
 
 export const stockCountInputSchema = z.object({
   warehouseId: uuidSchema.optional(),

@@ -149,7 +149,7 @@ export class RecipesService {
   }
 
   private async enrichIngredients(
-    ingredients: { productId: string; quantity: number; unit: string; basis: string }[],
+    ingredients: { productId: string; quantity: number; unit: string; basis: string; unitCost?: number }[],
   ) {
     const enriched = await Promise.all(
       ingredients.map(async (i) => {
@@ -160,6 +160,9 @@ export class RecipesService {
           quantity: i.quantity,
           unit: i.unit as 'kg' | 'litro' | 'unidad' | 'gramo',
           basis: i.basis as 'per_liter_milk' | 'per_kg_product' | 'fixed_per_order',
+          // Costo unitario congelado en la versión ($/unidad del insumo). Default 0
+          // para tolerar recetas sin costo cargado (CLAUDE.md §4.2).
+          unitCost: i.unitCost ?? 0,
         };
       }),
     );
@@ -167,7 +170,11 @@ export class RecipesService {
   }
 
   toDto(e: RecipeEntity): Recipe {
-    const active = e.versions?.find((v) => v.isActive);
+    const versions = (e.versions ?? [])
+      .map((v) => this.versionToDto(v))
+      // Más nueva primero para el historial.
+      .sort((a, b) => b.versionNumber - a.versionNumber);
+    const active = versions.find((v) => v.isActive);
     return {
       id: e.id,
       productId: e.productId,
@@ -175,7 +182,8 @@ export class RecipesService {
       name: e.name,
       description: e.description ?? undefined,
       isActive: e.isActive,
-      activeVersion: active ? this.versionToDto(active) : undefined,
+      activeVersion: active,
+      versions,
       createdAt: e.createdAt.toISOString(),
       updatedAt: e.updatedAt.toISOString(),
     };

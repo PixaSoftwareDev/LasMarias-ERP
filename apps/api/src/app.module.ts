@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './database/database.module';
-import { QueueModule } from './queues/queue.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ClientsModule } from './clients/clients.module';
@@ -12,21 +11,18 @@ import { MilkReceptionsModule } from './milk-receptions/milk-receptions.module';
 import { RecipesModule } from './recipes/recipes.module';
 import { ProductionModule } from './production/production.module';
 import { InventoryModule } from './inventory/inventory.module';
-import { DeliveryModule } from './delivery/delivery.module';
 import { SalesModule } from './sales/sales.module';
-import { InvoicesModule } from './invoices/invoices.module';
-import { SuppliersModule } from './suppliers/suppliers.module';
-import { HrModule } from './hr/hr.module';
+import { FinanceModule } from './finance/finance.module';
+import { HomeModule } from './home/home.module';
 import { ReportsModule } from './reports/reports.module';
-import { NotificationsModule } from './notifications/notifications.module';
 import { HealthModule } from './health/health.module';
 
+// Fase 1 — Recepción de leche, Elaboración (calculadora de costo), Inventario,
+// Despacho y maestros. Lo demás quedó fuera de alcance.
 @Module({
   imports: [
     ConfigModule,
     DatabaseModule,
-    QueueModule,
-    NotificationsModule, // global, debe ir temprano
     AuthModule,
     UsersModule,
     ClientsModule,
@@ -37,11 +33,9 @@ import { HealthModule } from './health/health.module';
     RecipesModule,
     ProductionModule,
     InventoryModule,
-    DeliveryModule,
     SalesModule,
-    InvoicesModule,
-    SuppliersModule,
-    HrModule,
+    FinanceModule,
+    HomeModule,
     ReportsModule,
     HealthModule,
   ],

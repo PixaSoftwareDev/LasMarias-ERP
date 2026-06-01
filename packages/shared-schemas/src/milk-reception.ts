@@ -31,6 +31,12 @@ export const milkQualityAnalysisSchema = z.object({
   antibioticsDetected: z.boolean().optional(),
   // Físico-químicos
   ph: z.number().min(0).max(14).optional(),
+  acidityDornic: z
+    .number()
+    .min(0, 'No puede ser negativo')
+    .max(50, 'Valor fuera de rango razonable')
+    .optional()
+    .describe('Acidez en grados Dornic (°D)'),
   temperatureCelsius: z
     .number()
     .min(-5, 'Temperatura fuera de rango')
@@ -55,7 +61,12 @@ export const milkReceptionSchema = z.object({
   producerName: z.string().min(1).max(200), // denormalizado para reportes
   vehiclePlate: z.string().max(20).optional(),
   driverName: z.string().max(120).optional(),
+  remito: z.string().max(50).optional(),
+  // Litros declarados en el remito (lo que dice el papel del transporte).
+  declaredLiters: z.number().nonnegative().optional(),
   liters: z.number().positive('Los litros tienen que ser mayor a 0'),
+  // Diferencia automática = litros recibidos − litros declarados (derivado).
+  litersDifference: z.number().optional(),
   quality: milkQualityAnalysisSchema,
   status: milkReceptionStatusSchema,
   blockedReason: z.string().max(500).optional(),
@@ -75,10 +86,14 @@ export const createMilkReceptionInputSchema = z.object({
   producerId: uuidSchema,
   vehiclePlate: z.string().max(20).optional(),
   driverName: z.string().max(120).optional(),
+  remito: z.string().max(50).optional(),
+  declaredLiters: z.number().nonnegative().optional(),
   liters: z
     .number({ invalid_type_error: 'Los litros tienen que ser un número' })
     .positive('Los litros tienen que ser mayor a 0'),
   quality: milkQualityAnalysisSchema,
+  // Cámara/sector donde se almacena el lote de leche cruda resultante (opcional).
+  warehouseId: uuidSchema.optional(),
   notes: z.string().max(1000).optional(),
 });
 

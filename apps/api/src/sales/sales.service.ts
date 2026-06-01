@@ -1,244 +1,373 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
+import type { EntityManager } from 'typeorm';
 import type {
-  CreatePriceListInput,
+  CreateReturnInput,
   CreateSalesOrderInput,
-  PriceList,
+  CreditNote,
   SalesOrder,
   SalesOrderLine,
 } from '@lasmarias/shared-schemas';
-import { PriceListEntity, PriceListItemEntity } from './price-list.entity';
 import { SalesOrderEntity } from './sales-order.entity';
+import { AccountMovementEntity } from './account-movement.entity';
+import { CreditNoteEntity } from './credit-note.entity';
+import { BatchEntity } from '../batches/batch.entity';
+import { ClientEntity } from '../clients/client.entity';
+import { InventoryMovementEntity } from '../inventory/inventory-movement.entity';
 import { ClientsService } from '../clients/clients.service';
 import { ProductsService } from '../products/products.service';
-import { DeliveryService } from '../delivery/delivery.service';
+
+// Asignación FEFO pura: dada la cantidad pedida y los lotes (ya ordenados por
+// vencimiento más próximo primero), devuelve cuánto tomar de cada lote y el faltante.
+// Sin efectos: se testea sin tocar la base (CLAUDE.md §8 — lógica de dominio testeable).
+export interface FefoBatchInput {
+  id: string;
+  remaining: number;
+}
+export interface FefoAllocation {
+  batchId: string;
+  take: number;
+  remainingAfter: number;
+}
+export interface FefoPlan {
+  allocations: FefoAllocation[];
+  shortage: number; // cantidad que no se pudo cubrir (0 si alcanzó)
+}
+
+export function planFefoAllocation(quantity: number, batches: FefoBatchInput[]): FefoPlan {
+  let pending = quantity;
+  const allocations: FefoAllocation[] = [];
+  for (const batch of batches) {
+    if (pending <= 0) break;
+    const available = batch.remaining;
+    if (available <= 0) continue;
+    const take = Math.min(available, pending);
+    allocations.push({ batchId: batch.id, take, remainingAfter: available - take });
+    pending -= take;
+  }
+  return { allocations, shortage: Math.max(0, pending) };
+}
 
 @Injectable()
 export class SalesService {
   constructor(
-    @InjectRepository(PriceListEntity)
-    private readonly priceLists: Repository<PriceListEntity>,
-    @InjectRepository(PriceListItemEntity)
-    private readonly priceListItems: Repository<PriceListItemEntity>,
     @InjectRepository(SalesOrderEntity)
     private readonly orders: Repository<SalesOrderEntity>,
     private readonly clients: ClientsService,
     private readonly products: ProductsService,
-    private readonly delivery: DeliveryService,
     private readonly dataSource: DataSource,
   ) {}
 
-  async listPriceLists(): Promise<PriceList[]> {
-    const rows = await this.priceLists.find({
-      where: { isActive: true },
-      relations: { items: { product: true } },
-      order: { name: 'ASC' },
-    });
-    return rows.map((p) => this.priceListToDto(p));
-  }
-
-  async createPriceList(input: CreatePriceListInput): Promise<PriceList> {
-    return this.dataSource.transaction(async (manager) => {
-      const list = manager.getRepository(PriceListEntity).create({
-        name: input.name,
-        description: input.description ?? null,
-        clientType: input.clientType,
-        validFrom: input.validFrom ? new Date(input.validFrom) : null,
-        validTo: input.validTo ? new Date(input.validTo) : null,
-        isActive: true,
-      });
-      const saved = await manager.getRepository(PriceListEntity).save(list);
-      if (input.items.length) {
-        await manager.getRepository(PriceListItemEntity).save(
-          input.items.map((i) =>
-            manager.getRepository(PriceListItemEntity).create({
-              priceListId: saved.id,
-              productId: i.productId,
-              unitPrice: String(i.unitPrice),
-            }),
-          ),
-        );
-      }
-      const reloaded = await manager.getRepository(PriceListEntity).findOne({
-        where: { id: saved.id },
-        relations: { items: { product: true } },
-      });
-      return this.priceListToDto(reloaded!);
-    });
-  }
-
-  // Encuentra el precio aplicable para un cliente y producto.
-  // Devuelve la lista activa del tipo de cliente con vigencia actual (la primera por simplicidad).
-  async resolvePriceFor(clientId: string, productId: string): Promise<number> {
-    const client = await this.clients.get(clientId);
-    const now = new Date();
-    const list = await this.priceLists.findOne({
-      where: { isActive: true, clientType: client.type },
-      relations: { items: true },
-    });
-    if (!list) throw new BadRequestException('No hay lista de precios para este tipo de cliente');
-    if (list.validFrom && list.validFrom > now) throw new BadRequestException('La lista de precios todavía no entró en vigencia');
-    if (list.validTo && list.validTo < now) throw new BadRequestException('La lista de precios está vencida');
-    const item = list.items.find((i) => i.productId === productId);
-    if (!item) throw new BadRequestException('El producto no tiene precio en la lista activa');
-    return Number(item.unitPrice);
-  }
-
-  // Igual que resolvePriceFor pero devuelve null en vez de lanzar — para cotización en vivo.
-  async tryResolvePriceFor(clientId: string, productId: string): Promise<number | null> {
-    try {
-      return await this.resolvePriceFor(clientId, productId);
-    } catch {
-      return null;
-    }
-  }
-
-  // Cotización sin persistir: precios, subtotales y total para mostrar en vivo
-  // mientras el vendedor arma el pedido. CLAUDE.md §4.6.1 / §5.4.
-  async quoteOrder(input: CreateSalesOrderInput) {
-    const client = await this.clients.get(input.clientId);
-    const lines: Array<{
-      productId: string;
-      productName: string;
-      sku: string;
-      unit: string;
-      quantity: number;
-      unitPrice: number | null;
-      subtotal: number | null;
-    }> = [];
-    const missingPrices: string[] = [];
-    let subtotal = 0;
-    for (const l of input.lines) {
-      const product = await this.products.get(l.productId);
-      const unitPrice = await this.tryResolvePriceFor(client.id, l.productId);
-      const lineSubtotal = unitPrice != null ? Math.round(unitPrice * l.quantity * 100) / 100 : null;
-      if (unitPrice == null) missingPrices.push(product.name);
-      else subtotal += lineSubtotal!;
-      lines.push({
-        productId: product.id,
-        productName: product.name,
-        sku: product.sku,
-        unit: product.unit,
-        quantity: l.quantity,
-        unitPrice,
-        subtotal: lineSubtotal,
-      });
-    }
-    const discountPercent = input.discountPercent ?? 0;
-    const total = Math.round(subtotal * (1 - discountPercent / 100) * 100) / 100;
-    return { lines, subtotal: Math.round(subtotal * 100) / 100, discountPercent, total, missingPrices };
-  }
-
   async listOrders(): Promise<SalesOrder[]> {
     const rows = await this.orders.find({
-      relations: { client: true, zone: true },
-      order: { takenAt: 'DESC' },
+      relations: { client: true },
+      order: { dispatchedAt: 'DESC' },
       take: 200,
     });
     return rows.map((r) => this.orderToDto(r));
   }
 
-  async listOrdersByDeliveryDate(date: string): Promise<SalesOrder[]> {
-    const rows = await this.orders.find({
-      where: { deliveryDate: date },
-      relations: { client: true, zone: true },
-      order: { takenAt: 'ASC' },
-    });
-    return rows.map((r) => this.orderToDto(r));
-  }
-
   async getOrder(id: string): Promise<SalesOrder> {
-    const o = await this.orders.findOne({
-      where: { id },
-      relations: { client: true, zone: true },
-    });
-    if (!o) throw new NotFoundException('Pedido no encontrado');
+    const o = await this.orders.findOne({ where: { id }, relations: { client: true } });
+    if (!o) throw new NotFoundException('Despacho no encontrado');
     return this.orderToDto(o);
   }
 
+  // Despacho directo: el precio se carga a mano por línea (sugerido por lista según
+  // tipo de cliente desde el front), el importe es automático y el stock baja en el
+  // momento (FEFO). Además genera el cargo en cuenta corriente; si es contado, también
+  // registra el cobro → saldo 0.
   async createOrder(input: CreateSalesOrderInput, userId: string): Promise<SalesOrder> {
     const client = await this.clients.get(input.clientId);
-    const zoneId = client.zoneId ?? null;
-
-    // Resolver fecha de reparto: si no la pasan, calcular según zona.
-    let deliveryDate = input.deliveryDate;
-    if (!deliveryDate) {
-      if (!zoneId) throw new BadRequestException('El cliente no tiene zona asignada — cargá la fecha de reparto manualmente');
-      deliveryDate = await this.delivery.nextDateForZone(zoneId);
-    }
 
     return this.dataSource.transaction(async (manager) => {
-      // Calcular líneas y total
       const lines: SalesOrderLine[] = [];
-      let subtotal = 0;
+      let total = 0;
       for (const l of input.lines) {
         const product = await this.products.get(l.productId);
-        const unitPrice = await this.resolvePriceFor(client.id, l.productId);
-        const lineSubtotal = unitPrice * l.quantity;
-        subtotal += lineSubtotal;
+        const subtotal = Math.round(l.unitPrice * l.quantity * 100) / 100;
+        total += subtotal;
         lines.push({
           productId: product.id,
           productName: product.name,
           sku: product.sku,
           quantity: l.quantity,
-          unitPrice,
+          unitPrice: l.unitPrice,
           unit: product.unit,
-          subtotal: Math.round(lineSubtotal * 100) / 100,
+          subtotal,
         });
       }
-      const discountPercent = input.discountPercent ?? 0;
-      const total = Math.round(subtotal * (1 - discountPercent / 100) * 100) / 100;
+      total = Math.round(total * 100) / 100;
 
+      const dispatchedAt = new Date();
       const code = await this.nextOrderCode(manager);
       const entity = manager.getRepository(SalesOrderEntity).create({
         code,
         clientId: client.id,
-        zoneId,
-        status: 'taken',
-        takenAt: new Date(),
-        deliveryDate,
+        dispatchedAt,
         lines,
         total: String(total),
-        discountPercent: String(discountPercent),
         notes: input.notes ?? null,
+        documentType: 'remito',
         createdById: userId,
       });
       const saved = await manager.getRepository(SalesOrderEntity).save(entity);
-      const reloaded = await manager.getRepository(SalesOrderEntity).findOne({
-        where: { id: saved.id },
-        relations: { client: true, zone: true },
-      });
+
+      // Principio no negociable #4: el stock baja con el despacho, nunca a mano.
+      await this.dischargeStock(manager, saved);
+
+      // Cuenta corriente: cargo por el total del despacho.
+      const isContado =
+        input.paymentMode === 'contado' ||
+        (input.paymentMode === undefined && client.paymentTermDays == null);
+      const dueDate =
+        client.paymentTermDays != null
+          ? new Date(dispatchedAt.getTime() + client.paymentTermDays * 24 * 60 * 60 * 1000)
+          : dispatchedAt;
+      await manager.getRepository(AccountMovementEntity).save(
+        manager.getRepository(AccountMovementEntity).create({
+          clientId: client.id,
+          kind: 'charge',
+          amount: String(total),
+          referenceType: 'sales_order',
+          referenceId: saved.id,
+          occurredAt: dispatchedAt,
+          dueDate,
+          notes: `Despacho ${saved.code}`,
+          createdById: userId,
+        }),
+      );
+      // Contado: registramos el cobro de inmediato (saldo 0). No genera ingreso de caja
+      // aparte para no duplicar (el cobro al contado es parte del despacho).
+      if (isContado && total > 0) {
+        await manager.getRepository(AccountMovementEntity).save(
+          manager.getRepository(AccountMovementEntity).create({
+            clientId: client.id,
+            kind: 'payment',
+            amount: String(total),
+            referenceType: 'sales_order',
+            referenceId: saved.id,
+            occurredAt: dispatchedAt,
+            dueDate: null,
+            notes: `Cobro contado ${saved.code}`,
+            createdById: userId,
+          }),
+        );
+      }
+
+      const reloaded = await manager
+        .getRepository(SalesOrderEntity)
+        .findOne({ where: { id: saved.id }, relations: { client: true } });
       return this.orderToDto(reloaded!);
     });
   }
 
-  async updateStatus(orderId: string, status: SalesOrder['status']): Promise<SalesOrder> {
-    const o = await this.orders.findOne({ where: { id: orderId } });
-    if (!o) throw new NotFoundException('Pedido no encontrado');
-    o.status = status;
-    await this.orders.save(o);
-    return this.getOrder(orderId);
+  // Devolución de un despacho → nota de crédito. Valida que no exceda lo despachado,
+  // repone stock al mismo lote del que salió, crea credit_note (NC-NNNNNN) con precio
+  // histórico y baja el saldo de cuenta corriente. Todo transaccional.
+  async createReturn(
+    orderId: string,
+    input: CreateReturnInput,
+    userId: string,
+  ): Promise<CreditNote> {
+    const order = await this.orders.findOne({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Despacho no encontrado');
+
+    return this.dataSource.transaction(async (manager) => {
+      // Lo ya devuelto previamente por este despacho (para no exceder).
+      const priorNotes = await manager
+        .getRepository(CreditNoteEntity)
+        .find({ where: { salesOrderId: orderId } });
+      const returnedByProduct = new Map<string, number>();
+      for (const cn of priorNotes) {
+        for (const l of cn.lines) {
+          returnedByProduct.set(
+            l.productId,
+            (returnedByProduct.get(l.productId) ?? 0) + l.quantity,
+          );
+        }
+      }
+
+      const ncLines: SalesOrderLine[] = [];
+      let total = 0;
+      for (const reqLine of input.lines) {
+        const orderLine = order.lines.find((l) => l.productId === reqLine.productId);
+        if (!orderLine) {
+          throw new BadRequestException(
+            `El producto no figura en el despacho ${order.code}`,
+          );
+        }
+        const alreadyReturned = returnedByProduct.get(reqLine.productId) ?? 0;
+        const remaining = orderLine.quantity - alreadyReturned;
+        if (reqLine.quantity > remaining + 1e-9) {
+          throw new BadRequestException(
+            `No se puede devolver ${reqLine.quantity} ${orderLine.unit} de ${orderLine.productName}: ` +
+              `el despacho ${order.code} tiene ${remaining} ${orderLine.unit} pendientes de devolver`,
+          );
+        }
+        // Reponer al mismo lote del que salió (movimientos sale de este despacho).
+        await this.restockToOriginBatches(manager, orderId, reqLine.productId, reqLine.quantity, userId, order.code);
+
+        const subtotal = Math.round(orderLine.unitPrice * reqLine.quantity * 100) / 100;
+        total += subtotal;
+        ncLines.push({
+          productId: orderLine.productId,
+          productName: orderLine.productName,
+          sku: orderLine.sku,
+          quantity: reqLine.quantity,
+          unitPrice: orderLine.unitPrice,
+          unit: orderLine.unit,
+          subtotal,
+        });
+      }
+      total = Math.round(total * 100) / 100;
+
+      const code = await this.nextCreditNoteCode(manager);
+      const note = await manager.getRepository(CreditNoteEntity).save(
+        manager.getRepository(CreditNoteEntity).create({
+          code,
+          salesOrderId: order.id,
+          clientId: order.clientId,
+          lines: ncLines,
+          total: String(total),
+          createdById: userId,
+        }),
+      );
+
+      // Baja de saldo de cuenta corriente por la nota de crédito.
+      await manager.getRepository(AccountMovementEntity).save(
+        manager.getRepository(AccountMovementEntity).create({
+          clientId: order.clientId,
+          kind: 'credit_note',
+          amount: String(total),
+          referenceType: 'credit_note',
+          referenceId: note.id,
+          occurredAt: new Date(),
+          dueDate: null,
+          notes: `Nota de crédito ${code} (devolución de ${order.code})`,
+          createdById: userId,
+        }),
+      );
+
+      return this.creditNoteToDto(note);
+    });
   }
 
-  // Secuencia global de pedidos con advisory lock (Postgres rechaza FOR UPDATE con agregados).
-  private async nextOrderCode(manager: import('typeorm').EntityManager) {
+  // Repone una cantidad devuelta a los lotes desde los que se despachó (movimientos
+  // sale de este despacho para este producto), en orden de salida, con movimiento 'in'
+  // reason='return'. Si el lote estaba agotado vuelve a 'activo'.
+  private async restockToOriginBatches(
+    manager: EntityManager,
+    orderId: string,
+    productId: string,
+    quantity: number,
+    userId: string,
+    orderCode: string,
+  ): Promise<void> {
+    const saleMovements = await manager.getRepository(InventoryMovementEntity).find({
+      where: { referenceType: 'sales_order', referenceId: orderId, productId, reason: 'sale' },
+      order: { createdAt: 'ASC' },
+    });
+    if (saleMovements.length === 0) {
+      throw new BadRequestException('No se encontró el movimiento de salida del despacho');
+    }
+    let pending = quantity;
+    for (const mv of saleMovements) {
+      if (pending <= 1e-9) break;
+      const restore = Math.min(Number(mv.quantity), pending);
+      pending -= restore;
+      const batch = await manager.getRepository(BatchEntity).findOne({ where: { id: mv.batchId } });
+      if (!batch) continue;
+      batch.remainingQuantity = String(Number(batch.remainingQuantity) + restore);
+      if (batch.status === 'agotado') batch.status = 'activo';
+      await manager.getRepository(BatchEntity).save(batch);
+      await manager.getRepository(InventoryMovementEntity).save(
+        manager.getRepository(InventoryMovementEntity).create({
+          batchId: batch.id,
+          productId,
+          type: 'in',
+          reason: 'return',
+          quantity: String(restore),
+          unit: batch.unit,
+          referenceType: 'sales_order',
+          referenceId: orderId,
+          notes: `Devolución ${orderCode}`,
+          createdById: userId,
+        }),
+      );
+    }
+    if (pending > 1e-9) {
+      // No debería ocurrir si la validación contra lo despachado es correcta.
+      throw new BadRequestException('La cantidad a devolver excede lo despachado');
+    }
+  }
+
+  // Descuenta del stock las cantidades del despacho usando FEFO (vencimiento más
+  // próximo primero) y registra un movimiento de salida por cada lote afectado.
+  private async dischargeStock(manager: EntityManager, order: SalesOrderEntity): Promise<void> {
+    for (const line of order.lines) {
+      const batches = await manager.getRepository(BatchEntity).find({
+        where: { productId: line.productId, status: 'activo' },
+        order: { expirationDate: 'ASC' }, // FEFO
+      });
+      const plan = planFefoAllocation(
+        line.quantity,
+        batches.map((b) => ({ id: b.id, remaining: Number(b.remainingQuantity) })),
+      );
+      if (plan.shortage > 0) {
+        throw new BadRequestException(
+          `No hay stock suficiente de ${line.productName} para despachar: faltan ${plan.shortage} ${line.unit}`,
+        );
+      }
+      const byId = new Map(batches.map((b) => [b.id, b]));
+      for (const alloc of plan.allocations) {
+        const batch = byId.get(alloc.batchId)!;
+        batch.remainingQuantity = String(alloc.remainingAfter);
+        if (alloc.remainingAfter === 0) batch.status = 'agotado';
+        await manager.getRepository(BatchEntity).save(batch);
+        await manager.getRepository(InventoryMovementEntity).save(
+          manager.getRepository(InventoryMovementEntity).create({
+            batchId: batch.id,
+            productId: batch.productId,
+            type: 'out',
+            reason: 'sale',
+            quantity: String(alloc.take),
+            unit: batch.unit,
+            referenceType: 'sales_order',
+            referenceId: order.id,
+            notes: `Despacho ${order.code}`,
+            createdById: order.createdById,
+          }),
+        );
+      }
+    }
+  }
+
+  // Secuencia global de despachos con advisory lock (Postgres rechaza FOR UPDATE con agregados).
+  private async nextOrderCode(manager: EntityManager) {
     await manager.query('SELECT pg_advisory_xact_lock(2000000001)');
     const count = await manager.getRepository(SalesOrderEntity).count();
-    return `PED-${String(count + 1).padStart(6, '0')}`;
+    return `DSP-${String(count + 1).padStart(6, '0')}`;
   }
 
-  priceListToDto(l: PriceListEntity): PriceList {
+  // Secuencia global de notas de crédito (advisory lock propio).
+  private async nextCreditNoteCode(manager: EntityManager) {
+    await manager.query('SELECT pg_advisory_xact_lock(2000000002)');
+    const count = await manager.getRepository(CreditNoteEntity).count();
+    return `NC-${String(count + 1).padStart(6, '0')}`;
+  }
+
+  private creditNoteToDto(e: CreditNoteEntity): CreditNote {
     return {
-      id: l.id,
-      name: l.name,
-      description: l.description ?? undefined,
-      clientType: l.clientType,
-      validFrom: l.validFrom?.toISOString(),
-      validTo: l.validTo?.toISOString(),
-      isActive: l.isActive,
-      createdAt: l.createdAt.toISOString(),
-      updatedAt: l.updatedAt.toISOString(),
+      id: e.id,
+      code: e.code,
+      salesOrderId: e.salesOrderId,
+      clientId: e.clientId,
+      lines: e.lines,
+      total: Number(e.total),
+      createdById: e.createdById,
+      createdAt: e.createdAt.toISOString(),
     };
   }
 
@@ -248,14 +377,11 @@ export class SalesService {
       code: o.code,
       clientId: o.clientId,
       clientName: o.client?.businessName ?? '',
-      zoneId: o.zoneId ?? undefined,
-      status: o.status,
-      takenAt: o.takenAt.toISOString(),
-      deliveryDate: o.deliveryDate,
+      dispatchedAt: o.dispatchedAt.toISOString(),
       lines: o.lines,
       total: Number(o.total),
-      discountPercent: Number(o.discountPercent),
       notes: o.notes ?? undefined,
+      documentType: 'remito',
       createdById: o.createdById,
       createdAt: o.createdAt.toISOString(),
       updatedAt: o.updatedAt.toISOString(),

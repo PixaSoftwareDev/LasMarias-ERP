@@ -32,6 +32,13 @@ export class MilkReceptionEntity extends BaseEntity {
   @Column({ type: 'varchar', length: 120, name: 'driver_name', nullable: true })
   driverName!: string | null;
 
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  remito!: string | null;
+
+  // Litros declarados en el remito; la diferencia con `liters` (recibidos) se calcula al vuelo.
+  @Column({ type: 'numeric', precision: 14, scale: 3, name: 'declared_liters', nullable: true })
+  declaredLiters!: string | null;
+
   @Column({ type: 'numeric', precision: 14, scale: 3 })
   liters!: string;
 

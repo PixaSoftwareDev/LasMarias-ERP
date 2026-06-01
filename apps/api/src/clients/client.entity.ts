@@ -27,8 +27,9 @@ export class ClientEntity extends BaseEntity {
   @Column({ type: 'varchar', length: 120, nullable: true })
   city!: string | null;
 
-  @Column({ type: 'uuid', name: 'zone_id', nullable: true })
-  zoneId!: string | null;
+  // Condición de pago default: null = contado; N = a N días.
+  @Column({ type: 'int', name: 'payment_term_days', nullable: true })
+  paymentTermDays!: number | null;
 
   @Column({ type: 'text', nullable: true })
   notes!: string | null;

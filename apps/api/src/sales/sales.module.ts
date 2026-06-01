@@ -1,22 +1,33 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { PriceListEntity, PriceListItemEntity } from './price-list.entity';
 import { SalesOrderEntity } from './sales-order.entity';
+import { PriceListItemEntity } from './price-list-item.entity';
+import { AccountMovementEntity } from './account-movement.entity';
+import { CreditNoteEntity } from './credit-note.entity';
 import { SalesService } from './sales.service';
+import { PricingService } from './pricing.service';
+import { AccountsService } from './accounts.service';
 import { SalesController } from './sales.controller';
 import { ClientsModule } from '../clients/clients.module';
 import { ProductsModule } from '../products/products.module';
-import { DeliveryModule } from '../delivery/delivery.module';
+import { ClientEntity } from '../clients/client.entity';
+import { CashMovementEntity } from '../finance/cash-movement.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([PriceListEntity, PriceListItemEntity, SalesOrderEntity]),
+    TypeOrmModule.forFeature([
+      SalesOrderEntity,
+      PriceListItemEntity,
+      AccountMovementEntity,
+      CreditNoteEntity,
+      ClientEntity,
+      CashMovementEntity,
+    ]),
     ClientsModule,
     ProductsModule,
-    DeliveryModule,
   ],
-  providers: [SalesService],
+  providers: [SalesService, PricingService, AccountsService],
   controllers: [SalesController],
-  exports: [SalesService, TypeOrmModule],
+  exports: [SalesService, PricingService, AccountsService, TypeOrmModule],
 })
 export class SalesModule {}

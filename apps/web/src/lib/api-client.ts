@@ -96,3 +96,33 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     throw err;
   }
 }
+
+// Descarga un archivo del API con el token de sesión y dispara el "Guardar como"
+// del navegador. Lo usamos para exportaciones (CSV) que el backend protege con auth.
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const headers = new Headers();
+  const token = authStorage.getAccess();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  let res = await fetch(`${API_URL}${path}`, { headers });
+  if (res.status === 401 && (await tryRefresh())) {
+    const t = authStorage.getAccess();
+    if (t) headers.set('Authorization', `Bearer ${t}`);
+    res = await fetch(`${API_URL}${path}`, { headers });
+  }
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as ApiErrorBody;
+    throw new ApiError(res.status, body);
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const match = /filename="?([^"]+)"?/i.exec(disposition);
+  const name = match?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

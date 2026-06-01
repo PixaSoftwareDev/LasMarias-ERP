@@ -1,26 +1,29 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus } from 'lucide-react';
-import { createClientInputSchema, type CreateClientInput } from '@lasmarias/shared-schemas';
+import Link from 'next/link';
+import { ArrowLeft, Pencil, Plus, Power } from 'lucide-react';
+import { createClientInputSchema, type CreateClientInput, type Client } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/data-table';
+import { RowActions } from '@/components/ui/row-actions';
 import { PageHeader } from '@/components/page-header';
-import { clientsApi, deliveryApi } from '@/features/api';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { clientsApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 
 export default function ClientsPage() {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<Client | null>(null);
   const { data = [], isLoading } = useQuery({ queryKey: ['clients'], queryFn: () => clientsApi.list() });
-  const zonesQuery = useQuery({ queryKey: ['delivery-zones'], queryFn: () => deliveryApi.listZones() });
 
   const form = useForm<CreateClientInput>({
     resolver: zodResolver(createClientInputSchema),
@@ -28,31 +31,66 @@ export default function ClientsPage() {
     defaultValues: { type: 'minorista' },
   });
 
-  const create = useMutation({
-    mutationFn: (i: CreateClientInput) => clientsApi.create(i),
+  useEffect(() => {
+    if (editing) {
+      form.reset({
+        businessName: editing.businessName,
+        taxId: editing.taxId,
+        type: editing.type,
+        email: editing.email,
+        phone: editing.phone,
+        address: editing.address,
+        city: editing.city,
+        notes: editing.notes,
+      });
+    }
+  }, [editing, form]);
+
+  function closeForm() {
+    setShowForm(false);
+    setEditing(null);
+    form.reset({ type: 'minorista' });
+  }
+
+  const save = useMutation({
+    mutationFn: (i: CreateClientInput) => (editing ? clientsApi.update(editing.id, i) : clientsApi.create(i)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['clients'] });
-      toast.success('Cliente creado');
-      form.reset();
-      setShowForm(false);
+      toast.success(editing ? 'Cliente actualizado' : 'Cliente creado');
+      closeForm();
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al crear'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al guardar'),
   });
 
+  const toggleActive = useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) => clientsApi.update(id, { isActive }),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['clients'] });
+      toast.success(vars.isActive ? 'Cliente activado' : 'Cliente desactivado');
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al actualizar'),
+  });
+
+  function onDeactivate(c: Client) {
+    if (!window.confirm(`¿Desactivar "${c.businessName}"? No aparecerá al tomar nuevos pedidos.`)) return;
+    toggleActive.mutate({ id: c.id, isActive: false });
+  }
+
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 p-4 sm:p-6">
+    <div className="flex flex-col gap-6">
+      <Button asChild variant="ghost" size="sm" className="self-start">
+        <Link href="/admin"><ArrowLeft className="h-4 w-4" /> Datos maestros</Link>
+      </Button>
       <PageHeader
         title="Clientes"
-        description="Comercios y compradores del sistema."
-        breadcrumbs={[{ href: '/dashboard', label: 'Inicio' }, { label: 'Clientes' }]}
-        action={<Button onClick={() => setShowForm((s) => !s)}><Plus className="h-4 w-4" /> {showForm ? 'Cerrar' : 'Nuevo cliente'}</Button>}
+        description="Comercios y compradores del sistema."        action={<Button onClick={() => (showForm ? closeForm() : setShowForm(true))}><Plus className="h-4 w-4" /> {showForm ? 'Cerrar' : 'Nuevo cliente'}</Button>}
       />
 
       {showForm && (
         <Card>
-          <CardHeader><CardTitle>Nuevo cliente</CardTitle></CardHeader>
+          <CardHeader><CardTitle>{editing ? 'Editar cliente' : 'Nuevo cliente'}</CardTitle></CardHeader>
           <CardContent>
-            <form onSubmit={form.handleSubmit((v) => create.mutateAsync(v))} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <form onSubmit={form.handleSubmit((v) => save.mutateAsync(v))} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Razón social" htmlFor="businessName" required error={form.formState.errors.businessName?.message}>
                 <Input {...form.register('businessName')} />
               </Field>
@@ -66,12 +104,6 @@ export default function ClientsPage() {
                   <option value="distribuidor">Distribuidor</option>
                 </select>
               </Field>
-              <Field label="Zona de reparto" htmlFor="zoneId">
-                <select className="min-h-touch w-full rounded-md border border-border px-3" {...form.register('zoneId')}>
-                  <option value="">(sin zona)</option>
-                  {zonesQuery.data?.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
-                </select>
-              </Field>
               <Field label="Email" htmlFor="email" error={form.formState.errors.email?.message}>
                 <Input type="email" {...form.register('email')} />
               </Field>
@@ -82,8 +114,8 @@ export default function ClientsPage() {
                 <Input {...form.register('address')} />
               </Field>
               <div className="flex justify-end gap-2 sm:col-span-2">
-                <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>Cancelar</Button>
-                <Button type="submit" loading={create.isPending}>Guardar</Button>
+                <Button type="button" variant="ghost" onClick={closeForm}>Cancelar</Button>
+                <Button type="submit" loading={save.isPending}>Guardar</Button>
               </div>
             </form>
           </CardContent>
@@ -101,6 +133,20 @@ export default function ClientsPage() {
             { key: 'taxId', header: 'CUIT', render: (c) => c.taxId ?? '—', secondary: true },
             { key: 'city', header: 'Ciudad', render: (c) => c.city ?? '—' },
             { key: 'phone', header: 'Teléfono', render: (c) => c.phone ?? '—' },
+            { key: 'status', header: 'Estado', render: (c) => (
+              <StatusBadge status={c.isActive ? 'success' : 'neutral'}>{c.isActive ? 'Activo' : 'Inactivo'}</StatusBadge>
+            )},
+            { key: 'actions', header: '', align: 'right', render: (c) => (
+              <RowActions
+                label={`Acciones de ${c.businessName}`}
+                actions={[
+                  { label: 'Editar', icon: Pencil, onClick: () => { setEditing(c); setShowForm(true); } },
+                  c.isActive
+                    ? { label: 'Desactivar', icon: Power, onClick: () => onDeactivate(c), destructive: true }
+                    : { label: 'Activar', icon: Power, onClick: () => toggleActive.mutate({ id: c.id, isActive: true }) },
+                ]}
+              />
+            )},
           ]}
         />
       )}

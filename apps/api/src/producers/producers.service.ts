@@ -27,6 +27,17 @@ export interface CreateProducerInput {
   notes?: string;
 }
 
+export interface UpdateProducerInput {
+  name?: string;
+  taxId?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  agreedPricePerLiter?: number;
+  notes?: string;
+  isActive?: boolean;
+}
+
 @Injectable()
 export class ProducersService {
   constructor(
@@ -57,6 +68,22 @@ export class ProducersService {
       isActive: true,
     });
     return this.toDto(await this.repo.save(entity));
+  }
+
+  // Edición de productor: mergea solo los campos provistos (CLAUDE.md §4.5).
+  async update(id: string, input: UpdateProducerInput): Promise<ProducerDto> {
+    const p = await this.repo.findOne({ where: { id } });
+    if (!p) throw new NotFoundException('Productor no encontrado');
+    if (input.name !== undefined) p.name = input.name;
+    if (input.taxId !== undefined) p.taxId = input.taxId;
+    if (input.phone !== undefined) p.phone = input.phone;
+    if (input.address !== undefined) p.address = input.address;
+    if (input.city !== undefined) p.city = input.city;
+    if (input.agreedPricePerLiter !== undefined)
+      p.agreedPricePerLiter = String(input.agreedPricePerLiter);
+    if (input.notes !== undefined) p.notes = input.notes;
+    if (input.isActive !== undefined) p.isActive = input.isActive;
+    return this.toDto(await this.repo.save(p));
   }
 
   toDto(e: ProducerEntity): ProducerDto {

@@ -3,14 +3,45 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import type {
   CreateWarehouseInput,
+  UpdateWarehouseInput,
+  FefoSuggestion,
   InventoryMovement,
   StockCountInput,
   StockSummary,
+  TraceBackward,
+  TraceBatch,
+  TraceDispatch,
+  TraceForward,
+  TraceProducer,
   Warehouse,
 } from '@lasmarias/shared-schemas';
 import { WarehouseEntity } from './warehouse.entity';
 import { InventoryMovementEntity } from './inventory-movement.entity';
 import { BatchEntity } from '../batches/batch.entity';
+import { ProductionOrderEntity } from '../production/production-order.entity';
+import { SalesOrderEntity } from '../sales/sales-order.entity';
+import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
+import { resolveAlertLevel } from './stock-alert';
+import {
+  buildBackwardTrace,
+  buildFefoSuggestion,
+  buildForwardTrace,
+  type BatchOutEdges,
+  type TraceGraphReader,
+} from './trace-graph';
+
+// Lote consumible para producción — shape esperada por el frontend.
+export interface ConsumableBatchDto {
+  id: string;
+  code: string;
+  productId: string;
+  productName: string;
+  category: string;
+  remainingQuantity: number;
+  unit: string;
+  unitCost: number | null;
+  expirationDate?: string;
+}
 
 @Injectable()
 export class InventoryService {
@@ -21,12 +52,23 @@ export class InventoryService {
     private readonly movements: Repository<InventoryMovementEntity>,
     @InjectRepository(BatchEntity)
     private readonly batches: Repository<BatchEntity>,
+    @InjectRepository(ProductionOrderEntity)
+    private readonly productionOrders: Repository<ProductionOrderEntity>,
+    @InjectRepository(SalesOrderEntity)
+    private readonly salesOrders: Repository<SalesOrderEntity>,
+    @InjectRepository(MilkReceptionEntity)
+    private readonly receptions: Repository<MilkReceptionEntity>,
     private readonly dataSource: DataSource,
   ) {}
 
   // --- Warehouses
-  async listWarehouses(): Promise<Warehouse[]> {
-    const rows = await this.warehouses.find({ where: { isActive: true }, order: { name: 'ASC' } });
+  // Por defecto solo cámaras activas (para selectores). La pantalla de gestión pide
+  // todas (includeInactive) para poder reactivar las desactivadas.
+  async listWarehouses(includeInactive = false): Promise<Warehouse[]> {
+    const rows = await this.warehouses.find({
+      where: includeInactive ? {} : { isActive: true },
+      order: { name: 'ASC' },
+    });
     return rows.map((w) => this.warehouseToDto(w));
   }
 
@@ -42,48 +84,93 @@ export class InventoryService {
     return this.warehouseToDto(await this.warehouses.save(w));
   }
 
+  async updateWarehouse(id: string, input: UpdateWarehouseInput): Promise<Warehouse> {
+    const w = await this.warehouses.findOne({ where: { id } });
+    if (!w) throw new NotFoundException(`Cámara ${id} no encontrada`);
+    if (input.code !== undefined) w.code = input.code;
+    if (input.name !== undefined) w.name = input.name;
+    if (input.kind !== undefined) w.kind = input.kind;
+    if (input.targetTemperatureCelsius !== undefined) {
+      w.targetTemperatureCelsius =
+        input.targetTemperatureCelsius != null ? String(input.targetTemperatureCelsius) : null;
+    }
+    if (typeof input.isActive === 'boolean') w.isActive = input.isActive;
+    return this.warehouseToDto(await this.warehouses.save(w));
+  }
+
   // --- Stock summary
   // Devuelve el stock agregado por producto. CLAUDE.md §4.4 — FEFO ordena por vencimiento.
   async stockSummary(): Promise<StockSummary[]> {
     const rows = await this.batches
       .createQueryBuilder('b')
       .leftJoin('b.product', 'p')
+      .leftJoin('b.warehouse', 'w')
       .select('b.product_id', 'productId')
       .addSelect('p.name', 'productName')
       .addSelect('p.sku', 'sku')
       .addSelect('p.unit', 'unit')
+      .addSelect('p.min_stock_level', 'minStockLevel')
       .addSelect('SUM(b.remaining_quantity)', 'totalQuantity')
       .addSelect('COUNT(*)', 'batchCount')
       .addSelect('MIN(b.expiration_date)', 'nearestExpiration')
+      // Cámaras distintas (no nulas) donde hay lotes del producto.
+      .addSelect("ARRAY_AGG(DISTINCT w.name) FILTER (WHERE w.name IS NOT NULL)", 'warehouses')
       .where("b.status IN ('activo', 'en_proceso')")
       .andWhere('b.product_id IS NOT NULL')
       .groupBy('b.product_id')
       .addGroupBy('p.name')
       .addGroupBy('p.sku')
       .addGroupBy('p.unit')
+      .addGroupBy('p.min_stock_level')
       .orderBy('p.name', 'ASC')
       .getRawMany();
 
     const now = Date.now();
     return rows.map((r) => {
       const nearest = r.nearestExpiration ? new Date(r.nearestExpiration) : null;
-      let alertLevel: StockSummary['alertLevel'] = 'ok';
-      if (nearest) {
-        const daysToExpire = Math.floor((nearest.getTime() - now) / 86_400_000);
-        if (daysToExpire <= 0) alertLevel = 'critical';
-        else if (daysToExpire <= 7) alertLevel = 'expiring';
-      }
+      const minStock = r.minStockLevel != null ? Number(r.minStockLevel) : null;
+      const totalQuantity = Number(r.totalQuantity);
+      const daysToExpire = nearest ? Math.floor((nearest.getTime() - now) / 86_400_000) : null;
+      const warehouses: string[] | undefined =
+        Array.isArray(r.warehouses) && r.warehouses.length > 0 ? r.warehouses : undefined;
       return {
         productId: r.productId as string,
         productName: r.productName as string,
         sku: r.sku as string,
         unit: r.unit as string,
-        totalQuantity: Number(r.totalQuantity),
+        totalQuantity,
         batchCount: Number(r.batchCount),
         nearestExpiration: nearest?.toISOString(),
-        alertLevel,
+        minStock: minStock ?? undefined,
+        warehouses,
+        alertLevel: resolveAlertLevel({ totalQuantity, minStock, daysToExpire }),
       };
     });
+  }
+
+  // Lotes disponibles para consumir en producción (CLAUDE.md §4.3 — apertura de orden).
+  // Ej: lotes de categoría "intermedio" (masa) para el paso masa→mozzarella.
+  // Sólo lotes activos con saldo > 0; ordenados por vencimiento (FEFO) y luego por código.
+  async consumableBatches(category?: string): Promise<ConsumableBatchDto[]> {
+    const qb = this.batches
+      .createQueryBuilder('b')
+      .leftJoinAndSelect('b.product', 'p')
+      .where("b.status = 'activo'")
+      .andWhere('b.remaining_quantity > 0');
+    if (category) qb.andWhere('p.category = :category', { category });
+    qb.orderBy('b.expiration_date', 'ASC').addOrderBy('b.code', 'ASC');
+    const rows = await qb.getMany();
+    return rows.map((b) => ({
+      id: b.id,
+      code: b.code,
+      productId: b.productId ?? '',
+      productName: b.product?.name ?? '',
+      category: b.product?.category ?? '',
+      remainingQuantity: Number(b.remainingQuantity),
+      unit: b.unit,
+      unitCost: b.unitCost != null ? Number(b.unitCost) : null,
+      expirationDate: b.expirationDate?.toISOString(),
+    }));
   }
 
   // FEFO — lotes activos ordenados por vencimiento más próximo.
@@ -135,17 +222,151 @@ export class InventoryService {
     return rows.map((m) => this.movementToDto(m));
   }
 
-  // Trazabilidad ascendente: dado un lote, devuelve el árbol de lotes padre.
+  // Trazabilidad ascendente simple por parent_batch_id. Se mantiene por compatibilidad
+  // con el endpoint histórico /traceback. Para multi-padre usar traceBackward.
   async traceback(batchId: string): Promise<BatchEntity[]> {
     const chain: BatchEntity[] = [];
+    const seen = new Set<string>();
     let current: BatchEntity | null = await this.batches.findOne({ where: { id: batchId } });
-    while (current) {
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
       chain.push(current);
       if (!current.parentBatchId) break;
       const parentId: string = current.parentBatchId;
       current = await this.batches.findOne({ where: { id: parentId } });
     }
     return chain;
+  }
+
+  // Carga en memoria todo lo necesario para recorrer el grafo de trazabilidad y devuelve
+  // un reader síncrono (lo consume la lógica pura de trace-graph). Resuelve multi-padre y
+  // multi-paso vía inventory_movements + production_orders.milkInputs (CLAUDE.md §4.4).
+  private async buildTraceReader(): Promise<
+    TraceGraphReader & { getOrderCode(orderId: string): string }
+  > {
+    const [batches, movements, orders, sales, receptions] = await Promise.all([
+      this.batches.find({ relations: { product: true } }),
+      this.movements.find(),
+      this.productionOrders.find(),
+      this.salesOrders.find({ relations: { client: true } }),
+      this.receptions.find({ relations: { producer: true } }),
+    ]);
+
+    const batchById = new Map<string, BatchEntity>(batches.map((b) => [b.id, b]));
+    const orderById = new Map<string, ProductionOrderEntity>(orders.map((o) => [o.id, o]));
+    const saleById = new Map<string, SalesOrderEntity>(sales.map((s) => [s.id, s]));
+    // Lote de leche → productor (vía recepción).
+    const producerByBatchId = new Map<string, TraceProducer>();
+    for (const r of receptions) {
+      if (r.batchId) {
+        producerByBatchId.set(r.batchId, {
+          producerId: r.producerId,
+          producerName: r.producer?.name ?? r.producerName,
+          receptionCode: r.code,
+        });
+      }
+    }
+
+    // Índices sobre movimientos.
+    const consumedInOrders = new Map<string, Set<string>>(); // batchId → orderIds (out/production_order)
+    const dispatchesByBatch = new Map<string, TraceDispatch[]>(); // batchId → despachos
+    const orderOutputs = new Map<string, Set<string>>(); // orderId → batchIds (in/production_order)
+    const producingOrderByBatch = new Map<string, string>(); // batchId → orderId que lo produjo
+
+    for (const m of movements) {
+      if (m.referenceType === 'production_order' && m.referenceId) {
+        if (m.type === 'out') {
+          if (!consumedInOrders.has(m.batchId)) consumedInOrders.set(m.batchId, new Set());
+          consumedInOrders.get(m.batchId)!.add(m.referenceId);
+        } else if (m.type === 'in') {
+          if (!orderOutputs.has(m.referenceId)) orderOutputs.set(m.referenceId, new Set());
+          orderOutputs.get(m.referenceId)!.add(m.batchId);
+          producingOrderByBatch.set(m.batchId, m.referenceId);
+        }
+      } else if (m.referenceType === 'sales_order' && m.referenceId) {
+        const sale = saleById.get(m.referenceId);
+        const list = dispatchesByBatch.get(m.batchId) ?? [];
+        list.push({
+          salesOrderId: m.referenceId,
+          salesOrderCode: sale?.code ?? '',
+          clientId: sale?.clientId ?? null,
+          clientName: sale?.client?.businessName ?? '',
+          quantity: Number(m.quantity),
+          unit: m.unit,
+          dispatchedAt: sale?.dispatchedAt?.toISOString(),
+        });
+        dispatchesByBatch.set(m.batchId, list);
+      }
+    }
+
+    const toTraceBatch = (b: BatchEntity): TraceBatch => ({
+      id: b.id,
+      code: b.code,
+      productId: b.productId,
+      productName: b.product?.name ?? null,
+      unit: b.unit,
+      quantity: b.remainingQuantity != null ? Number(b.remainingQuantity) : null,
+      expirationDate: b.expirationDate?.toISOString(),
+      // Es leche de origen si tiene productor asociado y no fue producido por una orden.
+      isMilk: producerByBatchId.has(b.id) && !producingOrderByBatch.has(b.id),
+    });
+
+    return {
+      getBatch: (batchId) => {
+        const b = batchById.get(batchId);
+        return b ? toTraceBatch(b) : null;
+      },
+      getOutEdges: (batchId): BatchOutEdges => ({
+        consumedInOrderIds: Array.from(consumedInOrders.get(batchId) ?? []),
+        dispatches: dispatchesByBatch.get(batchId) ?? [],
+      }),
+      getOrderOutputBatchIds: (orderId) => Array.from(orderOutputs.get(orderId) ?? []),
+      getProducingOrder: (batchId) => {
+        const orderId = producingOrderByBatch.get(batchId);
+        if (!orderId) return null;
+        return { orderId, orderCode: orderById.get(orderId)?.code ?? '' };
+      },
+      getOrderInputBatchIds: (orderId) => {
+        const order = orderById.get(orderId);
+        return (order?.milkInputs ?? []).map((mi) => mi.batchId);
+      },
+      getProducer: (batchId) => producerByBatchId.get(batchId) ?? null,
+      getOrderCode: (orderId) => orderById.get(orderId)?.code ?? '',
+    };
+  }
+
+  // Trazabilidad DESCENDENTE: de un lote (leche o masa) hacia adelante — en qué órdenes se
+  // consumió, qué lotes producto generó (recursivo) y a qué clientes se despachó.
+  async traceForward(batchId: string): Promise<TraceForward> {
+    const reader = await this.buildTraceReader();
+    const node = buildForwardTrace(batchId, reader);
+    if (!node) throw new NotFoundException(`Lote ${batchId} no encontrado`);
+    return node;
+  }
+
+  // Trazabilidad ASCENDENTE: de un lote hacia atrás — la orden que lo produjo, todos los
+  // lotes consumidos (multi-padre) y, en el origen, el productor de cada leche.
+  async traceBackward(batchId: string): Promise<TraceBackward> {
+    const reader = await this.buildTraceReader();
+    const node = buildBackwardTrace(batchId, reader);
+    if (!node) throw new NotFoundException(`Lote ${batchId} no encontrado`);
+    return node;
+  }
+
+  // Sugerencia FEFO (solo lectura): qué lotes tomar para cubrir una cantidad, ordenados por
+  // vencimiento más próximo. No persiste ni baja stock (CLAUDE.md §4.4).
+  async fefoSuggestion(productId: string, quantity: number): Promise<FefoSuggestion> {
+    const batches = await this.fefoBatchesForProduct(productId);
+    const result = buildFefoSuggestion(
+      quantity,
+      batches.map((b) => ({
+        id: b.id,
+        code: b.code,
+        remaining: Number(b.remainingQuantity),
+        expirationDate: b.expirationDate?.toISOString(),
+      })),
+    );
+    return { productId, quantity, ...result };
   }
 
   warehouseToDto(w: WarehouseEntity): Warehouse {

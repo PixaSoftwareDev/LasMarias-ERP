@@ -30,6 +30,7 @@ export class ProductsService {
       category: input.category,
       unit: input.unit,
       trackBatches: input.trackBatches,
+      minStockLevel: input.minStockLevel != null ? String(input.minStockLevel) : null,
       isActive: true,
     });
     return this.toDto(await this.repo.save(entity));
@@ -45,6 +46,9 @@ export class ProductsService {
       ...(input.category !== undefined && { category: input.category }),
       ...(input.unit !== undefined && { unit: input.unit }),
       ...(input.trackBatches !== undefined && { trackBatches: input.trackBatches }),
+      ...(input.minStockLevel !== undefined && {
+        minStockLevel: input.minStockLevel != null ? String(input.minStockLevel) : null,
+      }),
       ...(input.isActive !== undefined && { isActive: input.isActive }),
     });
     return this.toDto(await this.repo.save(p));
@@ -59,6 +63,7 @@ export class ProductsService {
       category: e.category,
       unit: e.unit,
       trackBatches: e.trackBatches,
+      minStockLevel: e.minStockLevel != null ? Number(e.minStockLevel) : undefined,
       isActive: e.isActive,
       createdAt: e.createdAt.toISOString(),
       updatedAt: e.updatedAt.toISOString(),

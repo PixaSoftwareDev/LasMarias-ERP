@@ -35,13 +35,6 @@ export class EnvService {
     };
   }
 
-  get redis() {
-    return {
-      host: this.env.REDIS_HOST,
-      port: this.env.REDIS_PORT,
-    };
-  }
-
   get jwt() {
     return {
       accessSecret: this.env.JWT_ACCESS_SECRET,

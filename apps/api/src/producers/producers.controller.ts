@@ -1,10 +1,14 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { ProducersService, type CreateProducerInput } from './producers.service';
+import {
+  ProducersService,
+  type CreateProducerInput,
+  type UpdateProducerInput,
+} from './producers.service';
 
 const createProducerSchema = z.object({
   name: z.string().min(1, 'Ingresá el nombre del productor').max(200),
@@ -14,6 +18,17 @@ const createProducerSchema = z.object({
   city: z.string().max(120).optional(),
   agreedPricePerLiter: z.coerce.number().positive().optional(),
   notes: z.string().max(1000).optional(),
+});
+
+const updateProducerSchema = z.object({
+  name: z.string().min(1, 'Ingresá el nombre del productor').max(200).optional(),
+  taxId: z.string().max(20).optional(),
+  phone: z.string().max(30).optional(),
+  address: z.string().max(300).optional(),
+  city: z.string().max(120).optional(),
+  agreedPricePerLiter: z.coerce.number().positive().optional(),
+  notes: z.string().max(1000).optional(),
+  isActive: z.boolean().optional(),
 });
 
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -31,5 +46,14 @@ export class ProducersController {
   @Roles('admin', 'gerente')
   create(@Body(new ZodValidationPipe(createProducerSchema)) body: CreateProducerInput) {
     return this.producers.create(body);
+  }
+
+  @Patch(':id')
+  @Roles('admin', 'gerente')
+  update(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(updateProducerSchema)) body: UpdateProducerInput,
+  ) {
+    return this.producers.update(id, body);
   }
 }

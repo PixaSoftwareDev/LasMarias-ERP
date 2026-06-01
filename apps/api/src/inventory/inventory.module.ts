@@ -5,9 +5,21 @@ import { InventoryMovementEntity } from './inventory-movement.entity';
 import { InventoryService } from './inventory.service';
 import { InventoryController } from './inventory.controller';
 import { BatchesModule } from '../batches/batches.module';
+import { ProductionOrderEntity } from '../production/production-order.entity';
+import { SalesOrderEntity } from '../sales/sales-order.entity';
+import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([WarehouseEntity, InventoryMovementEntity]), BatchesModule],
+  imports: [
+    TypeOrmModule.forFeature([
+      WarehouseEntity,
+      InventoryMovementEntity,
+      ProductionOrderEntity,
+      SalesOrderEntity,
+      MilkReceptionEntity,
+    ]),
+    BatchesModule,
+  ],
   providers: [InventoryService],
   controllers: [InventoryController],
   exports: [InventoryService, TypeOrmModule],

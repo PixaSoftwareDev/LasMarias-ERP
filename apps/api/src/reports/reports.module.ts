@@ -1,24 +1,22 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ReportsService } from './reports.service';
-import { ReportsController } from './reports.controller';
-import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
 import { ProductionOrderEntity } from '../production/production-order.entity';
 import { SalesOrderEntity } from '../sales/sales-order.entity';
-import { InvoiceEntity } from '../invoices/invoice.entity';
-import { BatchEntity } from '../batches/batch.entity';
-import { InventoryModule } from '../inventory/inventory.module';
+import { CreditNoteEntity } from '../sales/credit-note.entity';
+import { InventoryMovementEntity } from '../inventory/inventory-movement.entity';
+import { ReportsService } from './reports.service';
+import { ReportsController } from './reports.controller';
 
+// Reportes básicos (CLAUDE.md §4.9). Solo lecturas agregadas sobre producción,
+// ventas, notas de crédito y movimientos; no posee tablas propias.
 @Module({
   imports: [
     TypeOrmModule.forFeature([
-      MilkReceptionEntity,
       ProductionOrderEntity,
       SalesOrderEntity,
-      InvoiceEntity,
-      BatchEntity,
+      CreditNoteEntity,
+      InventoryMovementEntity,
     ]),
-    InventoryModule,
   ],
   providers: [ReportsService],
   controllers: [ReportsController],

@@ -34,7 +34,7 @@ export class ClientsService {
       phone: input.phone ?? null,
       address: input.address ?? null,
       city: input.city ?? null,
-      zoneId: input.zoneId ?? null,
+      paymentTermDays: input.paymentTermDays ?? null,
       notes: input.notes ?? null,
       isActive: true,
     });
@@ -52,7 +52,7 @@ export class ClientsService {
       ...(input.phone !== undefined && { phone: input.phone }),
       ...(input.address !== undefined && { address: input.address }),
       ...(input.city !== undefined && { city: input.city }),
-      ...(input.zoneId !== undefined && { zoneId: input.zoneId }),
+      ...(input.paymentTermDays !== undefined && { paymentTermDays: input.paymentTermDays }),
       ...(input.notes !== undefined && { notes: input.notes }),
       ...(input.isActive !== undefined && { isActive: input.isActive }),
     });
@@ -69,7 +69,7 @@ export class ClientsService {
       phone: e.phone ?? undefined,
       address: e.address ?? undefined,
       city: e.city ?? undefined,
-      zoneId: e.zoneId ?? undefined,
+      paymentTermDays: e.paymentTermDays ?? null,
       notes: e.notes ?? undefined,
       isActive: e.isActive,
       createdAt: e.createdAt.toISOString(),

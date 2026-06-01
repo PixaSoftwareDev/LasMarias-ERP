@@ -1,8 +1,10 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import {
   createWarehouseInputSchema,
+  updateWarehouseInputSchema,
   stockCountInputSchema,
   type CreateWarehouseInput,
+  type UpdateWarehouseInput,
   type StockCountInput,
 } from '@lasmarias/shared-schemas';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -19,8 +21,8 @@ export class InventoryController {
 
   @Get('warehouses')
   @Roles('admin', 'gerente', 'operario')
-  listWarehouses() {
-    return this.inventory.listWarehouses();
+  listWarehouses(@Query('all') all?: string) {
+    return this.inventory.listWarehouses(all === 'true');
   }
 
   @Post('warehouses')
@@ -29,10 +31,25 @@ export class InventoryController {
     return this.inventory.createWarehouse(body);
   }
 
+  @Patch('warehouses/:id')
+  @Roles('admin', 'gerente')
+  updateWarehouse(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(updateWarehouseInputSchema)) body: UpdateWarehouseInput,
+  ) {
+    return this.inventory.updateWarehouse(id, body);
+  }
+
   @Get('stock')
   @Roles('admin', 'gerente', 'operario', 'vendedor')
   stockSummary() {
     return this.inventory.stockSummary();
+  }
+
+  @Get('batches')
+  @Roles('admin', 'gerente', 'operario')
+  consumableBatches(@Query('category') category?: string) {
+    return this.inventory.consumableBatches(category);
   }
 
   @Get('movements')
@@ -45,6 +62,30 @@ export class InventoryController {
   @Roles('admin', 'gerente', 'operario')
   traceback(@Param('batchId', new ParseUUIDPipe()) batchId: string) {
     return this.inventory.traceback(batchId);
+  }
+
+  // Trazabilidad descendente: de un lote hacia el cliente (qué se hizo con él).
+  @Get('trace-forward/:batchId')
+  @Roles('admin', 'gerente', 'operario', 'vendedor')
+  traceForward(@Param('batchId', new ParseUUIDPipe()) batchId: string) {
+    return this.inventory.traceForward(batchId);
+  }
+
+  // Trazabilidad ascendente (multi-padre): de un lote hacia la leche y el productor de origen.
+  @Get('trace-backward/:batchId')
+  @Roles('admin', 'gerente', 'operario', 'vendedor')
+  traceBackward(@Param('batchId', new ParseUUIDPipe()) batchId: string) {
+    return this.inventory.traceBackward(batchId);
+  }
+
+  // Sugerencia FEFO (solo lectura): qué lotes tomar para cubrir una cantidad.
+  @Get('fefo-suggestion')
+  @Roles('admin', 'gerente', 'operario', 'vendedor')
+  fefoSuggestion(
+    @Query('productId', new ParseUUIDPipe()) productId: string,
+    @Query('quantity') quantity: string,
+  ) {
+    return this.inventory.fefoSuggestion(productId, Number(quantity));
   }
 
   @Post('count')

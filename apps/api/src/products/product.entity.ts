@@ -24,6 +24,10 @@ export class ProductEntity extends BaseEntity {
   @Column({ type: 'boolean', name: 'track_batches', default: true })
   trackBatches!: boolean;
 
+  // Stock mínimo configurable — dispara alerta 'low' (CLAUDE.md §4.4). Null = sin umbral.
+  @Column({ type: 'numeric', precision: 14, scale: 3, name: 'min_stock_level', nullable: true })
+  minStockLevel!: string | null;
+
   @Column({ type: 'boolean', name: 'is_active', default: true })
   isActive!: boolean;
 }

@@ -18,6 +18,9 @@ export const recipeIngredientSchema = z.object({
   quantity: z.number().nonnegative(),
   unit: z.enum(['kg', 'litro', 'unidad', 'gramo']),
   basis: ingredientBasisSchema,
+  // Costo unitario congelado en la versión de receta ($/unidad del insumo).
+  // Opcional para tolerar recetas viejas sin costo; ausente = 0 (CLAUDE.md §5.5).
+  unitCost: z.number().nonnegative().optional(),
 });
 export type RecipeIngredient = z.infer<typeof recipeIngredientSchema>;
 
@@ -60,6 +63,8 @@ export const recipeSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
   activeVersion: recipeVersionSchema.optional(),
+  // Historial completo de versiones (incluye la activa), ordenado de más nueva a más vieja.
+  versions: z.array(recipeVersionSchema).optional(),
   isActive: z.boolean(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,

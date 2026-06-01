@@ -43,6 +43,13 @@ export function useAuth() {
     return res.user;
   }, []);
 
+  // Refresca el usuario local (localStorage + estado) tras editar "Mi cuenta",
+  // sin volver a pedir login. Mantiene el sidebar y demás en sincronía.
+  const updateLocalUser = useCallback((next: User) => {
+    localStorage.setItem(USER_KEY, JSON.stringify(next));
+    setUser(next);
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await api('/api/auth/logout', { method: 'POST' });
@@ -56,5 +63,5 @@ export function useAuth() {
     }
   }, []);
 
-  return { user, hydrated, login, logout, isAuthenticated: !!user };
+  return { user, hydrated, login, logout, updateLocalUser, isAuthenticated: !!user };
 }

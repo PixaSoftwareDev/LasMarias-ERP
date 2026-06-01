@@ -1,5 +1,6 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import type {
+  ProductionCostBreakdown,
   ProductionMilkInput,
   ProductionOutput,
   ProductionStatus,
@@ -65,6 +66,10 @@ export class ProductionOrderEntity extends BaseEntity {
 
   @Column({ type: 'numeric', precision: 14, scale: 4, name: 'unit_cost', nullable: true })
   unitCost!: string | null;
+
+  // Desglose de costo (real + estándar + desvíos) calculado al cerrar. CLAUDE.md §5.
+  @Column({ type: 'jsonb', name: 'cost_breakdown', nullable: true })
+  costBreakdown!: ProductionCostBreakdown | null;
 
   @Column({ type: 'text', nullable: true })
   notes!: string | null;

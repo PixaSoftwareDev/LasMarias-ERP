@@ -1,6 +1,12 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import type { AuthTokens, LoginInput, User } from '@lasmarias/shared-schemas';
+import type {
+  AuthTokens,
+  ChangePasswordInput,
+  LoginInput,
+  UpdateMeInput,
+  User,
+} from '@lasmarias/shared-schemas';
 import { EnvService } from '../config/env.service';
 import { UsersService } from '../users/users.service';
 
@@ -35,6 +41,16 @@ export class AuthService {
 
   async logout(userId: string): Promise<void> {
     await this.users.setRefreshToken(userId, null);
+  }
+
+  // "Mi cuenta": el usuario edita sus propios datos.
+  async updateProfile(userId: string, input: UpdateMeInput): Promise<User> {
+    return this.users.update(userId, input);
+  }
+
+  // "Mi cuenta": cambio de contraseña propia (valida la actual en el service de usuarios).
+  async changePassword(userId: string, input: ChangePasswordInput): Promise<void> {
+    await this.users.changePassword(userId, input.currentPassword, input.newPassword);
   }
 
   private async issueTokens(sub: string, email: string, role: string): Promise<AuthTokens> {

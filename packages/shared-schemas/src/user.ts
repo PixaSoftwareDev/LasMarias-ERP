@@ -43,3 +43,20 @@ export const updateUserInputSchema = createUserInputSchema
   .extend({ isActive: z.boolean().optional() });
 
 export type UpdateUserInput = z.infer<typeof updateUserInputSchema>;
+
+// "Mi cuenta": el usuario edita sus propios datos (nombre/email).
+export const updateMeInputSchema = z.object({
+  fullName: z.string().min(1, 'Ingresá el nombre completo').max(120).optional(),
+  email: z.string().email('Email inválido').optional(),
+});
+export type UpdateMeInput = z.infer<typeof updateMeInputSchema>;
+
+// "Mi cuenta": cambio de contraseña (verifica la actual antes de aplicar la nueva).
+export const changePasswordInputSchema = z.object({
+  currentPassword: z.string().min(1, 'Ingresá tu contraseña actual'),
+  newPassword: z
+    .string()
+    .min(8, 'La nueva contraseña tiene que tener al menos 8 caracteres')
+    .max(128),
+});
+export type ChangePasswordInput = z.infer<typeof changePasswordInputSchema>;

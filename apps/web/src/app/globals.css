@@ -12,3 +12,29 @@
     @apply text-base text-foreground;
   }
 }
+
+/* Impresión de comprobantes (remito A4). Ocultamos el chrome de la app
+   (sidebar, header mobile, bottom-nav y todo lo marcado .no-print) y dejamos
+   solo el documento. CLAUDE.md §4.6 — remito imprimible. */
+@media print {
+  aside,
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+  .print-document {
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: 0 !important;
+    max-width: none !important;
+  }
+  @page {
+    size: A4;
+    margin: 16mm;
+  }
+}

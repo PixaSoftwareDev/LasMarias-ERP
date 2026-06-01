@@ -87,6 +87,9 @@ export class MilkReceptionsService {
           unit: 'litro' as const,
           status: 'activo' as const,
           parentBatchId: null,
+          warehouseId: input.warehouseId ?? null,
+          // Costo de la leche = precio acordado con el tambo ($/litro). Habilita el costeo.
+          unitCost: producer.agreedPricePerLiter,
           notes: `Leche cruda — productor ${producer.name}`,
         });
         const savedBatch = await batchRepo.save(batch);
@@ -101,6 +104,8 @@ export class MilkReceptionsService {
         producerName: producer.name,
         vehiclePlate: input.vehiclePlate ?? null,
         driverName: input.driverName ?? null,
+        remito: input.remito ?? null,
+        declaredLiters: input.declaredLiters != null ? String(input.declaredLiters) : null,
         liters: String(input.liters),
         quality: input.quality,
         status,
@@ -144,6 +149,10 @@ export class MilkReceptionsService {
       producerName: e.producerName,
       vehiclePlate: e.vehiclePlate ?? undefined,
       driverName: e.driverName ?? undefined,
+      remito: e.remito ?? undefined,
+      declaredLiters: e.declaredLiters != null ? Number(e.declaredLiters) : undefined,
+      litersDifference:
+        e.declaredLiters != null ? Number(e.liters) - Number(e.declaredLiters) : undefined,
       liters: Number(e.liters),
       quality: e.quality,
       status: e.status,

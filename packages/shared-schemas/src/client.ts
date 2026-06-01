@@ -15,7 +15,8 @@ export const clientSchema = z.object({
   phone: phoneSchema.optional(),
   address: z.string().max(300).optional(),
   city: z.string().max(120).optional(),
-  zoneId: uuidSchema.optional(), // Zona de reparto (CLAUDE.md §4.10.1)
+  // Condición de pago default: null = contado; N = a N días (vencimiento del cargo).
+  paymentTermDays: z.number().int().min(0).max(365).nullable().optional(),
   notes: z.string().max(1000).optional(),
   isActive: z.boolean(),
   createdAt: isoDateTimeSchema,

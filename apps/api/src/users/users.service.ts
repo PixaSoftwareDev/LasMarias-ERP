@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
@@ -58,6 +58,15 @@ export class UsersService {
 
   async verifyPassword(user: UserEntity, plain: string): Promise<boolean> {
     return bcrypt.compare(plain, user.passwordHash);
+  }
+
+  // Cambio de contraseña propio: exige la contraseña actual antes de aplicar la nueva.
+  async changePassword(id: string, currentPassword: string, newPassword: string): Promise<void> {
+    const user = await this.findById(id);
+    const valid = await this.verifyPassword(user, currentPassword);
+    if (!valid) throw new BadRequestException('La contraseña actual no es correcta');
+    user.passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    await this.repo.save(user);
   }
 
   async setRefreshToken(userId: string, refreshToken: string | null): Promise<void> {

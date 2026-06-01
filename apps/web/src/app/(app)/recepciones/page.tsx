@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Milk, Plus } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, Milk, Plus } from 'lucide-react';
 import type { MilkReception } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -23,19 +24,30 @@ function statusToBadge(s: MilkReception['status']): { variant: Status; label: st
   }
 }
 
+const PAGE_SIZE = 10;
+
 export default function ReceptionsPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['receptions'],
     queryFn: () => receptionsApi.list(),
   });
 
+  // Paginación local (mismo criterio que el DataTable compartido: 10 por página).
+  const [page, setPage] = useState(0);
+  const total = data?.length ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  useEffect(() => {
+    if (page > totalPages - 1) setPage(0);
+  }, [totalPages, page]);
+  const start = page * PAGE_SIZE;
+  const rows = (data ?? []).slice(start, start + PAGE_SIZE);
+  const paginated = total > PAGE_SIZE;
+
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 p-4 sm:p-6">
+    <div className="flex flex-col gap-6">
       <PageHeader
         title="Recepción de leche"
-        description="Ingreso diario de leche cruda a la planta."
-        breadcrumbs={[{ href: '/dashboard', label: 'Inicio' }, { label: 'Recepción de leche' }]}
-        action={
+        description="Ingreso diario de leche cruda a la planta."        action={
           <Button asChild size="md">
             <Link href="/recepciones/nueva">
               <Plus className="h-4 w-4" aria-hidden="true" />
@@ -80,7 +92,7 @@ export default function ReceptionsPage() {
         <>
           {/* Mobile: card list. CLAUDE.md §5.3 — "listas sobre tablas en mobile". */}
           <div className="grid gap-3 md:hidden">
-            {data.map((r) => {
+            {rows.map((r) => {
               const s = statusToBadge(r.status);
               return (
                 <Card key={r.id} className="p-4">
@@ -116,7 +128,7 @@ export default function ReceptionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.map((r) => {
+                {rows.map((r) => {
                   const s = statusToBadge(r.status);
                   return (
                     <tr key={r.id} className="border-b border-border-subtle last:border-0 hover:bg-surface-subtle/30">
@@ -133,6 +145,36 @@ export default function ReceptionsPage() {
               </tbody>
             </table>
           </Card>
+
+          {/* Paginación — solo si hay más de una página. */}
+          {paginated && (
+            <div className="mt-3 flex flex-col items-center justify-between gap-2 text-sm sm:flex-row">
+              <span className="text-foreground-muted">
+                Mostrando {start + 1}–{Math.min(start + PAGE_SIZE, total)} de {total}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={page === 0}
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                >
+                  <ChevronLeft className="h-4 w-4" /> Anterior
+                </Button>
+                <span className="px-1 text-foreground-muted">
+                  Página {page + 1} de {totalPages}
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={page >= totalPages - 1}
+                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                >
+                  Siguiente <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

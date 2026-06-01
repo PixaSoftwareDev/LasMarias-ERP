@@ -1,11 +1,13 @@
 /**
  * Carga de DATOS DE DEMOSTRACIÓN vía la API REST (respeta validaciones y lógica
- * de negocio: genera lotes, resuelve precios, calcula totales).
+ * de negocio: genera lotes, calcula costos, baja stock por FEFO, arma cuentas).
  *
  * Uso:  pnpm --filter api seed:demo      (con la API corriendo en :4000)
  *
- * Es tolerante a duplicados: si un dato ya existe, lo saltea y sigue.
- * NO borra nada. Pensado para dejar la app "poblada" para demo/capacitación.
+ * Es tolerante a duplicados en los MAESTROS (productos, clientes, tambos, cámaras,
+ * recetas, precios): si ya existen, los saltea. La parte transaccional (recepciones,
+ * producción, despachos, cobros, gastos) se genera SOLO si todavía no hay producción,
+ * para que reejecutar el script no duplique movimientos. NO borra nada.
  */
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? process.env.API_URL ?? 'http://localhost:4000';
@@ -13,6 +15,7 @@ const EMAIL = process.env.SEED_ADMIN_EMAIL ?? 'admin@lasmarias.local';
 const PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? 'Admin123!Cambiar';
 
 let token = '';
+let operatorId = '';
 
 async function login(): Promise<void> {
   const r = await fetch(`${API}/api/auth/login`, {
@@ -20,9 +23,10 @@ async function login(): Promise<void> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
   });
-  if (!r.ok) throw new Error(`Login falló (${r.status}). ¿La API está corriendo en ${API}?`);
-  const data = (await r.json()) as { tokens?: { accessToken: string }; accessToken?: string };
+  if (!r.ok) throw new Error(`Login falló (${r.status}). ¿La API corre en ${API}? ¿Credenciales correctas?`);
+  const data = (await r.json()) as { user?: { id: string }; tokens?: { accessToken: string }; accessToken?: string };
   token = data.tokens?.accessToken ?? data.accessToken ?? '';
+  operatorId = data.user?.id ?? '';
   if (!token) throw new Error('No se pudo extraer el token del login.');
 }
 
@@ -34,7 +38,7 @@ async function req<T = any>(method: string, path: string, body?: unknown): Promi
   });
   const text = await r.text();
   if (!r.ok) {
-    const short = text.replace(/\s+/g, ' ').slice(0, 140);
+    const short = text.replace(/\s+/g, ' ').slice(0, 160);
     console.warn(`   ↳ ${method} ${path} → ${r.status} ${short}`);
     return null;
   }
@@ -43,107 +47,325 @@ async function req<T = any>(method: string, path: string, body?: unknown): Promi
 
 const get = <T = any>(p: string) => req<T>('GET', p);
 const post = <T = any>(p: string, b: unknown) => req<T>('POST', p, b);
+const put = <T = any>(p: string, b: unknown) => req<T>('PUT', p, b);
 
 const daysAgo = (n: number) => {
   const d = new Date();
   d.setDate(d.getDate() - n);
   return d.toISOString();
 };
+const rnd = (min: number, max: number) => min + Math.random() * (max - min);
+const round1 = (n: number) => Math.round(n * 10) / 10;
+const pick = <T>(arr: T[], i: number) => arr[i % arr.length]!;
 
 async function main() {
   console.log(`[seed:demo] API: ${API}`);
   await login();
-  console.log('[seed:demo] Sesión iniciada como admin.');
+  console.log(`[seed:demo] Sesión iniciada como admin (operatorId=${operatorId || 's/d'}).`);
 
-  // 1) Zonas de reparto -------------------------------------------------------
-  console.log('→ Zonas de reparto');
-  await post('/api/delivery/zones', { name: 'Centro Pergamino', description: 'Casco urbano', deliveryDays: ['mon', 'wed', 'fri'], cutoffTime: '12:00' });
-  await post('/api/delivery/zones', { name: 'Ruta Norte', description: 'Localidades del norte', deliveryDays: ['tue', 'thu'], cutoffTime: '10:00' });
-  const zones = (await get<any[]>('/api/delivery/zones')) ?? [];
-  const zoneCentro = zones.find((z) => z.name === 'Centro Pergamino')?.id;
-  const zoneNorte = zones.find((z) => z.name === 'Ruta Norte')?.id;
+  // 1) CÁMARAS ----------------------------------------------------------------
+  console.log('→ Cámaras');
+  const warehouseSeeds = [
+    { code: 'CF-01', name: 'Cámara de frío 1', kind: 'cold_chamber', targetTemperatureCelsius: 4 },
+    { code: 'CF-02', name: 'Cámara de frío 2', kind: 'cold_chamber', targetTemperatureCelsius: 3 },
+    { code: 'MAD-01', name: 'Sala de maduración', kind: 'maturation', targetTemperatureCelsius: 12 },
+  ];
+  const existingWh = (await get<any[]>('/api/inventory/warehouses?all=true')) ?? [];
+  for (const w of warehouseSeeds) {
+    if (!existingWh.some((x) => x.code === w.code)) await post('/api/inventory/warehouses', w);
+  }
+  const warehouses = (await get<any[]>('/api/inventory/warehouses?all=true')) ?? [];
+  const camaraFrio = warehouses.find((w) => w.code === 'CF-01')?.id;
+  const camaraMad = warehouses.find((w) => w.code === 'MAD-01')?.id;
 
-  // 2) Productos --------------------------------------------------------------
+  // 2) PRODUCTOS --------------------------------------------------------------
   console.log('→ Productos');
   const productSeeds = [
-    { sku: 'QC-001', name: 'Queso cremoso 1kg', category: 'queso', unit: 'kg', trackBatches: true },
-    { sku: 'MUZ-001', name: 'Muzzarella 1kg', category: 'queso', unit: 'kg', trackBatches: true },
-    { sku: 'RIC-001', name: 'Ricota 500g', category: 'subproducto', unit: 'unidad', trackBatches: true },
-    { sku: 'SUE-001', name: 'Suero (granel)', category: 'subproducto', unit: 'litro', trackBatches: false },
-    { sku: 'SAL-001', name: 'Sal entrefina', category: 'insumo', unit: 'kg', trackBatches: false },
-    { sku: 'FER-001', name: 'Fermento láctico', category: 'insumo', unit: 'unidad', trackBatches: false },
+    { sku: 'QC-001', name: 'Queso cremoso', category: 'queso', unit: 'kg', trackBatches: true },
+    { sku: 'MUZ-001', name: 'Muzzarella', category: 'queso', unit: 'kg', trackBatches: true },
+    { sku: 'MASA-001', name: 'Masa base', category: 'intermedio', unit: 'kg', trackBatches: true },
+    { sku: 'RIC-001', name: 'Ricota', category: 'subproducto', unit: 'kg', trackBatches: true },
+    { sku: 'FER-001', name: 'Fermento láctico', category: 'insumo', unit: 'unidad', trackBatches: false, minStockLevel: 20 },
+    { sku: 'CUA-001', name: 'Cuajo líquido', category: 'insumo', unit: 'litro', trackBatches: false, minStockLevel: 5 },
+    { sku: 'SAL-001', name: 'Sal entrefina', category: 'insumo', unit: 'kg', trackBatches: false, minStockLevel: 40 },
+    { sku: 'MO-001', name: 'Mano de obra', category: 'insumo', unit: 'unidad', trackBatches: false },
+    { sku: 'ENE-001', name: 'Energía', category: 'insumo', unit: 'unidad', trackBatches: false },
   ];
-  for (const p of productSeeds) await post('/api/products', p);
+  const existingProds = (await get<any[]>('/api/products')) ?? [];
+  for (const p of productSeeds) {
+    if (!existingProds.some((x) => x.sku === p.sku)) await post('/api/products', p);
+  }
   const products = (await get<any[]>('/api/products')) ?? [];
-  const idBySku = (sku: string) => products.find((p) => p.sku === sku)?.id;
+  const idBySku = (sku: string): string | undefined => products.find((p) => p.sku === sku)?.id;
 
-  // 3) Listas de precios (una por tipo de cliente) ----------------------------
+  // 3) LISTAS DE PRECIOS (por tipo de cliente) --------------------------------
   console.log('→ Listas de precios');
-  const priced = (sku: string, minor: number, mayor: number, distri: number) => ({ sku, minor, mayor, distri });
-  const priceRows = [
-    priced('QC-001', 3500, 3000, 2800),
-    priced('MUZ-001', 4200, 3700, 3500),
-    priced('RIC-001', 1800, 1500, 1400),
-    priced('SUE-001', 200, 180, 150),
-  ].filter((r) => idBySku(r.sku));
-  const existingLists = (await get<any[]>('/api/sales/price-lists')) ?? [];
-  for (const [type, key] of [['minorista', 'minor'], ['mayorista', 'mayor'], ['distribuidor', 'distri']] as const) {
-    if (existingLists.some((l) => l.clientType === type)) continue;
-    await post('/api/sales/price-lists', {
-      name: `Lista ${type}`,
-      clientType: type,
-      items: priceRows.map((r) => ({ productId: idBySku(r.sku)!, unitPrice: (r as any)[key] })),
-    });
+  const PRICES: Record<string, Record<string, number>> = {
+    minorista: { 'QC-001': 3500, 'MUZ-001': 4200, 'RIC-001': 1800 },
+    mayorista: { 'QC-001': 3000, 'MUZ-001': 3700, 'RIC-001': 1500 },
+    distribuidor: { 'QC-001': 2800, 'MUZ-001': 3500, 'RIC-001': 1400 },
+  };
+  for (const type of ['minorista', 'mayorista', 'distribuidor'] as const) {
+    const items = Object.entries(PRICES[type]!)
+      .map(([sku, unitPrice]) => ({ productId: idBySku(sku), unitPrice }))
+      .filter((i) => i.productId) as { productId: string; unitPrice: number }[];
+    if (items.length) await put('/api/sales/price-list', { clientType: type, items });
   }
 
-  // 4) Productores ------------------------------------------------------------
-  console.log('→ Productores');
-  await post('/api/producers', { name: 'Tambo La Esperanza', agreedPricePerLiter: 320, city: 'Pergamino' });
-  await post('/api/producers', { name: 'Tambo Don Pedro', agreedPricePerLiter: 315, city: 'Colón' });
-  await post('/api/producers', { name: 'Tambo Santa Rita', agreedPricePerLiter: 310, city: 'Pergamino' });
+  // 4) PRODUCTORES (tambos) ---------------------------------------------------
+  console.log('→ Tambos');
+  const producerSeeds = [
+    { name: 'Tambo La Esperanza', agreedPricePerLiter: 320, city: 'Pergamino' },
+    { name: 'Tambo Don Pedro', agreedPricePerLiter: 315, city: 'Colón' },
+    { name: 'Tambo Santa Rita', agreedPricePerLiter: 310, city: 'Pergamino' },
+    { name: 'Tambo El Trébol', agreedPricePerLiter: 325, city: 'Junín' },
+  ];
+  const existingProducers = (await get<any[]>('/api/producers')) ?? [];
+  for (const p of producerSeeds) {
+    if (!existingProducers.some((x) => x.name === p.name)) await post('/api/producers', p);
+  }
   const producers = (await get<any[]>('/api/producers')) ?? [];
 
-  // 5) Proveedores ------------------------------------------------------------
-  console.log('→ Proveedores');
-  await post('/api/suppliers', { businessName: 'Insumos del Litoral', contactName: 'Mariana Gómez', phone: '2477-456789' });
-  await post('/api/suppliers', { businessName: 'Envases del Sur SA', contactName: 'Carlos Ruiz', phone: '2477-112233' });
-
-  // 6) Clientes ---------------------------------------------------------------
+  // 5) CLIENTES ---------------------------------------------------------------
   console.log('→ Clientes');
   const clientSeeds = [
-    { businessName: 'Almacén Doña Rosa', type: 'minorista', city: 'Pergamino', zoneId: zoneCentro },
-    { businessName: 'Supermercado El Ahorro', type: 'mayorista', city: 'Pergamino', zoneId: zoneCentro },
-    { businessName: 'Distribuidora Norte SRL', type: 'distribuidor', city: 'Colón', zoneId: zoneNorte },
-    { businessName: 'Rotisería La Esquina', type: 'minorista', city: 'Pergamino', zoneId: zoneNorte },
+    { businessName: 'Almacén Doña Rosa', type: 'minorista', city: 'Pergamino', paymentTermDays: null },
+    { businessName: 'Rotisería La Esquina', type: 'minorista', city: 'Pergamino', paymentTermDays: null },
+    { businessName: 'Fiambrería El Cerdito', type: 'minorista', city: 'Colón', paymentTermDays: null },
+    { businessName: 'Supermercado El Ahorro', type: 'mayorista', city: 'Pergamino', paymentTermDays: 30 },
+    { businessName: 'Mayorista Sur SA', type: 'mayorista', city: 'Junín', paymentTermDays: 45 },
+    { businessName: 'Distribuidora Norte SRL', type: 'distribuidor', city: 'Colón', paymentTermDays: 30 },
   ];
-  for (const c of clientSeeds) await post('/api/clients', c);
+  const existingClients = (await get<any[]>('/api/clients')) ?? [];
+  for (const c of clientSeeds) {
+    if (!existingClients.some((x) => x.businessName === c.businessName)) await post('/api/clients', c);
+  }
   const clients = (await get<any[]>('/api/clients')) ?? [];
 
-  // 7) Recepciones de leche (calidad buena → aceptadas, generan lote) ---------
-  console.log('→ Recepciones de leche');
-  const goodQuality = { fatPercent: 3.5, proteinPercent: 3.2, ph: 6.7, temperatureCelsius: 4, somaticCellCount: 200000, bacterialCount: 50000, alcoholTestPassed: true, antibioticsDetected: false };
-  for (let i = 0; i < producers.length; i++) {
-    const prod = producers[i];
-    if (!prod) continue;
-    await post('/api/milk-receptions', { receivedAt: daysAgo(i + 1), producerId: prod.id, liters: 1200 + i * 200, quality: goodQuality, vehiclePlate: `AB${100 + i}CD` });
-  }
-
-  // 8) Pedidos (con cliente + productos vendibles → total resuelto) -----------
-  console.log('→ Pedidos');
-  const sellable = ['QC-001', 'MUZ-001', 'RIC-001'].map(idBySku).filter(Boolean) as string[];
-  const withZone = clients.filter((c) => c.zoneId);
-  for (let i = 0; i < Math.min(3, withZone.length); i++) {
-    const c = withZone[i];
-    await post('/api/sales/orders', {
-      clientId: c.id,
-      lines: [
-        { productId: sellable[0], quantity: 5 + i },
-        ...(sellable[1] ? [{ productId: sellable[1], quantity: 3 }] : []),
-      ],
+  // 6) RECETAS ----------------------------------------------------------------
+  console.log('→ Recetas');
+  const ing = (sku: string, quantity: number, unit: string, basis: string, unitCost: number) => ({
+    productId: idBySku(sku)!,
+    quantity,
+    unit,
+    basis,
+    unitCost,
+  });
+  const sueroByproduct = {
+    name: 'Suero',
+    expectedYield: 0.8,
+    unit: 'litro',
+    basis: 'per_liter_milk',
+    destination: 'sale',
+    referenceValuePerUnit: 30,
+  };
+  const recipeSeeds = [
+    {
+      productSku: 'QC-001',
+      name: 'Cremoso clásico',
+      description: 'Receta estándar de queso cremoso.',
+      initialVersion: {
+        baseYieldKgPerLiter: 0.1,
+        standardWastePercent: 2,
+        baselineFatPercent: 3.5,
+        baselineProteinPercent: 3.2,
+        ingredients: [
+          ing('FER-001', 0.02, 'unidad', 'per_liter_milk', 50),
+          ing('CUA-001', 0.0015, 'litro', 'per_liter_milk', 4000),
+          ing('SAL-001', 0.025, 'kg', 'per_kg_product', 300),
+          ing('MO-001', 1, 'unidad', 'fixed_per_order', 8000),
+          ing('ENE-001', 1, 'unidad', 'fixed_per_order', 3000),
+        ],
+        byproducts: [sueroByproduct],
+      },
+    },
+    {
+      productSku: 'MUZ-001',
+      name: 'Muzzarella tradicional',
+      description: 'Receta estándar de muzzarella.',
+      initialVersion: {
+        baseYieldKgPerLiter: 0.095,
+        standardWastePercent: 3,
+        baselineFatPercent: 3.4,
+        baselineProteinPercent: 3.3,
+        ingredients: [
+          ing('FER-001', 0.018, 'unidad', 'per_liter_milk', 50),
+          ing('CUA-001', 0.0018, 'litro', 'per_liter_milk', 4000),
+          ing('SAL-001', 0.03, 'kg', 'per_kg_product', 300),
+          ing('MO-001', 1, 'unidad', 'fixed_per_order', 9000),
+          ing('ENE-001', 1, 'unidad', 'fixed_per_order', 3500),
+        ],
+        byproducts: [sueroByproduct],
+      },
+    },
+  ];
+  const existingRecipes = (await get<any[]>('/api/recipes')) ?? [];
+  for (const r of recipeSeeds) {
+    const productId = idBySku(r.productSku);
+    if (!productId) continue;
+    if (existingRecipes.some((x) => x.productId === productId)) continue;
+    await post('/api/recipes', {
+      productId,
+      name: r.name,
+      description: r.description,
+      initialVersion: r.initialVersion,
     });
   }
+  const recipes = (await get<any[]>('/api/recipes')) ?? [];
+  const recipeFor = (sku: string) => recipes.find((r) => r.productId === idBySku(sku));
 
-  console.log('[seed:demo] ✓ Listo. Entrá a la app y vas a ver las pantallas pobladas.');
+  // --- Guard de idempotencia: la parte transaccional se genera una sola vez ---
+  const existingOrders = (await get<any[]>('/api/production-orders')) ?? [];
+  if (existingOrders.length > 0) {
+    console.log(
+      `[seed:demo] Ya hay ${existingOrders.length} órdenes de producción: salteo recepciones/producción/despachos para no duplicar.`,
+    );
+    console.log('[seed:demo] ✓ Maestros verificados. Listo.');
+    return;
+  }
+
+  // 7) RECEPCIONES DE LECHE (calidad buena → aceptadas, generan lote) ----------
+  console.log('→ Recepciones de leche');
+  const goodQuality = () => ({
+    fatPercent: round1(rnd(3.3, 3.8)),
+    proteinPercent: round1(rnd(3.1, 3.5)),
+    ph: round1(rnd(6.6, 6.8)),
+    acidityDornic: Math.round(rnd(14, 17)),
+    temperatureCelsius: round1(rnd(2, 5)),
+    somaticCellCount: Math.round(rnd(120000, 280000)),
+    bacterialCount: Math.round(rnd(20000, 70000)),
+    alcoholTestPassed: true,
+    antibioticsDetected: false,
+  });
+  const milkBatches: { batchId: string; liters: number }[] = [];
+  const RECEPCIONES = 26;
+  for (let i = 0; i < RECEPCIONES; i++) {
+    const prod = pick(producers, i);
+    const liters = Math.round(rnd(900, 1600));
+    const declared = liters + Math.round(rnd(-15, 10));
+    const rec = await post<any>('/api/milk-receptions', {
+      receivedAt: daysAgo(RECEPCIONES * 2 - i * 2), // repartidas en el último ~mes
+      producerId: prod.id,
+      remito: `R-${10000 + i}`,
+      declaredLiters: declared,
+      liters,
+      quality: goodQuality(),
+      warehouseId: camaraFrio,
+    });
+    if (rec?.batchId) milkBatches.push({ batchId: rec.batchId, liters: rec.liters ?? liters });
+  }
+  console.log(`   ${milkBatches.length} recepciones aceptadas con lote.`);
+
+  // 8) PRODUCCIÓN (abrir + cerrar → genera producto con costo, baja leche) -----
+  console.log('→ Producción');
+  const PRODUCCIONES = Math.min(16, milkBatches.length);
+  let made = 0;
+  for (let i = 0; i < PRODUCCIONES; i++) {
+    const milk = milkBatches[i];
+    if (!milk) continue;
+    const sku = i % 2 === 0 ? 'QC-001' : 'MUZ-001';
+    const recipe = recipeFor(sku);
+    if (!recipe) continue;
+    const opened = await post<any>('/api/production-orders/open', {
+      recipeId: recipe.id,
+      operatorId,
+      startedAt: daysAgo(PRODUCCIONES * 2 - i * 2),
+      milkInputs: [{ batchId: milk.batchId, liters: milk.liters }],
+    });
+    if (!opened?.id) continue;
+    const order = (await get<any>(`/api/production-orders/${opened.id}`)) ?? opened;
+    const outputs: any[] = order.expectedOutputs ?? [];
+    if (!outputs.length) continue;
+    // Rendimiento real ~ esperado con leve variación → genera desvíos visibles.
+    const factor = rnd(0.9, 1.06);
+    const actualOutputs = outputs.map((o) => ({
+      productId: o.productId,
+      quantity: Math.max(0.1, round1(Number(o.quantity) * factor)),
+      isPrincipal: !!o.isPrincipal,
+    }));
+    const closed = await post<any>(`/api/production-orders/${opened.id}/close`, {
+      actualOutputs,
+      warehouseId: i % 3 === 0 ? camaraMad : camaraFrio,
+    });
+    if (closed) made++;
+  }
+  console.log(`   ${made} órdenes producidas y cerradas.`);
+
+  // 9) DESPACHOS (baja stock por FEFO + cuenta/contado) ------------------------
+  console.log('→ Despachos');
+  const stock = (await get<any[]>('/api/inventory/stock')) ?? [];
+  const avail: Record<string, number> = {};
+  for (const s of stock) avail[s.productId] = Number(s.totalQuantity);
+  const sellableSkus = ['QC-001', 'MUZ-001'];
+  let dispatched = 0;
+  for (let i = 0; i < clients.length * 4; i++) {
+    const client = pick(clients, i);
+    const type: string = client.type;
+    const lines: { productId: string; quantity: number; unitPrice: number }[] = [];
+    for (const sku of sellableSkus) {
+      const pid = idBySku(sku);
+      if (!pid) continue;
+      const left = avail[pid] ?? 0;
+      if (left < 3) continue;
+      const qty = round1(Math.min(left * 0.25, rnd(4, 14)));
+      if (qty < 1) continue;
+      const unitPrice = PRICES[type]?.[sku] ?? 3000;
+      lines.push({ productId: pid, quantity: qty, unitPrice });
+      avail[pid] = left - qty;
+    }
+    if (!lines.length) continue;
+    const paymentMode = client.paymentTermDays == null ? 'contado' : 'cuenta_corriente';
+    const order = await post<any>('/api/sales/orders', { clientId: client.id, lines, paymentMode });
+    if (order) dispatched++;
+  }
+  console.log(`   ${dispatched} despachos registrados.`);
+
+  // 10) COBROS parciales en cuenta corriente ----------------------------------
+  console.log('→ Cobros');
+  const accounts = (await get<any[]>('/api/sales/accounts')) ?? [];
+  let payments = 0;
+  for (const acc of accounts) {
+    if (Number(acc.balance) <= 0) continue;
+    // Cobramos ~60% del saldo de algunos clientes → quedan saldos parciales.
+    const amount = Math.round(Number(acc.balance) * rnd(0.4, 0.7));
+    if (amount <= 0) continue;
+    const ok = await post('/api/sales/payments', {
+      clientId: acc.clientId,
+      amount,
+      occurredAt: daysAgo(Math.round(rnd(1, 10))),
+      method: pick(['Efectivo', 'Transferencia', 'Cheque'], payments),
+    });
+    if (ok) payments++;
+  }
+  console.log(`   ${payments} cobros registrados.`);
+
+  // 11) GASTOS (flujo de caja) -------------------------------------------------
+  console.log('→ Gastos');
+  const gastos = [
+    { category: 'Sueldos', amount: 850000, notes: 'Quincena planta' },
+    { category: 'Energía', amount: 145000, notes: 'Factura luz' },
+    { category: 'Insumos', amount: 230000, notes: 'Fermento y cuajo' },
+    { category: 'Fletes', amount: 90000, notes: 'Reparto semanal' },
+    { category: 'Mantenimiento', amount: 65000, notes: 'Service cámara de frío' },
+    { category: 'Envases', amount: 120000, notes: 'Bolsas y film' },
+    { category: 'Combustible', amount: 78000, notes: 'Camioneta reparto' },
+    { category: 'Sueldos', amount: 850000, notes: 'Quincena administración' },
+  ];
+  let expenses = 0;
+  for (let i = 0; i < gastos.length; i++) {
+    const g = gastos[i]!;
+    const ok = await post('/api/finance/cash-movements', {
+      kind: 'expense',
+      amount: g.amount,
+      category: g.category,
+      occurredAt: daysAgo(Math.round(rnd(1, 25))),
+      notes: g.notes,
+    });
+    if (ok) expenses++;
+  }
+  console.log(`   ${expenses} gastos cargados.`);
+
+  console.log('[seed:demo] ✓ Listo. Entrá a la app: producción, costos, stock, cuentas, caja y reportes poblados.');
 }
 
 main().catch((e) => {
