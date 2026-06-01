@@ -49,5 +49,10 @@ infra/data/
 # Generated
 .eslintcache
 
+# Temporales / capturas sueltas
+tmptok.json
+rec-lista.png
+*.tmp
+
 # Artefactos de Playwright MCP (capturas/snapshots de verificación)
 .playwright-mcp/
