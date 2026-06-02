@@ -16,6 +16,9 @@ import { ApiError } from '@/lib/api-client';
 // Sólo se ofrece como acceso rápido fuera de producción.
 const DEV_USER = { email: 'admin@lasmarias.local', password: 'Admin123!Cambiar' };
 const IS_DEV = process.env.NODE_ENV !== 'production';
+// Acceso rápido: siempre en desarrollo, y en producción solo si se activa la demo
+// (NEXT_PUBLIC_DEMO_LOGIN=1 al buildear). Apagado por defecto en producción real.
+const SHOW_QUICK_LOGIN = IS_DEV || process.env.NEXT_PUBLIC_DEMO_LOGIN === '1';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -95,9 +98,9 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          {IS_DEV && (
+          {SHOW_QUICK_LOGIN && (
             <div className="mt-6 border-t border-border-subtle pt-5">
-              <p className="mb-2 text-xs text-foreground-subtle">Acceso rápido (sólo desarrollo)</p>
+              <p className="mb-2 text-xs text-foreground-subtle">Acceso rápido (demo)</p>
               <button
                 type="button"
                 onClick={() => {
