@@ -8,6 +8,8 @@ import {
   CalendarClock,
   CheckCircle2,
   ChevronRight,
+  Factory,
+  Milk,
   Package,
   PackageX,
   ShoppingCart,
@@ -131,12 +133,13 @@ function buildPending(stock: StockSummary[] | undefined, accounts: AccountBalanc
   }
 
   for (const acc of accounts ?? []) {
-    if (acc.balance > 0) {
+    // Solo deuda VENCIDA (no todo saldo): lo que realmente hay que reclamar.
+    if (acc.overdue > 0) {
       items.push({
         key: `deuda-${acc.clientId}`,
         severity: 'danger',
         icon: Banknote,
-        text: `${acc.clientName} debe ${money(acc.balance)}`,
+        text: `${acc.clientName} debe ${money(acc.overdue)} vencido`,
         href: '/cuentas',
       });
     }
@@ -207,11 +210,19 @@ export default function DashboardPage() {
   const accountsQuery = useQuery({ queryKey: ['sales', 'accounts'], queryFn: () => salesApi.accounts() });
 
   const s = summaryQuery.data;
-  const kpis: Kpi[] = s
+  // Bloque PLATA: todo en $ (finanzas y comercial).
+  const plata: Kpi[] = s
     ? [
         { href: '/cuentas', label: 'A cobrar', value: money(s.saldoTotalPorCobrar), icon: Wallet, tone: 'danger', hint: 'Total que te deben todos los clientes en cuenta corriente.' },
         { href: '/caja', label: 'Caja del mes', value: money(s.cajaNetaMes), icon: Banknote, tone: s.cajaNetaMes < 0 ? 'danger' : 'primary', hint: 'Cobros menos gastos de este mes. En rojo si gastaste más de lo que entró.' },
         { href: '/ventas', label: 'Ventas del mes', value: money(s.ventasMes), icon: TrendingUp, tone: 'primary', hint: 'Total facturado en lo que va del mes.' },
+      ]
+    : [];
+  // Bloque LA PLANTA HOY: operación del día (cantidades, no $).
+  const plantaHoy: Kpi[] = s
+    ? [
+        { href: '/recepciones', label: 'Leche recibida hoy', value: `${num(s.lecheHoyLitros)} L`, icon: Milk, tone: 'secondary', hint: 'Litros de leche aceptados en recepciones de hoy.' },
+        { href: '/produccion', label: 'Producido hoy', value: `${num(s.kgProducidosHoy)} kg`, icon: Factory, tone: 'primary', hint: 'Kg de producto terminado en órdenes cerradas hoy.' },
         { href: '/ventas', label: 'Ventas hoy', value: num(s.despachosHoy), icon: ShoppingCart, tone: 'secondary', hint: 'Cantidad de ventas registradas hoy.' },
         { href: '/inventario', label: 'Lotes por vencer', value: num(s.lotesPorVencer), icon: TriangleAlert, tone: s.lotesPorVencer > 0 ? 'amber' : 'primary', hint: 'Lotes próximos a vencer o ya vencidos. Tocá para verlos en stock.' },
       ]
@@ -238,20 +249,33 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* ── Columna principal ── */}
         <div className="flex flex-col gap-6 lg:col-span-2">
-          {/* KPIs compactos (chips que envuelven). */}
-          <section aria-label="Indicadores" className="flex flex-wrap gap-3">
-            {summaryQuery.isLoading ? (
-              Array.from({ length: 5 }, (_, i) => <KpiChipSkeleton key={i} />)
-            ) : summaryQuery.isError || !s ? (
-              <Card className="w-full">
-                <CardContent className="py-5 text-center text-sm text-danger">
-                  No se pudieron cargar los indicadores. Probá de nuevo en un momento.
-                </CardContent>
-              </Card>
-            ) : (
-              kpis.map((kpi) => <KpiChip key={kpi.label} kpi={kpi} />)
-            )}
-          </section>
+          {/* KPIs en dos bloques: plata (en $) y la planta hoy (cantidades). */}
+          {summaryQuery.isLoading ? (
+            <section aria-label="Indicadores" className="flex flex-wrap gap-3">
+              {Array.from({ length: 5 }, (_, i) => <KpiChipSkeleton key={i} />)}
+            </section>
+          ) : summaryQuery.isError || !s ? (
+            <Card className="w-full">
+              <CardContent className="py-5 text-center text-sm text-danger">
+                No se pudieron cargar los indicadores. Probá de nuevo en un momento.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="flex flex-col gap-5">
+              <section aria-label="Plata">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-foreground-muted">Plata</p>
+                <div className="flex flex-wrap gap-3">
+                  {plata.map((kpi) => <KpiChip key={kpi.label} kpi={kpi} />)}
+                </div>
+              </section>
+              <section aria-label="La planta hoy">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-foreground-muted">La planta hoy</p>
+                <div className="flex flex-wrap gap-3">
+                  {plantaHoy.map((kpi) => <KpiChip key={kpi.label} kpi={kpi} />)}
+                </div>
+              </section>
+            </div>
+          )}
 
           {/* Para resolver. */}
           <Card>

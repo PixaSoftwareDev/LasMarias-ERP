@@ -101,6 +101,7 @@ export const accountBalanceSchema = z.object({
   clientId: uuidSchema,
   clientName: z.string(),
   balance: z.number(), // Σcharge − Σpayment − Σcredit_note (puede ser negativo = saldo a favor)
+  overdue: z.number(), // deuda vencida (cargos cuyo vencimiento ya pasó)
   warnings: z.array(z.string()),
 });
 export type AccountBalance = z.infer<typeof accountBalanceSchema>;

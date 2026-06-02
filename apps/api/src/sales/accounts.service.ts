@@ -40,6 +40,7 @@ export class AccountsService {
         clientId: c.id,
         clientName: c.businessName,
         balance: r.balance,
+        overdue: r.overdue,
         warnings: r.warnings,
       };
     });

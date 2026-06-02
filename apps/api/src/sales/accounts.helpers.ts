@@ -49,6 +49,7 @@ export interface ReceivableMovement {
 export interface ReceivableResult {
   balance: number; // Σcharge − Σpayment − Σcredit_note (puede ser negativo)
   aging: AccountAging; // sobre cargos impagos (imputación FIFO de pagos sobre cargos viejos)
+  overdue: number; // deuda VENCIDA: Σ cargos impagos cuyo vencimiento ya pasó
   warnings: string[]; // 'SALDO_A_FAVOR' si el saldo es negativo
 }
 
@@ -108,12 +109,14 @@ export function computeReceivable(
   let current = new Big(0); // 0-30 (≤30)
   let d31to60 = new Big(0); // 31-60
   let over60 = new Big(0); // 60+
+  let overdue = new Big(0); // VENCIDO: vencimiento ya pasó (days > 0)
   for (const c of charges) {
     if (c.remaining.lte(0)) continue;
     const days = daysBetween(c.ageRef, asOf);
     if (days <= 30) current = current.plus(c.remaining);
     else if (days <= 60) d31to60 = d31to60.plus(c.remaining);
     else over60 = over60.plus(c.remaining);
+    if (days > 0) overdue = overdue.plus(c.remaining);
   }
 
   if (balance.lt(0)) warnings.push('SALDO_A_FAVOR');
@@ -125,6 +128,7 @@ export function computeReceivable(
       d31to60: d31to60.round(MONEY_DP).toNumber(),
       over60: over60.round(MONEY_DP).toNumber(),
     },
+    overdue: overdue.round(MONEY_DP).toNumber(),
     warnings,
   };
 }

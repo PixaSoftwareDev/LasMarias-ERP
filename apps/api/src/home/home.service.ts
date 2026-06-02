@@ -7,6 +7,8 @@ import { SalesOrderEntity } from '../sales/sales-order.entity';
 import { AccountMovementEntity } from '../sales/account-movement.entity';
 import { CashMovementEntity } from '../finance/cash-movement.entity';
 import { BatchEntity } from '../batches/batch.entity';
+import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
+import { ProductionOrderEntity } from '../production/production-order.entity';
 
 @Injectable()
 export class HomeService {
@@ -19,6 +21,10 @@ export class HomeService {
     private readonly cashMovements: Repository<CashMovementEntity>,
     @InjectRepository(BatchEntity)
     private readonly batches: Repository<BatchEntity>,
+    @InjectRepository(MilkReceptionEntity)
+    private readonly receptions: Repository<MilkReceptionEntity>,
+    @InjectRepository(ProductionOrderEntity)
+    private readonly production: Repository<ProductionOrderEntity>,
   ) {}
 
   // Resumen de KPIs comerciales/financieros. Fechas en hora local del servidor.
@@ -79,12 +85,32 @@ export class HomeService {
       },
     });
 
+    // --- La planta hoy ---
+    // Leche recibida hoy (litros) = Σ litros de recepciones aceptadas de hoy.
+    const receptionsToday = await this.receptions.find({
+      where: { receivedAt: Between(startOfDay, endOfDay), status: 'aceptada' },
+      select: { id: true, liters: true },
+    });
+    const lecheHoyLitros = receptionsToday.reduce((acc, r) => acc.plus(new Big(r.liters)), new Big(0));
+
+    // Kg producidos hoy = Σ kg de producto principal de órdenes cerradas hoy.
+    const closedToday = await this.production.find({
+      where: { status: 'closed', closedAt: Between(startOfDay, endOfDay) },
+      select: { id: true, totalPrincipalKg: true },
+    });
+    const kgProducidosHoy = closedToday.reduce(
+      (acc, o) => acc.plus(new Big(o.totalPrincipalKg ?? '0')),
+      new Big(0),
+    );
+
     return {
       saldoTotalPorCobrar: saldoTotal.round(2).toNumber(),
       cobrosEstaSemana: cobrosEstaSemana.round(2).toNumber(),
-      despachosHoy,
       ventasMes: ventasMes.round(2).toNumber(),
       cajaNetaMes: cajaNeta.round(2).toNumber(),
+      lecheHoyLitros: lecheHoyLitros.round(1).toNumber(),
+      kgProducidosHoy: kgProducidosHoy.round(1).toNumber(),
+      despachosHoy,
       lotesPorVencer,
     };
   }
@@ -127,20 +153,8 @@ export class HomeService {
       });
     }
 
-    // Despachos del mes.
-    const orders = await this.orders.find({
-      where: { dispatchedAt: Between(start, end) },
-      relations: { client: true },
-    });
-    for (const o of orders) {
-      events.push({
-        date: this.dateKey(o.dispatchedAt),
-        type: 'despacho',
-        label: `Despacho ${o.code}${o.client ? ` — ${o.client.businessName}` : ''}`,
-        amount: Number(o.total),
-        refId: o.id,
-      });
-    }
+    // El calendario muestra solo lo que VIENE y hay que atender (cobros por vencer y
+    // vencimientos de lote). Los despachos ya hechos se ven en Ventas, no acá.
 
     events.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return { month, events };
