@@ -23,6 +23,7 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { inventoryApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
+import { useConfirm } from '@/hooks/use-confirm';
 
 // Cámaras y sectores físicos donde se almacenan los lotes (CLAUDE.md §4.4).
 const KIND_LABEL: Record<Warehouse['kind'], string> = {
@@ -36,6 +37,7 @@ const EMPTY: CreateWarehouseInput = { code: '', name: '', kind: 'cold_chamber' }
 
 export default function WarehousesPage() {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Warehouse | null>(null);
 
@@ -93,9 +95,14 @@ export default function WarehousesPage() {
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al actualizar'),
   });
 
-  function onDeactivate(w: Warehouse) {
-    if (!window.confirm(`¿Desactivar "${w.name}"? No aparecerá al asignar lotes a una cámara.`)) return;
-    toggleActive.mutate({ id: w.id, isActive: false });
+  async function onDeactivate(w: Warehouse) {
+    const ok = await confirm({
+      title: `Desactivar ${w.name}`,
+      message: 'No aparecerá al asignar lotes a una cámara. La podés reactivar cuando quieras.',
+      confirmLabel: 'Desactivar',
+      destructive: true,
+    });
+    if (ok) toggleActive.mutate({ id: w.id, isActive: false });
   }
 
   return (

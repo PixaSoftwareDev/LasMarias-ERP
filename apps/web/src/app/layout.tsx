@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import { Toaster } from 'sonner';
 import { QueryProvider } from '@/providers/query-provider';
+import { ConfirmProvider } from '@/hooks/use-confirm';
 import './globals.css';
 
 // Inter en toda la app — body, títulos y wordmark. Sans SaaS moderna,
@@ -35,7 +36,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="es-AR" className={`h-full ${inter.variable}`}>
       <body className="h-full font-sans antialiased">
-        <QueryProvider>{children}</QueryProvider>
+        <QueryProvider>
+          <ConfirmProvider>{children}</ConfirmProvider>
+        </QueryProvider>
         <Toaster
           position="top-center"
           richColors

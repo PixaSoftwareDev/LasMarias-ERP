@@ -45,6 +45,17 @@ export default function ComprobantePage() {
   const order: SalesOrder = orderQuery.data;
   const client = clientsQuery.data?.find((c) => c.id === order.clientId);
 
+  // Condición de pago del remito. Igual criterio que usa el backend al despachar:
+  // si el cliente no tiene plazo (paymentTermDays null) es contado; si tiene plazo,
+  // es cuenta corriente y el vencimiento = fecha de despacho + plazo en días.
+  const termDays = client?.paymentTermDays ?? null;
+  const isContado = termDays == null;
+  const dueDate = isContado
+    ? null
+    : new Date(new Date(order.dispatchedAt).getTime() + termDays * 24 * 60 * 60 * 1000);
+  const fmtDate = (d: Date) =>
+    d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
   return (
     <div className="mx-auto max-w-3xl p-4 sm:p-6">
       {/* Acciones — no se imprimen */}
@@ -82,13 +93,17 @@ export default function ComprobantePage() {
           </div>
           <div className="sm:text-right">
             <p className="text-xs uppercase tracking-wide text-foreground-muted">Fecha</p>
+            <p className="font-medium">{fmtDate(new Date(order.dispatchedAt))}</p>
+            <p className="mt-3 text-xs uppercase tracking-wide text-foreground-muted">Condición de pago</p>
             <p className="font-medium">
-              {new Date(order.dispatchedAt).toLocaleDateString('es-AR', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-              })}
+              {isContado ? 'Contado' : `Cuenta corriente${termDays ? ` (a ${termDays} días)` : ''}`}
             </p>
+            {dueDate && (
+              <>
+                <p className="mt-3 text-xs uppercase tracking-wide text-foreground-muted">Vence</p>
+                <p className="font-medium">{fmtDate(dueDate)}</p>
+              </>
+            )}
           </div>
         </div>
 

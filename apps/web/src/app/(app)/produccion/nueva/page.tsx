@@ -135,10 +135,15 @@ export default function NewProductionPage() {
             </select>
           </Field>
 
-          <Field label="Origen de la materia prima" htmlFor="source" required hint="Leche cruda recibida, o masa en stock (ej. para mozzarella).">
+          <Field
+            label="¿De qué se parte?"
+            htmlFor="source"
+            required
+            hint="Elaboración en dos pasos: primero leche → masa, después masa → mozzarella o queso. La masa es un producto intermedio que queda en stock con su propio costo."
+          >
             <select className="min-h-touch w-full rounded-md border border-border px-3" value={source} onChange={(e) => changeSource(e.target.value as SourceKind)}>
-              <option value="leche">Leche</option>
-              <option value="masa">Masa (intermedio)</option>
+              <option value="leche">Leche cruda (paso 1: hacer masa)</option>
+              <option value="masa">Masa en stock (paso 2: hacer mozzarella o queso)</option>
             </select>
           </Field>
 

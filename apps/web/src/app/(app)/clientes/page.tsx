@@ -18,9 +18,11 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { clientsApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
+import { useConfirm } from '@/hooks/use-confirm';
 
 export default function ClientsPage() {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
   const { data = [], isLoading } = useQuery({ queryKey: ['clients'], queryFn: () => clientsApi.list() });
@@ -71,9 +73,14 @@ export default function ClientsPage() {
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al actualizar'),
   });
 
-  function onDeactivate(c: Client) {
-    if (!window.confirm(`¿Desactivar "${c.businessName}"? No aparecerá al tomar nuevos pedidos.`)) return;
-    toggleActive.mutate({ id: c.id, isActive: false });
+  async function onDeactivate(c: Client) {
+    const ok = await confirm({
+      title: `Desactivar ${c.businessName}`,
+      message: 'No aparecerá al cargar nuevas ventas. Lo podés reactivar cuando quieras.',
+      confirmLabel: 'Desactivar',
+      destructive: true,
+    });
+    if (ok) toggleActive.mutate({ id: c.id, isActive: false });
   }
 
   return (

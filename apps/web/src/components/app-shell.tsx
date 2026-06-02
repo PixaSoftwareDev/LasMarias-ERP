@@ -68,7 +68,8 @@ export function AppShell({ user, onLogout, children }: Props) {
       {/* Sidebar — solo desktop. Oscura (azul marino de marca) con activo en verde. */}
       <aside
         className={cn(
-          'hidden bg-gradient-to-b from-secondary-800 to-secondary-900 transition-[width] duration-200 md:flex md:flex-col',
+          // Fija: queda anclada al viewport mientras el contenido scrollea (UX estándar).
+          'hidden bg-gradient-to-b from-secondary-800 to-secondary-900 transition-[width] duration-200 md:sticky md:top-0 md:flex md:h-screen md:flex-col',
           collapsed ? 'md:w-[4.75rem]' : 'md:w-64',
         )}
       >

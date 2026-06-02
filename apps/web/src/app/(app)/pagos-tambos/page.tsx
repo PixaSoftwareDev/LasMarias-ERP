@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { producersApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
+import { useConfirm } from '@/hooks/use-confirm';
 import type { ProducerBalance } from '@lasmarias/shared-schemas';
 
 const money = (n: number) => `$${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -39,8 +40,9 @@ function recentMonths(): { value: string; label: string }[] {
 const SELECT_CLASS =
   'min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 sm:w-56';
 
-function PaymentForm({ producerId, onDone }: { producerId: string; onDone: () => void }) {
+function PaymentForm({ producerId, producerName, onDone }: { producerId: string; producerName: string; onDone: () => void }) {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const [amount, setAmount] = useState('');
   const [occurredAt, setOccurredAt] = useState(() => new Date().toISOString().slice(0, 10));
   const [method, setMethod] = useState('');
@@ -66,13 +68,22 @@ function PaymentForm({ producerId, onDone }: { producerId: string; onDone: () =>
 
   const canSave = Number(amount) > 0 && !register.isPending;
 
+  async function handleRegister() {
+    const ok = await confirm({
+      title: 'Confirmar pago',
+      message: `Vas a registrar un pago de ${money(Number(amount))} a ${producerName}. Se va a descontar del saldo y queda como egreso en el flujo de caja.`,
+      confirmLabel: 'Registrar pago',
+    });
+    if (ok) register.mutate();
+  }
+
   return (
     <Card>
       <CardHeader><CardTitle>Registrar pago</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field label="Monto" htmlFor="pay-amount" required>
-            <Input id="pay-amount" type="number" inputMode="decimal" step="0.01" min={0} placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            <Input id="pay-amount" type="number" inputMode="decimal" step="0.01" min={0} prefix="$" placeholder="Ej: 150000" value={amount} onChange={(e) => setAmount(e.target.value)} />
           </Field>
           <Field label="Fecha" htmlFor="pay-date">
             <Input id="pay-date" type="date" value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} />
@@ -82,7 +93,7 @@ function PaymentForm({ producerId, onDone }: { producerId: string; onDone: () =>
           </Field>
         </div>
         <div className="flex justify-end">
-          <Button onClick={() => register.mutate()} loading={register.isPending} loadingText="Registrando..." disabled={!canSave}>
+          <Button onClick={handleRegister} loading={register.isPending} loadingText="Registrando..." disabled={!canSave}>
             <HandCoins className="h-4 w-4" /> Registrar pago
           </Button>
         </div>
@@ -128,7 +139,7 @@ function AccountDetail({ producerId, onBack }: { producerId: string; onBack: () 
         </CardContent>
       </Card>
 
-      {showPayment && <PaymentForm producerId={producerId} onDone={() => setShowPayment(false)} />}
+      {showPayment && <PaymentForm producerId={producerId} producerName={d.producerName} onDone={() => setShowPayment(false)} />}
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <span className="text-sm font-medium text-foreground">Liquidación del mes:</span>

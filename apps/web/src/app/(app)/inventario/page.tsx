@@ -4,9 +4,11 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  ArrowLeft,
   ArrowLeftRight,
   Box,
   Boxes,
+  ChevronDown,
   ClipboardCheck,
   Droplets,
   FlaskConical,
@@ -83,64 +85,89 @@ function ChipSkeleton() {
   return <div className="h-[60px] min-w-[11rem] flex-1 animate-pulse rounded-lg bg-surface-subtle" />;
 }
 
-// --- Card de un ítem de stock ---
-function StockCard({ s, icon: Icon, tone, onAction }: { s: StockSummary; icon: LucideIcon; tone: string; onAction?: (mode: AdjustMode, s: StockSummary) => void }) {
+// --- Fila de un ítem de stock (lista escaneable) ---
+function StockRow({
+  s,
+  icon: Icon,
+  tone,
+  onAction,
+  onOpen,
+}: {
+  s: StockSummary;
+  icon: LucideIcon;
+  tone: string;
+  onAction?: (mode: AdjustMode, s: StockSummary) => void;
+  onOpen?: (s: StockSummary) => void;
+}) {
   const noStock = s.totalQuantity <= 0;
   const b: { variant: Status; label: string } = noStock ? { variant: 'danger', label: 'Sin stock' } : alertBadge(s.alertLevel);
   const showBar = typeof s.minStock === 'number' && s.minStock > 0;
   const pct = showBar ? Math.min(100, (s.totalQuantity / (s.minStock as number)) * 100) : 0;
   const barColor = noStock || s.alertLevel === 'critical' ? 'bg-red-500' : s.alertLevel === 'low' ? 'bg-amber-500' : 'bg-primary-600';
+  // La leche cruda es una fila sintética (sus movimientos no tienen producto): no es clickeable.
+  const clickable = !!onOpen && s.productId !== 'leche-cruda';
+  const meta = [
+    s.warehouses && s.warehouses.length > 0 ? s.warehouses.join(', ') : null,
+    s.nearestExpiration ? `vence ${new Date(s.nearestExpiration).toLocaleDateString('es-AR')}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   return (
-    <Card className="flex flex-col gap-3 p-4">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${tone}`}>
-            <Icon className="h-4 w-4" aria-hidden="true" />
-          </span>
-          <div className="min-w-0">
-            <p className="truncate font-medium text-foreground">{s.productName}</p>
-            {s.sku && s.sku !== '—' && <p className="font-mono text-xs text-foreground-muted">{s.sku}</p>}
-          </div>
-        </div>
-        <div className="flex flex-shrink-0 items-center gap-1">
-          <StatusBadge status={b.variant}>{b.label}</StatusBadge>
-          {onAction && s.productId !== 'leche-cruda' && (
-            <RowActions
-              label={`Acciones de ${s.productName}`}
-              actions={[
-                { label: 'Ajustar por conteo', icon: ClipboardCheck, onClick: () => onAction('count', s) },
-                { label: 'Dar de baja', icon: Trash2, onClick: () => onAction('discard', s), destructive: true },
-              ]}
-            />
-          )}
-        </div>
+    <div
+      onClick={clickable ? () => onOpen!(s) : undefined}
+      className={`flex items-center gap-3 px-4 py-3 ${clickable ? 'cursor-pointer transition-colors hover:bg-surface-subtle/40' : ''}`}
+    >
+      <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${tone}`}>
+        <Icon className="h-4 w-4" aria-hidden="true" />
+      </span>
+
+      {/* Nombre + metadatos */}
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-medium text-foreground">{s.productName}</p>
+        {(s.sku && s.sku !== '—') || meta ? (
+          <p className="truncate text-xs text-foreground-muted">
+            {s.sku && s.sku !== '—' ? <span className="font-mono">{s.sku}</span> : null}
+            {s.sku && s.sku !== '—' && meta ? ' · ' : ''}
+            {meta}
+          </p>
+        ) : null}
       </div>
 
-      <p className="font-display text-2xl font-bold tracking-tight text-foreground">
-        {num(s.totalQuantity)} <span className="text-base font-normal text-foreground-muted">{s.unit}</span>
-      </p>
-
+      {/* Barra vs mínimo (solo insumos, desktop) */}
       {showBar && (
-        <div>
+        <div className="hidden w-32 flex-shrink-0 sm:block">
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-subtle">
             <div className={`h-full rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
           </div>
-          <p className="mt-1 text-xs text-foreground-muted">mínimo: {num(s.minStock as number)} {s.unit}</p>
+          <p className="mt-1 text-right text-[11px] text-foreground-muted">mín {num(s.minStock as number)}</p>
         </div>
       )}
 
-      <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-foreground-muted">
-        {s.warehouses && s.warehouses.length > 0 && (
-          <span className="flex flex-wrap gap-1">
-            {s.warehouses.map((w) => (
-              <span key={w} className="inline-flex items-center rounded-md bg-surface-subtle px-2 py-0.5 text-foreground">{w}</span>
-            ))}
-          </span>
-        )}
-        {s.batchCount > 0 && <span>{s.batchCount} lote{s.batchCount === 1 ? '' : 's'}</span>}
-        {s.nearestExpiration && <span>vence {new Date(s.nearestExpiration).toLocaleDateString('es-AR')}</span>}
+      {/* Cantidad */}
+      <div className="w-24 flex-shrink-0 text-right">
+        <span className="font-display text-lg font-bold tracking-tight text-foreground">{num(s.totalQuantity)}</span>
+        <span className="ml-1 text-xs text-foreground-muted">{s.unit}</span>
       </div>
-    </Card>
+
+      {/* Estado */}
+      <div className="flex-shrink-0">
+        <StatusBadge status={b.variant}>{b.label}</StatusBadge>
+      </div>
+
+      {/* Acciones */}
+      {onAction && s.productId !== 'leche-cruda' ? (
+        <RowActions
+          label={`Acciones de ${s.productName}`}
+          actions={[
+            { label: 'Ajustar por conteo', icon: ClipboardCheck, onClick: () => onAction('count', s) },
+            { label: 'Dar de baja', icon: Trash2, onClick: () => onAction('discard', s), destructive: true },
+          ]}
+        />
+      ) : (
+        <span className="w-9 flex-shrink-0" aria-hidden="true" />
+      )}
+    </div>
   );
 }
 
@@ -294,9 +321,24 @@ function AdjustDialog({ s, mode, onClose }: { s: StockSummary; mode: AdjustMode;
               </Field>
             </>
           ) : (
-            <Field label={`Cantidad contada (${s.unit})`} htmlFor="adj-counted" required hint="El sistema lleva el stock a este valor y registra la diferencia.">
-              <Input id="adj-counted" type="number" inputMode="decimal" step="0.01" min={0} value={counted} onChange={(e) => setCounted(e.target.value)} />
-            </Field>
+            <>
+              <Field label={`Cantidad contada (${s.unit})`} htmlFor="adj-counted" required hint="El sistema lleva el stock a este valor y registra la diferencia.">
+                <Input id="adj-counted" type="number" inputMode="decimal" step="0.01" min={0} value={counted} onChange={(e) => setCounted(e.target.value)} />
+              </Field>
+              {counted !== '' && Number.isFinite(Number(counted)) && (() => {
+                const diff = Number(counted) - s.totalQuantity;
+                if (Math.abs(diff) < 1e-9) {
+                  return <p className="text-sm text-foreground-muted">Coincide con el sistema, no hay diferencia.</p>;
+                }
+                const up = diff > 0;
+                return (
+                  <p className={`text-sm font-medium ${up ? 'text-primary-700' : 'text-danger'}`}>
+                    Diferencia: {up ? '+' : '−'}{num(Math.abs(diff))} {s.unit}{' '}
+                    <span className="font-normal text-foreground-muted">(el sistema tiene {num(s.totalQuantity)} {s.unit})</span>
+                  </p>
+                );
+              })()}
+            </>
           )}
           <Field label="Notas" htmlFor="adj-notes" hint="Opcional.">
             <Input id="adj-notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -316,6 +358,10 @@ function AdjustDialog({ s, mode, onClose }: { s: StockSummary; mode: AdjustMode;
 export default function InventoryPage() {
   const [showEntry, setShowEntry] = useState(false);
   const [adjust, setAdjust] = useState<{ s: StockSummary; mode: AdjustMode } | null>(null);
+  const [view, setView] = useState<'stock' | 'movimientos'>('stock');
+  const [movFilter, setMovFilter] = useState<string | null>(null); // nombre de producto
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
   const stockQuery = useQuery({ queryKey: ['stock'], queryFn: () => inventoryApi.stock() });
   const movementsQuery = useQuery({ queryKey: ['inv-movements'], queryFn: () => inventoryApi.movements() });
 
@@ -342,86 +388,141 @@ export default function InventoryPage() {
       .sort((a, b) => a.meta.order - b.meta.order);
   }, [stock]);
 
+  const movements = movementsQuery.data ?? [];
+  const filteredMovements = useMemo(
+    () => (movFilter ? movements.filter((m) => (m.productName ?? '') === movFilter) : movements),
+    [movements, movFilter],
+  );
+
+  const openMovements = (s: StockSummary) => {
+    setMovFilter(s.productName);
+    setView('movimientos');
+  };
+  const toggleCat = (cat: string) =>
+    setCollapsed((prev) => {
+      const n = new Set(prev);
+      if (n.has(cat)) n.delete(cat);
+      else n.add(cat);
+      return n;
+    });
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Stock"
         description="Todo el stock de la planta: materia prima, productos, subproductos e insumos."
         action={
-          <Button onClick={() => setShowEntry((s) => !s)}>
-            <Plus className="h-4 w-4" /> {showEntry ? 'Cerrar' : 'Ingresar stock'}
-          </Button>
+          view === 'stock' ? (
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => { setMovFilter(null); setView('movimientos'); }}>
+                <ArrowLeftRight className="h-4 w-4" /> Movimientos
+              </Button>
+              <Button onClick={() => setShowEntry((v) => !v)}>
+                <Plus className="h-4 w-4" /> {showEntry ? 'Cerrar' : 'Ingresar stock'}
+              </Button>
+            </div>
+          ) : (
+            <Button variant="secondary" onClick={() => setView('stock')}>
+              <ArrowLeft className="h-4 w-4" /> Volver al stock
+            </Button>
+          )
         }
       />
 
-      {showEntry && <StockEntryForm onClose={() => setShowEntry(false)} />}
-
-      {/* Resumen en chips compactos. */}
-      <section aria-label="Resumen de inventario" className="flex flex-wrap gap-3">
-        {stockQuery.isLoading ? (
-          Array.from({ length: 3 }, (_, i) => <ChipSkeleton key={i} />)
-        ) : summary ? (
-          <>
-            <SummaryChip icon={Boxes} label="Ítems con stock" value={num(summary.products)} tone="primary" />
-            <SummaryChip icon={Package} label="Con stock bajo" value={num(summary.low)} tone={summary.low > 0 ? 'amber' : 'primary'} />
-            <SummaryChip icon={PackageX} label="Por vencer o vencidos" value={num(summary.expiring)} tone={summary.expiring > 0 ? 'danger' : 'primary'} />
-          </>
-        ) : null}
-      </section>
-
-      {/* Stock por categoría, en cards. */}
-      {stockQuery.isLoading ? (
-        <Card className="h-40 animate-pulse bg-surface-subtle" />
-      ) : groups.length === 0 ? (
-        <EmptyState icon={Package} title="Sin stock cargado" description="A medida que recibas leche, cierres producción o ingreses insumos, el stock aparece acá." />
+      {view === 'movimientos' ? (
+        /* --- Vista de movimientos (separada; opcionalmente filtrada por un ítem) --- */
+        <section className="flex flex-col gap-3">
+          {movFilter && (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-foreground-muted">Movimientos de</span>
+              <span className="inline-flex items-center gap-2 rounded-full bg-surface-subtle px-3 py-1 font-medium text-foreground">
+                {movFilter}
+                <button type="button" onClick={() => setMovFilter(null)} aria-label="Quitar filtro" className="text-foreground-muted hover:text-foreground">
+                  ✕
+                </button>
+              </span>
+            </div>
+          )}
+          {movementsQuery.isLoading ? (
+            <Card className="h-40 animate-pulse bg-surface-subtle" />
+          ) : (
+            <DataTable
+              data={filteredMovements}
+              getKey={(m) => m.id}
+              emptyText={movFilter ? `Sin movimientos de ${movFilter}.` : 'Sin movimientos registrados.'}
+              getSearchText={(m) => `${m.batchCode ?? ''} ${m.productName ?? ''}`}
+              searchPlaceholder="Buscar por lote o producto…"
+              columns={[
+                { key: 'when', header: 'Fecha', render: (m) => formatDateTime(m.createdAt), secondary: true, sortValue: (m) => new Date(m.createdAt).getTime() },
+                { key: 'batch', header: 'Lote', render: (m) => <span className="font-mono text-xs">{m.batchCode || '—'}</span>, primary: true, sortValue: (m) => m.batchCode ?? '' },
+                { key: 'product', header: 'Producto', render: (m) => m.productName || '—', sortValue: (m) => m.productName ?? '' },
+                { key: 'type', header: 'Movimiento', render: (m) => (
+                  <StatusBadge status={m.type === 'in' ? 'success' : m.type === 'out' ? 'info' : 'warning'}>
+                    {labelOr(movementTypeLabel, m.type)}
+                  </StatusBadge>
+                )},
+                { key: 'qty', header: 'Cantidad', render: (m) => `${m.quantity} ${m.unit}`, align: 'right', sortValue: (m) => Number(m.quantity) },
+                { key: 'reason', header: 'Motivo', render: (m) => labelOr(movementReasonLabel, m.reason) },
+              ]}
+            />
+          )}
+        </section>
       ) : (
-        groups.map(({ cat, meta, items }) => {
-          const Icon = meta.icon;
-          return (
-            <section key={cat}>
-              <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-foreground">
-                <Icon className="h-5 w-5 text-foreground-muted" aria-hidden="true" />
-                {meta.label}
-                <span className="text-sm font-normal text-foreground-muted">({items.length})</span>
-              </h2>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {items.map((s) => (
-                  <StockCard key={s.productId} s={s} icon={meta.icon} tone={meta.tone} onAction={(mode, item) => setAdjust({ s: item, mode })} />
-                ))}
-              </div>
-            </section>
-          );
-        })
-      )}
+        /* --- Vista de stock --- */
+        <>
+          {showEntry && <StockEntryForm onClose={() => setShowEntry(false)} />}
 
-      {/* Últimos movimientos. */}
-      <section>
-        <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-foreground">
-          <ArrowLeftRight className="h-5 w-5 text-foreground-muted" aria-hidden="true" />
-          Últimos movimientos
-        </h2>
-        {movementsQuery.isLoading ? <Card className="h-40 animate-pulse bg-surface-subtle" /> : (
-          <DataTable
-            data={movementsQuery.data ?? []}
-            getKey={(m) => m.id}
-            emptyText="Sin movimientos registrados."
-            getSearchText={(m) => `${m.batchCode ?? ''} ${m.productName ?? ''}`}
-            searchPlaceholder="Buscar por lote o producto…"
-            columns={[
-              { key: 'when', header: 'Fecha', render: (m) => formatDateTime(m.createdAt), secondary: true, sortValue: (m) => new Date(m.createdAt).getTime() },
-              { key: 'batch', header: 'Lote', render: (m) => <span className="font-mono text-xs">{m.batchCode || '—'}</span>, primary: true, sortValue: (m) => m.batchCode ?? '' },
-              { key: 'product', header: 'Producto', render: (m) => m.productName || '—', sortValue: (m) => m.productName ?? '' },
-              { key: 'type', header: 'Movimiento', render: (m) => (
-                <StatusBadge status={m.type === 'in' ? 'success' : m.type === 'out' ? 'info' : 'warning'}>
-                  {labelOr(movementTypeLabel, m.type)}
-                </StatusBadge>
-              )},
-              { key: 'qty', header: 'Cantidad', render: (m) => `${m.quantity} ${m.unit}`, align: 'right', sortValue: (m) => Number(m.quantity) },
-              { key: 'reason', header: 'Motivo', render: (m) => labelOr(movementReasonLabel, m.reason) },
-            ]}
-          />
-        )}
-      </section>
+          <section aria-label="Resumen de inventario" className="flex flex-wrap gap-3">
+            {stockQuery.isLoading ? (
+              Array.from({ length: 3 }, (_, i) => <ChipSkeleton key={i} />)
+            ) : summary ? (
+              <>
+                <SummaryChip icon={Boxes} label="Ítems con stock" value={num(summary.products)} tone="primary" />
+                <SummaryChip icon={Package} label="Con stock bajo" value={num(summary.low)} tone={summary.low > 0 ? 'amber' : 'primary'} />
+                <SummaryChip icon={PackageX} label="Por vencer o vencidos" value={num(summary.expiring)} tone={summary.expiring > 0 ? 'danger' : 'primary'} />
+              </>
+            ) : null}
+          </section>
+
+          {stockQuery.isLoading ? (
+            <Card className="h-40 animate-pulse bg-surface-subtle" />
+          ) : groups.length === 0 ? (
+            <EmptyState icon={Package} title="Sin stock cargado" description="A medida que recibas leche, cierres producción o ingreses insumos, el stock aparece acá." />
+          ) : (
+            groups.map(({ cat, meta, items }) => {
+              const Icon = meta.icon;
+              const isOpen = !collapsed.has(cat);
+              return (
+                <section key={cat}>
+                  <button
+                    type="button"
+                    onClick={() => toggleCat(cat)}
+                    className="mb-3 flex w-full items-center gap-2 text-base font-semibold text-foreground"
+                  >
+                    <ChevronDown className={`h-4 w-4 text-foreground-muted transition-transform ${isOpen ? '' : '-rotate-90'}`} aria-hidden="true" />
+                    <Icon className="h-5 w-5 text-foreground-muted" aria-hidden="true" />
+                    {meta.label}
+                  </button>
+                  {isOpen && (
+                    <Card className="divide-y divide-border-subtle overflow-hidden p-0">
+                      {items.map((s) => (
+                        <StockRow
+                          key={s.productId}
+                          s={s}
+                          icon={meta.icon}
+                          tone={meta.tone}
+                          onAction={(mode, item) => setAdjust({ s: item, mode })}
+                          onOpen={openMovements}
+                        />
+                      ))}
+                    </Card>
+                  )}
+                </section>
+              );
+            })
+          )}
+        </>
+      )}
 
       {adjust && <AdjustDialog s={adjust.s} mode={adjust.mode} onClose={() => setAdjust(null)} />}
     </div>

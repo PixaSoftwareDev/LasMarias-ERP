@@ -225,6 +225,7 @@ export default function NewReceptionPage() {
                 inputMode="decimal"
                 step="0.1"
                 min={0}
+                suffix="L"
                 placeholder="Ej: 1200"
                 {...register('declaredLiters', { setValueAs: (v) => (v === '' || Number.isNaN(Number(v)) ? undefined : Number(v)) })}
               />
@@ -236,6 +237,7 @@ export default function NewReceptionPage() {
                 inputMode="decimal"
                 step="0.1"
                 min={0}
+                suffix="L"
                 placeholder="Ej: 1200"
                 {...register('liters', { valueAsNumber: true })}
               />

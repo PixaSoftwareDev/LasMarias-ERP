@@ -18,9 +18,11 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { productsApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
+import { useConfirm } from '@/hooks/use-confirm';
 
 export default function ProductsPage() {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
 
@@ -73,9 +75,14 @@ export default function ProductsPage() {
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al actualizar'),
   });
 
-  function onDeactivate(p: Product) {
-    if (!window.confirm(`¿Desactivar "${p.name}"? Dejará de aparecer para usarse en nuevas operaciones.`)) return;
-    toggleActive.mutate({ id: p.id, isActive: false });
+  async function onDeactivate(p: Product) {
+    const ok = await confirm({
+      title: `Desactivar ${p.name}`,
+      message: 'Dejará de aparecer para usarse en nuevas operaciones. Lo podés reactivar cuando quieras.',
+      confirmLabel: 'Desactivar',
+      destructive: true,
+    });
+    if (ok) toggleActive.mutate({ id: p.id, isActive: false });
   }
 
   return (

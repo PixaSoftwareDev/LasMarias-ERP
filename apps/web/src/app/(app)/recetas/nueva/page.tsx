@@ -87,6 +87,26 @@ export default function NewRecipePage() {
 
   const [ingredients, setIngredients] = useState<IngredientRow[]>([]);
   const [byproducts, setByproducts] = useState<ByproductRow[]>([]);
+  // Campos de filas dinámicas que el usuario ya visitó (para validar en vivo, no recién al guardar).
+  const [touched, setTouched] = useState<Set<string>>(new Set());
+  const touch = (key: string) => setTouched((s) => (s.has(key) ? s : new Set(s).add(key)));
+
+  // Mensajes de error por campo (CLAUDE.md §7 — avisar antes de guardar, mensajes claros).
+  function ingError(r: IngredientRow, field: 'productId' | 'quantity' | 'unitCost'): string | undefined {
+    if (field === 'productId') return r.productId ? undefined : 'Elegí el insumo';
+    if (field === 'quantity') return Number(r.quantity) > 0 ? undefined : 'Tiene que ser mayor a 0';
+    return r.unitCost === '' || Number(r.unitCost) >= 0 ? undefined : 'El costo no puede ser negativo';
+  }
+  function bpError(r: ByproductRow, field: 'name' | 'expectedYield' | 'referenceValuePerUnit'): string | undefined {
+    if (field === 'name') return r.name.trim() ? undefined : 'Ingresá el nombre';
+    if (field === 'expectedYield') return Number(r.expectedYield) > 0 ? undefined : 'Tiene que ser mayor a 0';
+    return r.referenceValuePerUnit === '' || Number(r.referenceValuePerUnit) >= 0 ? undefined : 'No puede ser negativo';
+  }
+  // Error a mostrar: sólo si el campo ya fue visitado.
+  const shownIng = (idx: number, r: IngredientRow, field: 'productId' | 'quantity' | 'unitCost') =>
+    touched.has(`ing-${idx}-${field}`) ? ingError(r, field) : undefined;
+  const shownBp = (idx: number, r: ByproductRow, field: 'name' | 'expectedYield' | 'referenceValuePerUnit') =>
+    touched.has(`bp-${idx}-${field}`) ? bpError(r, field) : undefined;
 
   const ingredientProducts = products.data?.filter((p) => INGREDIENT_CATEGORIES.includes(p.category)) ?? [];
 
@@ -227,11 +247,12 @@ export default function NewRecipePage() {
                   </Button>
                 </div>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Field label="Producto" htmlFor={`ing-product-${idx}`} required>
+                  <Field label="Producto" htmlFor={`ing-product-${idx}`} required error={shownIng(idx, row, 'productId')}>
                     <select
                       className={selectClass}
                       value={row.productId}
                       onChange={(e) => updateIngredient(idx, { productId: e.target.value })}
+                      onBlur={() => touch(`ing-${idx}-productId`)}
                     >
                       <option value="">Elegí el insumo</option>
                       {ingredientProducts.map((p) => (
@@ -248,14 +269,16 @@ export default function NewRecipePage() {
                       {BASIS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </Field>
-                  <Field label="Cantidad" htmlFor={`ing-qty-${idx}`} required>
+                  <Field label="Cantidad" htmlFor={`ing-qty-${idx}`} required error={shownIng(idx, row, 'quantity')}>
                     <Input
                       type="number"
                       inputMode="decimal"
                       step="0.001"
                       placeholder="0"
+                      invalid={!!shownIng(idx, row, 'quantity')}
                       value={row.quantity}
                       onChange={(e) => updateIngredient(idx, { quantity: e.target.value })}
+                      onBlur={() => touch(`ing-${idx}-quantity`)}
                     />
                   </Field>
                   <Field label="Unidad" htmlFor={`ing-unit-${idx}`} required>
@@ -270,14 +293,17 @@ export default function NewRecipePage() {
                       <option value="gramo">gramo</option>
                     </select>
                   </Field>
-                  <Field label="Costo unitario ($)" htmlFor={`ing-cost-${idx}`} hint="Por unidad del insumo (opcional)">
+                  <Field label="Costo unitario" htmlFor={`ing-cost-${idx}`} hint="Por unidad del insumo (opcional)" error={shownIng(idx, row, 'unitCost')}>
                     <Input
                       type="number"
                       inputMode="decimal"
                       step="0.01"
+                      prefix="$"
                       placeholder="0"
+                      invalid={!!shownIng(idx, row, 'unitCost')}
                       value={row.unitCost}
                       onChange={(e) => updateIngredient(idx, { unitCost: e.target.value })}
+                      onBlur={() => touch(`ing-${idx}-unitCost`)}
                     />
                   </Field>
                 </div>
@@ -314,11 +340,13 @@ export default function NewRecipePage() {
                   </Button>
                 </div>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Field label="Nombre" htmlFor={`bp-name-${idx}`} required>
+                  <Field label="Nombre" htmlFor={`bp-name-${idx}`} required error={shownBp(idx, row, 'name')}>
                     <Input
                       placeholder="Suero / Ricota"
+                      invalid={!!shownBp(idx, row, 'name')}
                       value={row.name}
                       onChange={(e) => updateByproduct(idx, { name: e.target.value })}
+                      onBlur={() => touch(`bp-${idx}-name`)}
                     />
                   </Field>
                   <Field label="Destino" htmlFor={`bp-dest-${idx}`} required>
@@ -330,14 +358,16 @@ export default function NewRecipePage() {
                       {DESTINATION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </Field>
-                  <Field label="Rendimiento esperado" htmlFor={`bp-yield-${idx}`} required>
+                  <Field label="Rendimiento esperado" htmlFor={`bp-yield-${idx}`} required error={shownBp(idx, row, 'expectedYield')}>
                     <Input
                       type="number"
                       inputMode="decimal"
                       step="0.001"
                       placeholder="0"
+                      invalid={!!shownBp(idx, row, 'expectedYield')}
                       value={row.expectedYield}
                       onChange={(e) => updateByproduct(idx, { expectedYield: e.target.value })}
+                      onBlur={() => touch(`bp-${idx}-expectedYield`)}
                     />
                   </Field>
                   <Field label="Unidad" htmlFor={`bp-unit-${idx}`} required>
@@ -359,14 +389,17 @@ export default function NewRecipePage() {
                       {BYPRODUCT_BASIS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </Field>
-                  <Field label="Valor de recupero ($/unidad)" htmlFor={`bp-value-${idx}`} hint="Opcional. Cuánto vale lo recuperado.">
+                  <Field label="Valor de recupero" htmlFor={`bp-value-${idx}`} hint="Opcional. Cuánto vale lo recuperado, por unidad." error={shownBp(idx, row, 'referenceValuePerUnit')}>
                     <Input
                       type="number"
                       inputMode="decimal"
                       step="0.01"
+                      prefix="$"
                       placeholder="0"
+                      invalid={!!shownBp(idx, row, 'referenceValuePerUnit')}
                       value={row.referenceValuePerUnit}
                       onChange={(e) => updateByproduct(idx, { referenceValuePerUnit: e.target.value })}
+                      onBlur={() => touch(`bp-${idx}-referenceValuePerUnit`)}
                     />
                   </Field>
                 </div>

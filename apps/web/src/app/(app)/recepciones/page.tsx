@@ -13,7 +13,7 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge, type Status } from '@/components/ui/status-badge';
 import { formatDateTime, formatLiters } from '@/lib/utils';
 import { receptionsApi } from '@/features/receptions/api';
-import { cn } from '@/lib/utils';
+import { cn, normalizeText } from '@/lib/utils';
 
 function statusToBadge(s: MilkReception['status']): { variant: Status; label: string } {
   switch (s) {
@@ -64,10 +64,10 @@ export default function ReceptionsPage() {
 
   // Filtrado + orden.
   const result = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = normalizeText(query.trim());
     const filtered = (data ?? []).filter((r) => {
       if (status !== 'todas' && r.status !== status) return false;
-      if (q && !`${r.code} ${r.producerName} ${r.remito ?? ''}`.toLowerCase().includes(q)) return false;
+      if (q && !normalizeText(`${r.code} ${r.producerName} ${r.remito ?? ''}`).includes(q)) return false;
       const day = r.receivedAt.slice(0, 10);
       if (from && day < from) return false;
       if (to && day > to) return false;

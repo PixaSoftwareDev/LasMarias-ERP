@@ -16,7 +16,9 @@
       "Bash(grep -A 15 \"next/font.\\\\` error\" \"C:\\\\Users\\\\ALEJOM~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Alejo-Maros-Desktop-Desarollos-app-lasmarias\\\\bf0441a2-a967-46a5-b2f3-c7f6fd01f26f\\\\tasks\\\\bpsdv72s3.output\")",
       "PowerShell($pids = Get-NetTCPConnection -State Listen -LocalPort 3000,4000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique; foreach \\($p in $pids\\) { try { Stop-Process -Id $p -Force -ErrorAction Stop; Write-Output \"Maté PID $p\" } catch {} }; Start-Sleep 2; Write-Output \"ok\")",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/login)",
-      "Bash(curl -s -o NUL -w \"API -> %{http_code}\\\\n\" http://localhost:4000/health)"
+      "Bash(curl -s -o NUL -w \"API -> %{http_code}\\\\n\" http://localhost:4000/health)",
+      "Bash(grep -iE \"\\\\.css$|config\")",
+      "Bash(pnpm --filter @lasmarias/web exec tsc --noEmit)"
     ]
   }
 }

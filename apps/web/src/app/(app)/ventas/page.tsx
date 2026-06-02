@@ -15,6 +15,7 @@ import { PageHeader } from '@/components/page-header';
 import { ReturnDialog } from '@/components/sales/return-dialog';
 import { clientsApi, inventoryApi, productsApi, salesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
+import { useConfirm } from '@/hooks/use-confirm';
 import type { SalesOrder } from '@lasmarias/shared-schemas';
 
 // Condición de pago del despacho. El tipo vive en el schema como enum inline de
@@ -94,6 +95,7 @@ function FefoPreview({ productId, quantity }: { productId: string; quantity: num
 
 export default function SalesPage() {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const ordersQuery = useQuery({ queryKey: ['sales-orders'], queryFn: () => salesApi.listOrders() });
   const clientsQuery = useQuery({ queryKey: ['clients'], queryFn: () => clientsApi.list() });
   const productsQuery = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
@@ -214,6 +216,30 @@ export default function SalesPage() {
   }
 
   const canSave = !!clientId && validLines.length > 0 && !create.isPending;
+
+  // ¿Alguna línea pide más de lo que hay en stock? (venta quedaría con stock negativo)
+  const hasOverStock = useMemo(
+    () =>
+      validLines.some((l) => {
+        const st = stockByProduct.get(l.productId);
+        return st != null && l.quantity > st.totalQuantity;
+      }),
+    [validLines, stockByProduct],
+  );
+
+  async function handleRegister() {
+    if (hasOverStock) {
+      const ok = await confirm({
+        title: 'Stock insuficiente',
+        message: 'Algún producto supera el stock disponible; el stock puede quedar en negativo. ¿Registrás la venta igual?',
+        confirmLabel: 'Registrar igual',
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+    create.mutate();
+  }
+
   const orders = ordersQuery.data ?? [];
   const filteredOrders = useMemo(
     () =>
@@ -224,6 +250,12 @@ export default function SalesPage() {
         return true;
       }),
     [orders, fromDate, toDate],
+  );
+
+  // Total del período mostrado (suma de las ventas que quedan tras el filtro de fechas).
+  const periodTotal = useMemo(
+    () => filteredOrders.reduce((acc, o) => acc + Number(o.total), 0),
+    [filteredOrders],
   );
 
   return (
@@ -293,6 +325,7 @@ export default function SalesPage() {
                 const stock = row.productId ? stockByProduct.get(row.productId) : undefined;
                 const overStock = stock != null && row.quantity > stock.totalQuantity;
                 const lineTotal = row.quantity * row.unitPrice;
+                const lineUnit = stock?.unit ?? '';
                 return (
                   <div key={idx} className="rounded-lg border border-border-subtle p-3">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,90px,110px,auto]">
@@ -311,6 +344,7 @@ export default function SalesPage() {
                         step="0.1"
                         min={0.1}
                         aria-label="Cantidad"
+                        suffix={lineUnit || undefined}
                         value={row.quantity}
                         onChange={(e) => updateLine(idx, { quantity: Number(e.target.value) })}
                       />
@@ -320,6 +354,7 @@ export default function SalesPage() {
                         step="0.01"
                         min={0}
                         aria-label="Precio por unidad"
+                        prefix="$"
                         placeholder="Precio"
                         value={row.unitPrice}
                         onChange={(e) => updateLine(idx, { unitPrice: Number(e.target.value) })}
@@ -383,8 +418,8 @@ export default function SalesPage() {
               </div>
               <div className="flex w-full gap-2 sm:w-auto">
                 <Button variant="ghost" onClick={resetForm}>Cancelar</Button>
-                <Button onClick={() => create.mutate()} loading={create.isPending} loadingText="Despachando..." disabled={!canSave}>
-                  <Truck className="h-4 w-4" /> Despachar
+                <Button onClick={handleRegister} loading={create.isPending} loadingText="Registrando..." disabled={!canSave}>
+                  <Truck className="h-4 w-4" /> Registrar venta
                 </Button>
               </div>
             </div>
@@ -402,6 +437,18 @@ export default function SalesPage() {
             action={<Button onClick={() => setShowForm(true)}>Hacer la primera venta</Button>}
           />
         ) : (
+          <>
+          {/* Resumen del período: cuántas ventas suman y cuánto, antes de la tabla. */}
+          <div className="mb-3 flex flex-col gap-2 rounded-lg border border-border-subtle bg-surface-subtle/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-sm text-foreground-muted">
+              {filteredOrders.length} {filteredOrders.length === 1 ? 'venta' : 'ventas'}
+              {fromDate || toDate ? ' en el período elegido' : ''}
+            </span>
+            <span className="flex items-baseline gap-2">
+              <span className="text-[11px] uppercase tracking-wide text-foreground-muted">Total facturado</span>
+              <span className="font-display text-xl font-bold tracking-tight text-foreground">{money(periodTotal)}</span>
+            </span>
+          </div>
           <DataTable
             data={filteredOrders}
             getKey={(o) => o.id}
@@ -453,6 +500,7 @@ export default function SalesPage() {
               },
             ]}
           />
+          </>
         )
       )}
 

@@ -21,3 +21,12 @@ export function formatDateTime(input: string | Date): string {
 export function formatLiters(liters: number): string {
   return `${liters.toLocaleString('es-AR', { maximumFractionDigits: 1 })} l`;
 }
+
+// Normaliza texto para búsquedas: minúsculas y sin tildes (así "creamoso" o "CREMOSO"
+// encuentran "Cremoso"). CLAUDE.md §7 — fácil para el usuario.
+export function normalizeText(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
+}

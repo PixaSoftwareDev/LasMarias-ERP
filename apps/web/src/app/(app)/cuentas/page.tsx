@@ -15,6 +15,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/page-header';
 import { salesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
+import { useConfirm } from '@/hooks/use-confirm';
 import type { AccountBalance, AccountMovement } from '@lasmarias/shared-schemas';
 
 const money = (n: number) => `$${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -78,8 +79,9 @@ const KIND_TONE: Record<AccountMovement['kind'], 'danger' | 'success' | 'info'> 
   credit_note: 'info',
 };
 
-function PaymentForm({ clientId, onDone }: { clientId: string; onDone: () => void }) {
+function PaymentForm({ clientId, clientName, onDone }: { clientId: string; clientName: string; onDone: () => void }) {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const [amount, setAmount] = useState('');
   const [occurredAt, setOccurredAt] = useState(() => new Date().toISOString().slice(0, 10));
   const [method, setMethod] = useState('');
@@ -103,6 +105,15 @@ function PaymentForm({ clientId, onDone }: { clientId: string; onDone: () => voi
 
   const canSave = Number(amount) > 0 && !register.isPending;
 
+  async function handleRegister() {
+    const ok = await confirm({
+      title: 'Confirmar cobro',
+      message: `Vas a registrar un cobro de ${money(Number(amount))} de ${clientName}. Se va a descontar de su saldo y queda como ingreso en el flujo de caja.`,
+      confirmLabel: 'Registrar cobro',
+    });
+    if (ok) register.mutate();
+  }
+
   return (
     <Card>
       <CardHeader><CardTitle>Registrar cobro</CardTitle></CardHeader>
@@ -115,7 +126,8 @@ function PaymentForm({ clientId, onDone }: { clientId: string; onDone: () => voi
               inputMode="decimal"
               step="0.01"
               min={0}
-              placeholder="0"
+              prefix="$"
+              placeholder="Ej: 25000"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
             />
@@ -128,7 +140,7 @@ function PaymentForm({ clientId, onDone }: { clientId: string; onDone: () => voi
           </Field>
         </div>
         <div className="flex justify-end">
-          <Button onClick={() => register.mutate()} loading={register.isPending} loadingText="Registrando..." disabled={!canSave}>
+          <Button onClick={handleRegister} loading={register.isPending} loadingText="Registrando..." disabled={!canSave}>
             <HandCoins className="h-4 w-4" /> Registrar cobro
           </Button>
         </div>
@@ -197,7 +209,7 @@ function AccountDetailView({ clientId, onBack }: { clientId: string; onBack: () 
         </Card>
       )}
 
-      {showPayment && <PaymentForm clientId={clientId} onDone={() => setShowPayment(false)} />}
+      {showPayment && <PaymentForm clientId={clientId} clientName={d.clientName} onDone={() => setShowPayment(false)} />}
 
       <Card>
         <CardHeader><CardTitle>Movimientos</CardTitle></CardHeader>

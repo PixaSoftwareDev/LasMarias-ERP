@@ -15,6 +15,7 @@ import { SegmentedControl } from '@/components/ui/segmented-control';
 import { PageHeader } from '@/components/page-header';
 import { financeApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
+import { useConfirm } from '@/hooks/use-confirm';
 import type { CashMovement, ReportGranularity } from '@lasmarias/shared-schemas';
 
 // CLAUDE.md §4.7 — Flujo de caja simple. Los cobros de clientes entran como
@@ -76,6 +77,7 @@ function KpiChip({
 // Form para cargar un gasto (kind=expense). Categoría + monto + fecha + notas.
 function ExpenseForm({ onDone }: { onDone: () => void }) {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
   const [occurredAt, setOccurredAt] = useState(() => new Date().toISOString().slice(0, 10));
@@ -102,6 +104,15 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
 
   const canSave = Number(amount) > 0 && category.trim().length > 0 && !create.isPending;
 
+  async function handleCreate() {
+    const ok = await confirm({
+      title: 'Confirmar gasto',
+      message: `Vas a cargar un gasto de ${money(Number(amount))} en "${category.trim()}". Va a figurar como egreso en el flujo de caja.`,
+      confirmLabel: 'Cargar gasto',
+    });
+    if (ok) create.mutate();
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -124,7 +135,8 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
               inputMode="decimal"
               step="0.01"
               min={0}
-              placeholder="0"
+              prefix="$"
+              placeholder="Ej: 12000"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
             />
@@ -140,7 +152,7 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
           <Button variant="ghost" onClick={onDone} disabled={create.isPending}>
             Cancelar
           </Button>
-          <Button onClick={() => create.mutate()} loading={create.isPending} loadingText="Guardando..." disabled={!canSave}>
+          <Button onClick={handleCreate} loading={create.isPending} loadingText="Guardando..." disabled={!canSave}>
             <Plus className="h-4 w-4" /> Cargar gasto
           </Button>
         </div>

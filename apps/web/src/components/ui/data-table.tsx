@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Search } fr
 import { Card } from './card';
 import { Button } from './button';
 import { Input } from './input';
-import { cn } from '@/lib/utils';
+import { cn, normalizeText } from '@/lib/utils';
 
 // Tabla simple compartida. Responsive: en mobile cada fila se convierte en stack vertical.
 // CLAUDE.md §5.2/§5.3 — listas sobre tablas en mobile; paginación, orden y búsqueda.
@@ -55,11 +55,11 @@ export function DataTable<T>({
   const [sortKey, setSortKey] = React.useState<string | null>(null);
   const [sortDir, setSortDir] = React.useState<'asc' | 'desc'>('asc');
 
-  // 1) Filtrar por búsqueda.
+  // 1) Filtrar por búsqueda (insensible a mayúsculas y a tildes).
   const filtered = React.useMemo(() => {
     if (!getSearchText || !query.trim()) return data;
-    const q = query.trim().toLowerCase();
-    return data.filter((row) => getSearchText(row).toLowerCase().includes(q));
+    const q = normalizeText(query);
+    return data.filter((row) => normalizeText(getSearchText(row)).includes(q));
   }, [data, getSearchText, query]);
 
   // 2) Ordenar.

@@ -17,6 +17,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { producersApi } from '@/features/api';
 import type { ProducerDto } from '@/features/receptions/types';
 import { ApiError } from '@/lib/api-client';
+import { useConfirm } from '@/hooks/use-confirm';
 
 interface FormValues {
   name: string;
@@ -32,6 +33,7 @@ const emptyDefaults: FormValues = { name: '', taxId: '', phone: '', city: '', ad
 
 export default function ProducersPage() {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<ProducerDto | null>(null);
   const { data = [], isLoading } = useQuery({ queryKey: ['producers'], queryFn: () => producersApi.list() });
@@ -86,9 +88,14 @@ export default function ProducersPage() {
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al actualizar'),
   });
 
-  function onDeactivate(p: ProducerDto) {
-    if (!window.confirm(`¿Desactivar "${p.name}"? No aparecerá al cargar nuevas recepciones de leche.`)) return;
-    toggleActive.mutate({ id: p.id, isActive: false });
+  async function onDeactivate(p: ProducerDto) {
+    const ok = await confirm({
+      title: `Desactivar ${p.name}`,
+      message: 'No aparecerá al cargar nuevas recepciones de leche. Lo podés reactivar cuando quieras.',
+      confirmLabel: 'Desactivar',
+      destructive: true,
+    });
+    if (ok) toggleActive.mutate({ id: p.id, isActive: false });
   }
 
   return (
@@ -119,7 +126,7 @@ export default function ProducersPage() {
                 <Input {...form.register('phone')} />
               </Field>
               <Field label="Precio acordado ($/litro)" htmlFor="agreedPricePerLiter" hint="Usado para liquidación mensual">
-                <Input type="number" step="0.0001" inputMode="decimal" {...form.register('agreedPricePerLiter', { valueAsNumber: true })} />
+                <Input type="number" step="0.0001" inputMode="decimal" prefix="$" suffix="/L" placeholder="Ej: 320" {...form.register('agreedPricePerLiter', { valueAsNumber: true })} />
               </Field>
               <Field label="Dirección" htmlFor="address" className="sm:col-span-2">
                 <Input {...form.register('address')} />
