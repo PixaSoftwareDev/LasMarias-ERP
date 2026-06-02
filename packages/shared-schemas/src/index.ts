@@ -13,3 +13,4 @@ export * from './finance';
 export * from './home';
 export * from './report';
 export * from './producer-account';
+export * from './settings';

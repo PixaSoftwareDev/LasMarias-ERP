@@ -54,6 +54,11 @@ import type {
   ProducerAccountDetail,
   ProducerPayment,
   RegisterProducerPaymentInput,
+  AppSettings,
+  CompanySettings,
+  QualityLimits,
+  UpdateCompanySettingsInput,
+  UpdateQualityLimitsInput,
 } from '@lasmarias/shared-schemas';
 import type { ProducerDto } from './receptions/types';
 import { api, downloadFile } from '@/lib/api-client';
@@ -95,6 +100,15 @@ export const producersApi = {
     api<ProducerAccountDetail>(`/api/producers/${id}/account${month ? `?month=${encodeURIComponent(month)}` : ''}`),
   registerPayment: (input: RegisterProducerPaymentInput) =>
     api<ProducerPayment>('/api/producers/payments', { method: 'POST', body: input }),
+};
+
+// Configuración editable por el admin: datos de la empresa (remito) + límites de calidad.
+export const settingsApi = {
+  get: () => api<AppSettings>('/api/settings'),
+  updateCompany: (input: UpdateCompanySettingsInput) =>
+    api<CompanySettings>('/api/settings/company', { method: 'PATCH', body: input }),
+  updateQualityLimits: (input: UpdateQualityLimitsInput) =>
+    api<QualityLimits>('/api/settings/quality-limits', { method: 'PATCH', body: input }),
 };
 
 export const recipesApi = {

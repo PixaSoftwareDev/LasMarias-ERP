@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, Package, Users, Milk, Snowflake, Tags, type LucideIcon } from 'lucide-react';
+import { ChevronRight, Package, Users, Milk, Snowflake, Tags, SlidersHorizontal, type LucideIcon } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageHeader } from '@/components/page-header';
 import { productsApi, clientsApi, producersApi, inventoryApi, salesApi } from '@/features/api';
@@ -156,6 +156,25 @@ export default function AdminHome() {
         {sections.map((s) => (
           <SectionCard key={s.href} s={s} />
         ))}
+
+        {/* Configuración: no es un catálogo con conteo, así que va como tarjeta simple. */}
+        <Link href="/admin/configuracion" className="group block">
+          <Card className="h-full transition-all hover:border-primary-300 hover:shadow-md">
+            <CardContent className="flex h-full flex-col gap-3 pt-6">
+              <div className="flex items-start justify-between gap-3">
+                <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-700">
+                  <SlidersHorizontal className="h-5 w-5" aria-hidden="true" />
+                </span>
+                <ChevronRight className="h-4 w-4 flex-shrink-0 text-foreground-muted transition-colors group-hover:text-foreground" aria-hidden="true" />
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-foreground-muted">Configuración</p>
+                <span className="mt-1 block font-display text-2xl font-bold tracking-tight text-foreground">Empresa y calidad</span>
+              </div>
+              <p className="mt-auto text-sm text-foreground-muted">Datos de tu empresa para el remito y los límites de calidad de la leche.</p>
+            </CardContent>
+          </Card>
+        </Link>
       </div>
     </div>
   );

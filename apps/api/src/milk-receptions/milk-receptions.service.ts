@@ -11,6 +11,7 @@ import { BatchEntity } from '../batches/batch.entity';
 import { ProducersService } from '../producers/producers.service';
 import { evaluateMilkQuality } from './milk-quality-limits';
 import { formatMilkBatchCode } from './batch-code';
+import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class MilkReceptionsService {
@@ -18,6 +19,7 @@ export class MilkReceptionsService {
     @InjectRepository(MilkReceptionEntity)
     private readonly repo: Repository<MilkReceptionEntity>,
     private readonly producers: ProducersService,
+    private readonly settings: SettingsService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -65,7 +67,8 @@ export class MilkReceptionsService {
   async create(input: CreateMilkReceptionInput, userId: string): Promise<MilkReception> {
     const producer = await this.producers.get(input.producerId);
 
-    const evaluation = evaluateMilkQuality(input.quality);
+    const limits = await this.settings.getQualityLimits();
+    const evaluation = evaluateMilkQuality(input.quality, limits);
     const status: MilkReceptionStatus = evaluation.acceptable ? 'aceptada' : 'bloqueada';
     const blockedReason = evaluation.acceptable ? null : evaluation.reasons.join(' ');
 

@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   ArrowLeft,
   ArrowLeftRight,
+  Bell,
   Box,
   Boxes,
   ChevronDown,
@@ -36,7 +37,7 @@ import { formatDateTime } from '@/lib/utils';
 import { labelOr, movementReasonLabel, movementTypeLabel } from '@/lib/labels';
 import type { StockSummary, DiscardReason } from '@lasmarias/shared-schemas';
 
-type AdjustMode = 'discard' | 'count';
+type AdjustMode = 'discard' | 'count' | 'min';
 
 function alertBadge(level?: StockSummary['alertLevel']): { variant: Status; label: string } {
   switch (level) {
@@ -161,6 +162,7 @@ function StockRow({
         <RowActions
           label={`Acciones de ${s.productName}`}
           actions={[
+            { label: typeof s.minStock === 'number' && s.minStock > 0 ? 'Cambiar aviso de stock bajo' : 'Definir aviso de stock bajo', icon: Bell, onClick: () => onAction('min', s) },
             { label: 'Ajustar por conteo', icon: ClipboardCheck, onClick: () => onAction('count', s) },
             { label: 'Dar de baja', icon: Trash2, onClick: () => onAction('discard', s), destructive: true },
           ]}
@@ -276,41 +278,56 @@ function AdjustDialog({ s, mode, onClose }: { s: StockSummary; mode: AdjustMode;
   const [quantity, setQuantity] = useState('');
   const [reason, setReason] = useState<DiscardReason>('vencido');
   const [counted, setCounted] = useState(String(s.totalQuantity));
+  const [minVal, setMinVal] = useState(typeof s.minStock === 'number' && s.minStock > 0 ? String(s.minStock) : '');
   const [notes, setNotes] = useState('');
 
   const mut = useMutation({
     mutationFn: async () => {
       if (mode === 'discard') {
         await inventoryApi.discardStock({ productId: s.productId, quantity: Number(quantity), reason, notes: notes || undefined });
-      } else {
+      } else if (mode === 'count') {
         await inventoryApi.countAdjust({ productId: s.productId, countedQuantity: Number(counted), notes: notes || undefined });
+      } else {
+        // Aviso de stock bajo = mínimo del producto. 0 (o vacío) = sin aviso.
+        await productsApi.update(s.productId, { minStockLevel: minVal === '' ? 0 : Number(minVal) });
       }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stock'] });
       queryClient.invalidateQueries({ queryKey: ['inv-movements'] });
-      toast.success(mode === 'discard' ? 'Stock dado de baja.' : 'Stock ajustado al conteo.');
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      toast.success(mode === 'discard' ? 'Stock dado de baja.' : mode === 'count' ? 'Stock ajustado al conteo.' : 'Aviso de stock bajo actualizado.');
       onClose();
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo registrar el ajuste.'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar. Probá de nuevo.'),
   });
 
   const canSave =
     mode === 'discard'
       ? Number(quantity) > 0 && Number(quantity) <= s.totalQuantity && !mut.isPending
-      : counted !== '' && Number(counted) >= 0 && !mut.isPending;
+      : mode === 'count'
+        ? counted !== '' && Number(counted) >= 0 && !mut.isPending
+        : minVal !== '' && Number(minVal) >= 0 && !mut.isPending;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <Card className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         <CardHeader>
-          <CardTitle>{mode === 'discard' ? 'Dar de baja' : 'Ajustar por conteo'} — {s.productName}</CardTitle>
+          <CardTitle>{mode === 'discard' ? 'Dar de baja' : mode === 'count' ? 'Ajustar por conteo' : 'Aviso de stock bajo'} — {s.productName}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-foreground-muted">
             Stock actual: <span className="font-medium text-foreground">{num(s.totalQuantity)} {s.unit}</span>
           </p>
-          {mode === 'discard' ? (
+          {mode === 'min' ? (
+            <Field
+              label={`Avisarme cuando baje de (${s.unit})`}
+              htmlFor="adj-min"
+              hint="Cuando el stock llegue a este número o menos, el ítem se marca como 'stock bajo'. Poné 0 para no avisar."
+            >
+              <Input id="adj-min" type="number" inputMode="decimal" step="0.01" min={0} placeholder="Ej: 20" value={minVal} onChange={(e) => setMinVal(e.target.value)} autoFocus />
+            </Field>
+          ) : mode === 'discard' ? (
             <>
               <Field label={`Cantidad a dar de baja (${s.unit})`} htmlFor="adj-qty" required>
                 <Input id="adj-qty" type="number" inputMode="decimal" step="0.01" min={0} max={s.totalQuantity} placeholder="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
@@ -341,13 +358,15 @@ function AdjustDialog({ s, mode, onClose }: { s: StockSummary; mode: AdjustMode;
               })()}
             </>
           )}
-          <Field label="Notas" htmlFor="adj-notes" hint="Opcional.">
-            <Input id="adj-notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </Field>
+          {mode !== 'min' && (
+            <Field label="Notas" htmlFor="adj-notes" hint="Opcional.">
+              <Input id="adj-notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
+            </Field>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={onClose} disabled={mut.isPending}>Cancelar</Button>
             <Button onClick={() => mut.mutate()} loading={mut.isPending} loadingText="Guardando..." disabled={!canSave}>
-              {mode === 'discard' ? 'Dar de baja' : 'Ajustar'}
+              {mode === 'discard' ? 'Dar de baja' : mode === 'count' ? 'Ajustar' : 'Guardar aviso'}
             </Button>
           </div>
         </CardContent>

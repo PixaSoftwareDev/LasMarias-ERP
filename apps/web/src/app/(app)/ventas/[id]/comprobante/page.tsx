@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { clientsApi, salesApi } from '@/features/api';
+import { clientsApi, salesApi, settingsApi } from '@/features/api';
 import { formatMoney as money, formatQuantity as qty, formatDate } from '@/lib/utils';
 import type { SalesOrder } from '@lasmarias/shared-schemas';
 
@@ -20,6 +20,7 @@ export default function ComprobantePage() {
     enabled: !!params.id,
   });
   const clientsQuery = useQuery({ queryKey: ['clients'], queryFn: () => clientsApi.list() });
+  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: () => settingsApi.get() });
 
   if (orderQuery.isLoading) {
     return (
@@ -42,6 +43,7 @@ export default function ComprobantePage() {
 
   const order: SalesOrder = orderQuery.data;
   const client = clientsQuery.data?.find((c) => c.id === order.clientId);
+  const company = settingsQuery.data?.company;
 
   // Condición de pago del remito. Igual criterio que usa el backend al despachar:
   // si el cliente no tiene plazo (paymentTermDays null) es contado; si tiene plazo,
@@ -69,9 +71,11 @@ export default function ComprobantePage() {
       <Card className="print-document p-8 text-foreground">
         <div className="flex items-start justify-between border-b border-border-subtle pb-6">
           <div>
-            <p className="text-xs font-medium uppercase tracking-[0.25em] text-primary-700">Lácteos</p>
-            <p className="font-display text-2xl font-bold tracking-tight">Las Marías</p>
-            <p className="mt-1 text-xs text-foreground-muted">Pergamino, Buenos Aires</p>
+            <p className="font-display text-2xl font-bold tracking-tight">{company?.name ?? 'Las Marías'}</p>
+            {company?.address && <p className="mt-1 text-xs text-foreground-muted">{company.address}</p>}
+            {company?.city && <p className="text-xs text-foreground-muted">{company.city}</p>}
+            {company?.taxId && <p className="text-xs text-foreground-muted">CUIT: {company.taxId}</p>}
+            {company?.phone && <p className="text-xs text-foreground-muted">Tel: {company.phone}</p>}
           </div>
           <div className="text-right">
             <p className="text-lg font-semibold">Remito</p>

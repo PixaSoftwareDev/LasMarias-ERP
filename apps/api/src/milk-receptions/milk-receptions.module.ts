@@ -5,9 +5,10 @@ import { MilkReceptionsService } from './milk-receptions.service';
 import { MilkReceptionsController } from './milk-receptions.controller';
 import { ProducersModule } from '../producers/producers.module';
 import { BatchesModule } from '../batches/batches.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([MilkReceptionEntity]), ProducersModule, BatchesModule],
+  imports: [TypeOrmModule.forFeature([MilkReceptionEntity]), ProducersModule, BatchesModule, SettingsModule],
   providers: [MilkReceptionsService],
   controllers: [MilkReceptionsController],
   exports: [MilkReceptionsService],
