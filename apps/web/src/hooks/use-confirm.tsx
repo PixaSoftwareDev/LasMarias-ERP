@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -38,6 +38,20 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
     resolver.current = null;
     setOpts(null);
   };
+
+  // Esc cancela (cierra sin confirmar), como en cualquier diálogo. CLAUDE.md §5.5.
+  useEffect(() => {
+    if (!opts) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        resolver.current?.(false);
+        resolver.current = null;
+        setOpts(null);
+      }
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [opts]);
 
   return (
     <ConfirmContext.Provider value={confirm}>

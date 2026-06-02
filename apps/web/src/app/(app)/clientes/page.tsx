@@ -6,13 +6,14 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import Link from 'next/link';
-import { ArrowLeft, Pencil, Plus, Power } from 'lucide-react';
+import { ArrowLeft, Pencil, Plus, Power, Users } from 'lucide-react';
 import { createClientInputSchema, type CreateClientInput, type Client } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/data-table';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { RowActions } from '@/components/ui/row-actions';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -61,7 +62,7 @@ export default function ClientsPage() {
       toast.success(editing ? 'Cliente actualizado' : 'Cliente creado');
       closeForm();
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al guardar'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar. Probá de nuevo.'),
   });
 
   const toggleActive = useMutation({
@@ -70,7 +71,7 @@ export default function ClientsPage() {
       queryClient.invalidateQueries({ queryKey: ['clients'] });
       toast.success(vars.isActive ? 'Cliente activado' : 'Cliente desactivado');
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al actualizar'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo actualizar. Probá de nuevo.'),
   });
 
   async function onDeactivate(c: Client) {
@@ -99,7 +100,7 @@ export default function ClientsPage() {
           <CardContent>
             <form onSubmit={form.handleSubmit((v) => save.mutateAsync(v))} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Razón social" htmlFor="businessName" required error={form.formState.errors.businessName?.message}>
-                <Input {...form.register('businessName')} />
+                <Input autoFocus {...form.register('businessName')} />
               </Field>
               <Field label="CUIT" htmlFor="taxId" error={form.formState.errors.taxId?.message}>
                 <Input placeholder="20-12345678-9" {...form.register('taxId')} />
@@ -129,11 +130,13 @@ export default function ClientsPage() {
         </Card>
       )}
 
-      {isLoading ? <Card className="h-40 animate-pulse bg-surface-subtle" /> : (
+      {isLoading ? <TableSkeleton /> : (
         <DataTable
           data={data}
           getKey={(c) => c.id}
-          emptyText="Todavía no hay clientes."
+          emptyIcon={Users}
+          emptyTitle="Todavía no hay clientes"
+          emptyDescription="Cargá tu primer cliente para poder venderle y llevar su cuenta corriente."
           getSearchText={(c) => `${c.businessName} ${c.taxId ?? ''} ${c.city ?? ''}`}
           searchPlaceholder="Buscar por razón social, CUIT o ciudad…"
           columns={[

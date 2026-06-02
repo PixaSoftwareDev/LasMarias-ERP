@@ -23,7 +23,7 @@ export default function SimulatorPage() {
   const simulate = useMutation<RecipeSimulationResult, Error>({
     mutationFn: () =>
       recipesApi.simulate({ recipeId, liters: Number(liters), fatPercent: fat, proteinPercent: protein }),
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al simular'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo simular. Probá de nuevo.'),
   });
 
   return (

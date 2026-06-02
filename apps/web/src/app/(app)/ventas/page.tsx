@@ -16,6 +16,8 @@ import { ReturnDialog } from '@/components/sales/return-dialog';
 import { clientsApi, inventoryApi, productsApi, salesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useConfirm } from '@/hooks/use-confirm';
+import { formatMoney as money, formatDate } from '@/lib/utils';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import type { SalesOrder } from '@lasmarias/shared-schemas';
 
 // Condición de pago del despacho. El tipo vive en el schema como enum inline de
@@ -28,11 +30,9 @@ interface Line {
   unitPrice: number;
 }
 
-const money = (n: number) => `$${n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
-
 const EMPTY_LINE: Line = { productId: '', quantity: 1, unitPrice: 0 };
 
-const fefoDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('es-AR') : null);
+const fefoDate = (iso?: string) => (iso ? formatDate(iso) : null);
 
 // Preview FEFO por línea (CLAUDE.md §4.4). Solo informativo: muestra de qué lote/s
 // saldrá la mercadería; el descuento real lo hace el backend al despachar.
@@ -429,7 +429,7 @@ export default function SalesPage() {
 
       {!showForm && (
         ordersQuery.isLoading ? (
-          <Card className="h-40 animate-pulse bg-surface-subtle" />
+          <TableSkeleton />
         ) : orders.length === 0 ? (
           <EmptyState
             icon={ShoppingCart}
@@ -471,7 +471,7 @@ export default function SalesPage() {
             columns={[
               { key: 'code', header: 'Código', render: (o: SalesOrder) => <span className="font-mono text-xs">{o.code}</span>, secondary: true, sortValue: (o: SalesOrder) => o.code },
               { key: 'client', header: 'Cliente', render: (o: SalesOrder) => o.clientName, primary: true, sortValue: (o: SalesOrder) => o.clientName },
-              { key: 'date', header: 'Fecha', render: (o: SalesOrder) => new Date(o.dispatchedAt).toLocaleDateString('es-AR'), sortValue: (o: SalesOrder) => new Date(o.dispatchedAt).getTime() },
+              { key: 'date', header: 'Fecha', render: (o: SalesOrder) => formatDate(o.dispatchedAt), sortValue: (o: SalesOrder) => new Date(o.dispatchedAt).getTime() },
               { key: 'items', header: 'Items', render: (o: SalesOrder) => o.lines.length, align: 'right', sortValue: (o: SalesOrder) => o.lines.length },
               { key: 'total', header: 'Total', render: (o: SalesOrder) => money(o.total), align: 'right', sortValue: (o: SalesOrder) => Number(o.total) },
               {

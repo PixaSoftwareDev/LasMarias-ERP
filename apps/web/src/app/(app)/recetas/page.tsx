@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { ChefHat, Copy, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/data-table';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { recipesApi } from '@/features/api';
@@ -25,7 +25,7 @@ export default function RecipesPage() {
         }
       />
 
-      {isLoading ? <Card className="h-40 animate-pulse bg-surface-subtle" /> : data.length === 0 ? (
+      {isLoading ? <TableSkeleton /> : data.length === 0 ? (
         <EmptyState icon={ChefHat} title="Todavía no hay recetas" description="Cuando crees la primera receta, va a aparecer acá." action={<Button asChild><Link href="/recetas/nueva">Crear receta</Link></Button>} />
       ) : (
         <>

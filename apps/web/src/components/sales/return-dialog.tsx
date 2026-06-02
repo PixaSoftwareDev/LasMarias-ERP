@@ -8,9 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ApiError } from '@/lib/api-client';
 import { salesApi } from '@/features/api';
+import { formatMoney as money } from '@/lib/utils';
 import type { SalesOrder } from '@lasmarias/shared-schemas';
-
-const money = (n: number) => `$${n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 
 interface Props {
   order: SalesOrder;

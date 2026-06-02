@@ -15,6 +15,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/page-header';
 import { productsApi, recipesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
+import { formatDate } from '@/lib/utils';
 
 interface FormValues {
   baseYieldKgPerLiter: number;
@@ -77,7 +78,7 @@ const emptyByproduct: ByproductRow = {
 const selectClass =
   'flex min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-1';
 
-const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+const fmtDate = (iso: string) => formatDate(iso);
 
 export default function NewRecipeVersionPage() {
   const router = useRouter();
@@ -168,7 +169,7 @@ export default function NewRecipeVersionPage() {
       toast.success('Nueva versión guardada. La anterior quedó archivada.');
       router.push('/recetas');
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al guardar la versión'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar la versión. Probá de nuevo.'),
   });
 
   function validateAndSubmit(v: FormValues) {

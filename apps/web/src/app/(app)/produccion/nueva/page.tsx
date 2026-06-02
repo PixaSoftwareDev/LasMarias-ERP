@@ -97,7 +97,7 @@ export default function NewProductionPage() {
       toast.success(`Orden ${r.code} abierta`);
       router.push('/produccion');
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al abrir orden'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo abrir la orden. Probá de nuevo.'),
   });
 
   useEffect(() => {

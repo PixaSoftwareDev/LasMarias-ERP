@@ -7,10 +7,8 @@ import { ArrowLeft, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { clientsApi, salesApi } from '@/features/api';
+import { formatMoney as money, formatQuantity as qty, formatDate } from '@/lib/utils';
 import type { SalesOrder } from '@lasmarias/shared-schemas';
-
-const money = (n: number) => `$${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const qty = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 2 });
 
 // Remito imprimible (CLAUDE.md §4.6). Documento interno A4, NO fiscal. El botón
 // "Imprimir" usa window.print(); el chrome de la app se oculta vía CSS de print.
@@ -53,8 +51,7 @@ export default function ComprobantePage() {
   const dueDate = isContado
     ? null
     : new Date(new Date(order.dispatchedAt).getTime() + termDays * 24 * 60 * 60 * 1000);
-  const fmtDate = (d: Date) =>
-    d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const fmtDate = (d: Date) => formatDate(d);
 
   return (
     <div className="mx-auto max-w-3xl p-4 sm:p-6">

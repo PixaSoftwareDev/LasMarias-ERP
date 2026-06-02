@@ -10,6 +10,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/page-header';
 import { inventoryApi, productionApi } from '@/features/api';
 import { receptionsApi } from '@/features/receptions/api';
+import { formatDate } from '@/lib/utils';
 import type { TraceForward, TraceBackward } from '@lasmarias/shared-schemas';
 
 // Trazabilidad bidireccional navegable (CLAUDE.md §4.4). El usuario elige un lote
@@ -23,7 +24,7 @@ interface BatchOption {
   group: string; // "Lotes de leche" | "Lotes de producción"
 }
 
-const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('es-AR') : null);
+const fmtDate = (iso?: string) => (iso ? formatDate(iso) : null);
 const fmtQty = (n: number | null | undefined, unit?: string) =>
   typeof n === 'number' ? `${n.toLocaleString('es-AR', { maximumFractionDigits: 2 })}${unit ? ` ${unit}` : ''}` : null;
 

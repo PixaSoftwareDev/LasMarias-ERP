@@ -14,10 +14,9 @@ import { PageHeader } from '@/components/page-header';
 import { producersApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useConfirm } from '@/hooks/use-confirm';
+import { formatMoney as money, formatDate as dateFmt } from '@/lib/utils';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import type { ProducerBalance } from '@lasmarias/shared-schemas';
-
-const money = (n: number) => `$${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const dateFmt = (iso: string) => new Date(iso).toLocaleDateString('es-AR');
 
 function balanceTone(b: number) {
   if (b > 0.005) return 'text-danger';
@@ -83,7 +82,7 @@ function PaymentForm({ producerId, producerName, onDone }: { producerId: string;
       <CardContent className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field label="Monto" htmlFor="pay-amount" required>
-            <Input id="pay-amount" type="number" inputMode="decimal" step="0.01" min={0} prefix="$" placeholder="Ej: 150000" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            <Input id="pay-amount" autoFocus type="number" inputMode="decimal" step="0.01" min={0} prefix="$" placeholder="Ej: 150000" value={amount} onChange={(e) => setAmount(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && canSave) { e.preventDefault(); handleRegister(); } }} />
           </Field>
           <Field label="Fecha" htmlFor="pay-date">
             <Input id="pay-date" type="date" value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} />
@@ -111,7 +110,7 @@ function AccountDetail({ producerId, onBack }: { producerId: string; onBack: () 
     queryFn: () => producersApi.account(producerId, month),
   });
 
-  if (detailQuery.isLoading) return <Card className="h-64 animate-pulse bg-surface-subtle" />;
+  if (detailQuery.isLoading) return <TableSkeleton rows={6} />;
   if (detailQuery.isError || !detailQuery.data) return <p className="text-sm text-danger">No se pudo cargar la cuenta.</p>;
 
   const d = detailQuery.data;
@@ -198,7 +197,7 @@ export default function PagosTambosPage() {
       {selected ? (
         <AccountDetail producerId={selected} onBack={() => setSelected(null)} />
       ) : accountsQuery.isLoading ? (
-        <Card className="h-40 animate-pulse bg-surface-subtle" />
+        <TableSkeleton />
       ) : accounts.length === 0 ? (
         <EmptyState icon={Milk} title="No hay tambos cargados" description="Cargá tambos en Datos maestros y, cuando recibas leche, vas a ver acá lo que les debés." />
       ) : (

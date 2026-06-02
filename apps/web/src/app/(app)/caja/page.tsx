@@ -16,14 +16,12 @@ import { PageHeader } from '@/components/page-header';
 import { financeApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useConfirm } from '@/hooks/use-confirm';
+import { formatMoney as money, formatSignedMoney as signedMoney, formatDate as dateFmt } from '@/lib/utils';
+import { TableSkeleton, ChipsSkeleton } from '@/components/ui/skeleton';
 import type { CashMovement, ReportGranularity } from '@lasmarias/shared-schemas';
 
 // CLAUDE.md §4.7 — Flujo de caja simple. Los cobros de clientes entran como
 // ingresos (los genera el backend); acá se cargan gastos a mano. Roles admin/gerente.
-
-const money = (n: number) => `$${n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
-const signedMoney = (n: number) => `${n < 0 ? '−' : ''}$${Math.abs(n).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
-const dateFmt = (iso: string) => new Date(iso).toLocaleDateString('es-AR');
 
 const fmtDay = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -54,15 +52,17 @@ function KpiChip({
   value,
   tone,
   icon: Icon,
+  hint,
 }: {
   label: string;
   value: string;
   tone: keyof typeof CHIP_TONE;
   icon: typeof TrendingUp;
+  hint?: string;
 }) {
   const t = CHIP_TONE[tone];
   return (
-    <div className="flex flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
+    <div title={hint} className="flex flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
       <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${t.icon}`}>
         <Icon className="h-4 w-4" aria-hidden="true" />
       </span>
@@ -123,6 +123,7 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
           <Field label="Categoría" htmlFor="exp-category" required hint="Insumos, sueldos, servicios…">
             <Input
               id="exp-category"
+              autoFocus
               placeholder="Insumos"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
@@ -139,6 +140,7 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
               placeholder="Ej: 12000"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && canSave) { e.preventDefault(); handleCreate(); } }}
             />
           </Field>
           <Field label="Fecha" htmlFor="exp-date">
@@ -236,11 +238,7 @@ export default function CajaPage() {
       {!validRange ? (
         <EmptyState icon={Banknote} title="Elegí un rango de fechas válido" description='La fecha "desde" debe ser anterior o igual a "hasta".' />
       ) : flowQuery.isLoading ? (
-        <div className="flex flex-wrap gap-3">
-          {Array.from({ length: 3 }, (_, i) => (
-            <div key={i} className="h-[60px] min-w-[11rem] flex-1 animate-pulse rounded-lg bg-surface-subtle" />
-          ))}
-        </div>
+        <ChipsSkeleton count={3} />
       ) : flowQuery.isError || !flow ? (
         <Card>
           <CardContent className="py-6 text-center text-sm text-danger">
@@ -250,13 +248,14 @@ export default function CajaPage() {
       ) : (
         <>
           <section aria-label="Resumen" className="flex flex-wrap gap-3">
-            <KpiChip label="Ingresos" value={money(flow.totalIncome)} tone="income" icon={TrendingUp} />
-            <KpiChip label="Egresos" value={money(flow.totalExpense)} tone="expense" icon={TrendingDown} />
+            <KpiChip label="Ingresos" value={money(flow.totalIncome)} tone="income" icon={TrendingUp} hint="Total de cobros recibidos en el período elegido." />
+            <KpiChip label="Egresos" value={money(flow.totalExpense)} tone="expense" icon={TrendingDown} hint="Total de gastos cargados en el período elegido." />
             <KpiChip
               label="Neto"
               value={signedMoney(flow.net)}
               tone={flow.net < 0 ? 'net-negative' : 'net'}
               icon={Banknote}
+              hint="Ingresos menos egresos. En rojo si gastaste más de lo que cobraste."
             />
           </section>
 
@@ -273,7 +272,7 @@ export default function CajaPage() {
               </Button>
             </div>
             {movementsQuery.isLoading ? (
-              <Card className="h-40 animate-pulse bg-surface-subtle" />
+              <TableSkeleton />
             ) : movements.length === 0 ? (
               <EmptyState
                 icon={Banknote}

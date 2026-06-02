@@ -145,7 +145,7 @@ export default function NewRecipePage() {
       toast.success('Receta creada');
       router.push('/recetas');
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al crear'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo crear la receta. Probá de nuevo.'),
   });
 
   function validateAndSubmit(v: FormValues) {
@@ -203,19 +203,31 @@ export default function NewRecipePage() {
 
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2"><Gauge className="h-5 w-5 text-primary-700" aria-hidden="true" />Rendimiento base</CardTitle></CardHeader>
-          <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <CardContent className="flex flex-col gap-5">
+            {/* Lo obligatorio, siempre visible. */}
             <Field label="Rendimiento (kg de producto por litro)" htmlFor="baseYieldKgPerLiter" required hint="Ej: 0.10 = 100 kg de queso cada 1000 L">
               <Input type="number" step="0.001" inputMode="decimal" {...form.register('baseYieldKgPerLiter', { valueAsNumber: true, required: true, min: 0.0001 })} />
             </Field>
-            <Field label="Merma estándar (%)" htmlFor="standardWastePercent">
-              <Input type="number" step="0.1" inputMode="decimal" {...form.register('standardWastePercent', { valueAsNumber: true })} />
-            </Field>
-            <Field label="Grasa base (%)" htmlFor="baselineFatPercent">
-              <Input type="number" step="0.01" inputMode="decimal" {...form.register('baselineFatPercent', { valueAsNumber: true })} />
-            </Field>
-            <Field label="Proteína base (%)" htmlFor="baselineProteinPercent">
-              <Input type="number" step="0.01" inputMode="decimal" {...form.register('baselineProteinPercent', { valueAsNumber: true })} />
-            </Field>
+
+            {/* Lo opcional/avanzado, plegado para no abrumar. */}
+            <details className="group rounded-lg border border-border-subtle bg-surface-subtle/40">
+              <summary className="flex cursor-pointer items-center justify-between px-4 py-3 text-sm font-medium text-foreground">
+                <span>Datos avanzados (opcional)</span>
+                <span className="text-xs text-foreground-muted group-open:hidden">Mostrar</span>
+                <span className="hidden text-xs text-foreground-muted group-open:inline">Ocultar</span>
+              </summary>
+              <div className="grid grid-cols-1 gap-5 px-4 pb-4 sm:grid-cols-3">
+                <Field label="Merma estándar (%)" htmlFor="standardWastePercent" hint="Pérdida esperada del proceso.">
+                  <Input type="number" step="0.1" inputMode="decimal" {...form.register('standardWastePercent', { valueAsNumber: true })} />
+                </Field>
+                <Field label="Grasa base (%)" htmlFor="baselineFatPercent" hint="Materia grasa de referencia de la leche.">
+                  <Input type="number" step="0.01" inputMode="decimal" {...form.register('baselineFatPercent', { valueAsNumber: true })} />
+                </Field>
+                <Field label="Proteína base (%)" htmlFor="baselineProteinPercent" hint="Proteína de referencia de la leche.">
+                  <Input type="number" step="0.01" inputMode="decimal" {...form.register('baselineProteinPercent', { valueAsNumber: true })} />
+                </Field>
+              </div>
+            </details>
           </CardContent>
         </Card>
 

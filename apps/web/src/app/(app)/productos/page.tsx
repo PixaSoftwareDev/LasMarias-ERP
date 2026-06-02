@@ -6,13 +6,14 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import Link from 'next/link';
-import { ArrowLeft, Pencil, Plus, Power } from 'lucide-react';
+import { ArrowLeft, Package, Pencil, Plus, Power } from 'lucide-react';
 import { createProductInputSchema, type CreateProductInput, type Product } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/data-table';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { RowActions } from '@/components/ui/row-actions';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -63,7 +64,7 @@ export default function ProductsPage() {
       toast.success(editing ? 'Producto actualizado' : 'Producto creado');
       closeForm();
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al guardar'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar. Probá de nuevo.'),
   });
 
   const toggleActive = useMutation({
@@ -72,7 +73,7 @@ export default function ProductsPage() {
       queryClient.invalidateQueries({ queryKey: ['products'] });
       toast.success(vars.isActive ? 'Producto activado' : 'Producto desactivado');
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al actualizar'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo actualizar. Probá de nuevo.'),
   });
 
   async function onDeactivate(p: Product) {
@@ -105,7 +106,7 @@ export default function ProductsPage() {
           <CardContent>
             <form onSubmit={form.handleSubmit((v) => save.mutateAsync(v))} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="SKU" htmlFor="sku" required error={form.formState.errors.sku?.message}>
-                <Input placeholder="QC-001" {...form.register('sku')} />
+                <Input autoFocus placeholder="QC-001" {...form.register('sku')} />
               </Field>
               <Field label="Nombre" htmlFor="name" required error={form.formState.errors.name?.message}>
                 <Input placeholder="Queso cremoso 1kg" {...form.register('name')} />
@@ -151,12 +152,14 @@ export default function ProductsPage() {
       )}
 
       {isLoading ? (
-        <Card className="h-40 animate-pulse bg-surface-subtle" />
+        <TableSkeleton />
       ) : (
         <DataTable
           data={data}
           getKey={(p) => p.id}
-          emptyText="Todavía no hay productos cargados."
+          emptyIcon={Package}
+          emptyTitle="Todavía no hay productos cargados"
+          emptyDescription="Creá tu primer producto para poder usarlo en recetas, producción y ventas."
           getSearchText={(p) => `${p.sku} ${p.name} ${p.category}`}
           searchPlaceholder="Buscar por nombre, SKU o categoría…"
           columns={[

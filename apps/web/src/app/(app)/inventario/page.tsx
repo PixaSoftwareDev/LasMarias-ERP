@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/data-table';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { RowActions } from '@/components/ui/row-actions';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
@@ -444,7 +445,7 @@ export default function InventoryPage() {
             </div>
           )}
           {movementsQuery.isLoading ? (
-            <Card className="h-40 animate-pulse bg-surface-subtle" />
+            <TableSkeleton />
           ) : (
             <DataTable
               data={filteredMovements}
@@ -485,7 +486,7 @@ export default function InventoryPage() {
           </section>
 
           {stockQuery.isLoading ? (
-            <Card className="h-40 animate-pulse bg-surface-subtle" />
+            <TableSkeleton />
           ) : groups.length === 0 ? (
             <EmptyState icon={Package} title="Sin stock cargado" description="A medida que recibas leche, cierres producción o ingreses insumos, el stock aparece acá." />
           ) : (

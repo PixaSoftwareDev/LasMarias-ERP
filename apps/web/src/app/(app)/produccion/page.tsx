@@ -5,13 +5,13 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Factory, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/data-table';
 import { EmptyState } from '@/components/ui/empty-state';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge, type Status } from '@/components/ui/status-badge';
 import { productionApi } from '@/features/api';
-import { formatDateTime } from '@/lib/utils';
+import { formatDateTime, formatMoney } from '@/lib/utils';
 import type { ProductionOrder } from '@lasmarias/shared-schemas';
 
 function statusBadge(s: ProductionOrder['status']): { variant: Status; label: string } {
@@ -34,7 +34,7 @@ export default function ProductionPage() {
         description="Órdenes de producción. Cerrar una orden es definitivo (modificaciones requieren rol Gerente)."        action={<Button asChild><Link href="/produccion/nueva"><Plus className="h-4 w-4" /> Abrir orden</Link></Button>}
       />
 
-      {isLoading ? <Card className="h-40 animate-pulse bg-surface-subtle" /> : data.length === 0 ? (
+      {isLoading ? <TableSkeleton /> : data.length === 0 ? (
         <EmptyState icon={Factory} title="Todavía no hay órdenes de producción" description="Cuando abras la primera orden, va a aparecer acá." action={<Button asChild><Link href="/produccion/nueva">Abrir primera orden</Link></Button>} />
       ) : (
         <DataTable
@@ -49,7 +49,7 @@ export default function ProductionPage() {
             { key: 'started', header: 'Inicio', render: (o) => formatDateTime(o.startedAt), sortValue: (o) => new Date(o.startedAt).getTime() },
             { key: 'milk', header: 'Litros', render: (o) => o.totalMilkLiters.toLocaleString('es-AR'), align: 'right', sortValue: (o) => Number(o.totalMilkLiters) },
             { key: 'output', header: 'Producido', render: (o) => o.totalPrincipalKg ? `${o.totalPrincipalKg.toFixed(1)} kg` : '—', align: 'right', sortValue: (o) => Number(o.totalPrincipalKg ?? 0) },
-            { key: 'cost', header: 'Costo/kg', render: (o) => o.unitCost ? `$${o.unitCost.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—', align: 'right' },
+            { key: 'cost', header: 'Costo/kg', render: (o) => o.unitCost ? formatMoney(o.unitCost) : '—', align: 'right' },
             { key: 'status', header: 'Estado', render: (o) => { const s = statusBadge(o.status); return <StatusBadge status={s.variant}>{s.label}</StatusBadge>; } },
             {
               key: 'action',

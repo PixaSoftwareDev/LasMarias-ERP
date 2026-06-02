@@ -22,6 +22,7 @@ import { SegmentedControl } from '@/components/ui/segmented-control';
 import { PageHeader } from '@/components/page-header';
 import { reportsApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
+import { formatMoney as money, formatDate } from '@/lib/utils';
 import type {
   ProductionReportRow,
   ProfitabilityRow,
@@ -34,8 +35,6 @@ import type {
 // CLAUDE.md §4.9 / §5.3 — Reportes en pestañas: una sección a la vez para no
 // abrumar. Rango de fechas compartido arriba. Solo lectura, lenguaje del negocio.
 
-const money = (n: number) =>
-  `$${n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 const num = (n: number, max = 0) =>
   n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: max });
 const pct = (n: number) =>
@@ -69,14 +68,16 @@ function KpiChip({
   value,
   icon: Icon,
   tone = 'primary',
+  hint,
 }: {
   label: string;
   value: string;
   icon: LucideIcon;
   tone?: KpiTone;
+  hint?: string;
 }) {
   return (
-    <div className="flex min-w-[11rem] flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
+    <div title={hint} className="flex min-w-[11rem] flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
       <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${KPI_TONE[tone]}`}>
         <Icon className="h-4 w-4" aria-hidden="true" />
       </span>
@@ -117,7 +118,7 @@ function ProductionSection({ from, to }: { from: string; to: string }) {
   const periodLabel = (iso: string) =>
     granularity === 'month'
       ? new Date(iso).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
-      : new Date(iso).toLocaleDateString('es-AR');
+      : formatDate(iso);
 
   const rows = query.data ?? [];
 
@@ -149,9 +150,9 @@ function ProductionSection({ from, to }: { from: string; to: string }) {
   return (
     <div className="space-y-4">
       <KpiRow>
-        <KpiChip label="Kg producidos" value={num(totals.kg, 1)} icon={Factory} tone="primary" />
-        <KpiChip label="Litros de leche" value={num(totals.milk, 1)} icon={TrendingUp} tone="secondary" />
-        <KpiChip label="Costo total" value={money(totals.cost)} icon={Coins} tone="amber" />
+        <KpiChip label="Kg producidos" value={num(totals.kg, 1)} icon={Factory} tone="primary" hint="Total de kg de producto terminado en el período." />
+        <KpiChip label="Litros de leche" value={num(totals.milk, 1)} icon={TrendingUp} tone="secondary" hint="Litros de leche que entraron a producción en el período." />
+        <KpiChip label="Costo total" value={money(totals.cost)} icon={Coins} tone="amber" hint="Costo de toda la producción del período: leche, insumos y mano de obra, menos subproductos." />
       </KpiRow>
 
       <div className="flex justify-end">
@@ -212,9 +213,9 @@ function SalesSection({ from, to }: { from: string; to: string }) {
     <div className="space-y-4">
       {by === 'client' && !clientQuery.isLoading && !clientQuery.isError && clientRows.length > 0 && (
         <KpiRow>
-          <KpiChip label="Total facturado" value={money(totalFacturado)} icon={Coins} tone="primary" />
-          <KpiChip label="Ventas" value={num(totalDespachos)} icon={ShoppingCart} tone="secondary" />
-          <KpiChip label="Clientes" value={num(clientRows.length)} icon={TrendingUp} tone="secondary" />
+          <KpiChip label="Total facturado" value={money(totalFacturado)} icon={Coins} tone="primary" hint="Suma de todas las ventas del período." />
+          <KpiChip label="Ventas" value={num(totalDespachos)} icon={ShoppingCart} tone="secondary" hint="Cantidad de ventas (despachos) registradas en el período." />
+          <KpiChip label="Clientes" value={num(clientRows.length)} icon={TrendingUp} tone="secondary" hint="Cantidad de clientes distintos que compraron en el período." />
         </KpiRow>
       )}
 
@@ -342,12 +343,13 @@ function ProfitabilitySection({ from, to }: { from: string; to: string }) {
   return (
     <div className="space-y-4">
       <KpiRow>
-        <KpiChip label="Facturado (con costo)" value={money(totals.revenue)} icon={Coins} tone="primary" />
+        <KpiChip label="Facturado (con costo)" value={money(totals.revenue)} icon={Coins} tone="primary" hint="Lo que vendiste de productos que tienen costo calculado (los que pasaron por producción)." />
         <KpiChip
           label="Margen total"
           value={`${totals.margin < 0 ? '−' : ''}${money(Math.abs(totals.margin))}`}
           icon={TrendingUp}
           tone={totals.margin < 0 ? 'danger' : 'primary'}
+          hint="Facturado menos el costo de lo vendido. Es la ganancia bruta, antes de gastos."
         />
         {totals.marginPct != null && (
           <KpiChip
@@ -355,6 +357,7 @@ function ProfitabilitySection({ from, to }: { from: string; to: string }) {
             value={`${totals.marginPct < 0 ? '−' : ''}${pct(Math.abs(totals.marginPct))}`}
             icon={TrendingUp}
             tone={totals.marginPct < 0 ? 'danger' : 'secondary'}
+            hint="Qué porción de lo facturado es ganancia. Margen ÷ facturado."
           />
         )}
       </KpiRow>
@@ -441,12 +444,13 @@ function YieldSection({ from, to }: { from: string; to: string }) {
   return (
     <div className="space-y-4">
       <KpiRow>
-        <KpiChip label="Órdenes cerradas" value={num(rows.length)} icon={Factory} tone="secondary" />
+        <KpiChip label="Órdenes cerradas" value={num(rows.length)} icon={Factory} tone="secondary" hint="Cantidad de órdenes de producción cerradas en el período." />
         <KpiChip
           label="Por debajo de lo esperado"
           value={num(desvCount)}
           icon={TrendingUp}
           tone={desvCount > 0 ? 'amber' : 'primary'}
+          hint="Órdenes que rindieron menos kg de lo que dice la receta. Conviene revisarlas."
         />
       </KpiRow>
 

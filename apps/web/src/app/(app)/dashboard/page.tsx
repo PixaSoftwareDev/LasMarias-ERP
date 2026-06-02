@@ -22,14 +22,13 @@ import { PageHeader } from '@/components/page-header';
 import { MonthCalendar } from '@/components/month-calendar';
 import { useAuth } from '@/hooks/use-auth';
 import { homeApi, inventoryApi, salesApi } from '@/features/api';
+import { formatMoney as money } from '@/lib/utils';
 import type { HomeCalendarEvent, StockSummary, AccountBalance } from '@lasmarias/shared-schemas';
 
 // Home "Centro de comando" (CLAUDE.md §5.3 / §5.4): panel administrativo denso
 // y ordenado. Izquierda (2/3): saludo + KPIs en chips + "Para resolver" (lo
 // accionable). Derecha (1/3): mini calendario + "Próximos".
 
-const money = (n: number) =>
-  `$${n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 const num = (n: number) => n.toLocaleString('es-AR');
 
 function currentMonthKey() {
@@ -57,6 +56,7 @@ interface Kpi {
   value: string;
   icon: LucideIcon;
   tone: 'primary' | 'amber' | 'secondary' | 'danger';
+  hint?: string;
 }
 
 const KPI_TONE: Record<Kpi['tone'], string> = {
@@ -71,6 +71,7 @@ function KpiChip({ kpi }: { kpi: Kpi }) {
   return (
     <Link
       href={kpi.href}
+      title={kpi.hint}
       className="group flex min-w-[11rem] flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm transition-all hover:border-primary-300 hover:shadow-md"
     >
       <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${KPI_TONE[kpi.tone]}`}>
@@ -208,11 +209,11 @@ export default function DashboardPage() {
   const s = summaryQuery.data;
   const kpis: Kpi[] = s
     ? [
-        { href: '/cuentas', label: 'A cobrar', value: money(s.saldoTotalPorCobrar), icon: Wallet, tone: 'danger' },
-        { href: '/caja', label: 'Caja del mes', value: money(s.cajaNetaMes), icon: Banknote, tone: s.cajaNetaMes < 0 ? 'danger' : 'primary' },
-        { href: '/ventas', label: 'Ventas del mes', value: money(s.ventasMes), icon: TrendingUp, tone: 'primary' },
-        { href: '/ventas', label: 'Ventas hoy', value: num(s.despachosHoy), icon: ShoppingCart, tone: 'secondary' },
-        { href: '/inventario', label: 'Lotes por vencer', value: num(s.lotesPorVencer), icon: TriangleAlert, tone: s.lotesPorVencer > 0 ? 'amber' : 'primary' },
+        { href: '/cuentas', label: 'A cobrar', value: money(s.saldoTotalPorCobrar), icon: Wallet, tone: 'danger', hint: 'Total que te deben todos los clientes en cuenta corriente.' },
+        { href: '/caja', label: 'Caja del mes', value: money(s.cajaNetaMes), icon: Banknote, tone: s.cajaNetaMes < 0 ? 'danger' : 'primary', hint: 'Cobros menos gastos de este mes. En rojo si gastaste más de lo que entró.' },
+        { href: '/ventas', label: 'Ventas del mes', value: money(s.ventasMes), icon: TrendingUp, tone: 'primary', hint: 'Total facturado en lo que va del mes.' },
+        { href: '/ventas', label: 'Ventas hoy', value: num(s.despachosHoy), icon: ShoppingCart, tone: 'secondary', hint: 'Cantidad de ventas registradas hoy.' },
+        { href: '/inventario', label: 'Lotes por vencer', value: num(s.lotesPorVencer), icon: TriangleAlert, tone: s.lotesPorVencer > 0 ? 'amber' : 'primary', hint: 'Lotes próximos a vencer o ya vencidos. Tocá para verlos en stock.' },
       ]
     : [];
 

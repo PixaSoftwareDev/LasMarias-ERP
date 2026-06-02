@@ -1,10 +1,11 @@
 'use client';
 
 import * as React from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Search, Inbox, type LucideIcon } from 'lucide-react';
 import { Card } from './card';
 import { Button } from './button';
 import { Input } from './input';
+import { EmptyState } from './empty-state';
 import { cn, normalizeText } from '@/lib/utils';
 
 // Tabla simple compartida. Responsive: en mobile cada fila se convierte en stack vertical.
@@ -35,6 +36,10 @@ interface Props<T> {
   searchPlaceholder?: string;
   /** Controles de filtro extra (fechas, chips…). Se renderizan en la MISMA fila que el buscador, a la derecha. */
   filters?: React.ReactNode;
+  /** Estado vacío enriquecido (ícono + título). Si se provee, se usa <EmptyState> en vez del texto plano. */
+  emptyIcon?: LucideIcon;
+  emptyTitle?: string;
+  emptyDescription?: string;
 }
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -49,6 +54,9 @@ export function DataTable<T>({
   getSearchText,
   searchPlaceholder = 'Buscar…',
   filters,
+  emptyIcon,
+  emptyTitle,
+  emptyDescription,
 }: Props<T>) {
   const [page, setPage] = React.useState(0);
   const [query, setQuery] = React.useState('');
@@ -125,9 +133,20 @@ export function DataTable<T>({
       )}
 
       {total === 0 ? (
-        <Card className="p-8 text-center text-sm text-foreground-muted">
-          {query.trim() ? 'No hay resultados para la búsqueda.' : emptyText ?? 'No hay datos para mostrar.'}
-        </Card>
+        query.trim() ? (
+          // Vacío por búsqueda: mensaje simple, no un estado vacío "no hay nada".
+          <Card className="p-8 text-center text-sm text-foreground-muted">
+            No hay resultados para la búsqueda.
+          </Card>
+        ) : emptyIcon || emptyTitle ? (
+          <Card className="py-4">
+            <EmptyState icon={emptyIcon ?? Inbox} title={emptyTitle ?? 'No hay datos para mostrar.'} description={emptyDescription} />
+          </Card>
+        ) : (
+          <Card className="p-8 text-center text-sm text-foreground-muted">
+            {emptyText ?? 'No hay datos para mostrar.'}
+          </Card>
+        )
       ) : (
         <>
           {/* Mobile */}
@@ -172,9 +191,9 @@ export function DataTable<T>({
             })}
           </div>
 
-          {/* Desktop */}
-          <Card className="hidden md:block">
-            <table className="w-full">
+          {/* Desktop — scroll horizontal si la tabla es ancha (no se aprieta en tablet). */}
+          <Card className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[40rem]">
               <thead className="border-b border-border-subtle bg-surface-subtle/40">
                 <tr className="text-left text-xs uppercase tracking-wide text-foreground-muted">
                   {columns.map((c) => {

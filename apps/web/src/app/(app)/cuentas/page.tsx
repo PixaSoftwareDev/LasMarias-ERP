@@ -16,10 +16,9 @@ import { PageHeader } from '@/components/page-header';
 import { salesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useConfirm } from '@/hooks/use-confirm';
+import { formatMoney as money, formatDate as dateFmt } from '@/lib/utils';
+import { TableSkeleton, ChipsSkeleton } from '@/components/ui/skeleton';
 import type { AccountBalance, AccountMovement } from '@lasmarias/shared-schemas';
-
-const money = (n: number) => `$${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const dateFmt = (iso: string) => new Date(iso).toLocaleDateString('es-AR');
 
 // Color del saldo: rojo si debe (>0), gris/verde si está al día o a favor.
 function balanceTone(balance: number) {
@@ -45,15 +44,17 @@ function StatChip({
   value,
   tone,
   valueClassName,
+  hint,
 }: {
   icon: LucideIcon;
   label: string;
   value: string;
   tone: ChipTone;
   valueClassName?: string;
+  hint?: string;
 }) {
   return (
-    <div className="flex min-w-[10rem] flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
+    <div title={hint} className="flex min-w-[10rem] flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
       <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${CHIP_TONE[tone]}`}>
         <Icon className="h-4 w-4" aria-hidden="true" />
       </span>
@@ -122,6 +123,7 @@ function PaymentForm({ clientId, clientName, onDone }: { clientId: string; clien
           <Field label="Monto" htmlFor="pay-amount" required>
             <Input
               id="pay-amount"
+              autoFocus
               type="number"
               inputMode="decimal"
               step="0.01"
@@ -130,6 +132,7 @@ function PaymentForm({ clientId, clientName, onDone }: { clientId: string; clien
               placeholder="Ej: 25000"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && canSave) { e.preventDefault(); handleRegister(); } }}
             />
           </Field>
           <Field label="Fecha" htmlFor="pay-date">
@@ -153,16 +156,23 @@ function AccountDetailView({ clientId, onBack }: { clientId: string; onBack: () 
   const [showPayment, setShowPayment] = useState(false);
   const detailQuery = useQuery({ queryKey: ['account', clientId], queryFn: () => salesApi.accountDetail(clientId) });
 
-  if (detailQuery.isLoading) return <Card className="h-64 animate-pulse bg-surface-subtle" />;
+  if (detailQuery.isLoading) {
+    return (
+      <div className="flex flex-col gap-6">
+        <ChipsSkeleton count={3} />
+        <TableSkeleton rows={5} />
+      </div>
+    );
+  }
   if (detailQuery.isError || !detailQuery.data) {
     return <p className="text-sm text-danger">No se pudo cargar la cuenta.</p>;
   }
 
   const d = detailQuery.data;
-  const aging: { icon: LucideIcon; label: string; value: number; tone: ChipTone }[] = [
-    { icon: CalendarClock, label: 'Al día (0-30 días)', value: d.aging.current, tone: 'neutral' },
-    { icon: TriangleAlert, label: '31 a 60 días', value: d.aging.d31to60, tone: 'amber' },
-    { icon: CalendarX2, label: 'Más de 60 días', value: d.aging.over60, tone: 'danger' },
+  const aging: { icon: LucideIcon; label: string; value: number; tone: ChipTone; hint: string }[] = [
+    { icon: CalendarClock, label: 'Al día (0-30 días)', value: d.aging.current, tone: 'neutral', hint: 'Deuda con menos de 31 días desde la venta. Todavía dentro del plazo normal.' },
+    { icon: TriangleAlert, label: '31 a 60 días', value: d.aging.d31to60, tone: 'amber', hint: 'Deuda de entre 31 y 60 días. Conviene seguirla de cerca.' },
+    { icon: CalendarX2, label: 'Más de 60 días', value: d.aging.over60, tone: 'danger', hint: 'Deuda con más de 60 días. Es la más vieja y la más difícil de cobrar.' },
   ];
   const balanceLabel = d.balance > 0.005 ? 'Debe' : d.balance < -0.005 ? 'Saldo a favor' : 'Al día';
 
@@ -192,7 +202,7 @@ function AccountDetailView({ clientId, onBack }: { clientId: string; onBack: () 
       {/* Antigüedad de la deuda como chips compactos (§5.3). */}
       <section aria-label="Antigüedad de la deuda" className="flex flex-wrap gap-3">
         {aging.map((a) => (
-          <StatChip key={a.label} icon={a.icon} label={a.label} value={money(a.value)} tone={a.tone} />
+          <StatChip key={a.label} icon={a.icon} label={a.label} value={money(a.value)} tone={a.tone} hint={a.hint} />
         ))}
       </section>
 
@@ -285,7 +295,7 @@ export default function CuentasPage() {
       {selected ? (
         <AccountDetailView clientId={selected} onBack={() => setSelected(null)} />
       ) : accountsQuery.isLoading ? (
-        <Card className="h-40 animate-pulse bg-surface-subtle" />
+        <TableSkeleton />
       ) : accounts.length === 0 ? (
         <EmptyState
           icon={Wallet}

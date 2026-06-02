@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/data-table';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { RowActions } from '@/components/ui/row-actions';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
@@ -82,7 +83,7 @@ export default function WarehousesPage() {
       toast.success(editing ? 'Cámara actualizada' : 'Cámara creada');
       closeForm();
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al guardar'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar. Probá de nuevo.'),
   });
 
   const toggleActive = useMutation({
@@ -92,7 +93,7 @@ export default function WarehousesPage() {
       invalidate();
       toast.success(vars.isActive ? 'Cámara activada' : 'Cámara desactivada');
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al actualizar'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo actualizar. Probá de nuevo.'),
   });
 
   async function onDeactivate(w: Warehouse) {
@@ -126,7 +127,7 @@ export default function WarehousesPage() {
           <CardContent>
             <form onSubmit={form.handleSubmit((v) => save.mutateAsync(v))} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Código" htmlFor="code" required error={form.formState.errors.code?.message}>
-                <Input placeholder="CF-01" {...form.register('code')} />
+                <Input autoFocus placeholder="CF-01" {...form.register('code')} />
               </Field>
               <Field label="Nombre" htmlFor="name" required error={form.formState.errors.name?.message}>
                 <Input placeholder="Cámara de frío 1" {...form.register('name')} />
@@ -158,7 +159,7 @@ export default function WarehousesPage() {
       )}
 
       {isLoading ? (
-        <Card className="h-40 animate-pulse bg-surface-subtle" />
+        <TableSkeleton />
       ) : data.length === 0 ? (
         <EmptyState
           icon={Snowflake}

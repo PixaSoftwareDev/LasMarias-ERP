@@ -5,12 +5,13 @@ import { useForm } from 'react-hook-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import Link from 'next/link';
-import { ArrowLeft, Pencil, Plus, Power } from 'lucide-react';
+import { ArrowLeft, Milk, Pencil, Plus, Power } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/data-table';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { RowActions } from '@/components/ui/row-actions';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -76,7 +77,7 @@ export default function ProducersPage() {
       toast.success(editing ? 'Productor actualizado' : 'Productor creado');
       closeForm();
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al guardar'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar. Probá de nuevo.'),
   });
 
   const toggleActive = useMutation({
@@ -85,7 +86,7 @@ export default function ProducersPage() {
       queryClient.invalidateQueries({ queryKey: ['producers'] });
       toast.success(vars.isActive ? 'Productor activado' : 'Productor desactivado');
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Error al actualizar'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo actualizar. Probá de nuevo.'),
   });
 
   async function onDeactivate(p: ProducerDto) {
@@ -114,7 +115,7 @@ export default function ProducersPage() {
           <CardContent>
             <form onSubmit={form.handleSubmit((v) => save.mutateAsync(v))} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Nombre" htmlFor="name" required error={form.formState.errors.name?.message} className="sm:col-span-2">
-                <Input placeholder="Tambo La Esperanza" {...form.register('name', { required: 'Ingresá el nombre' })} />
+                <Input autoFocus placeholder="Tambo La Esperanza" {...form.register('name', { required: 'Ingresá el nombre' })} />
               </Field>
               <Field label="CUIT" htmlFor="taxId">
                 <Input placeholder="20-12345678-9" {...form.register('taxId')} />
@@ -143,11 +144,13 @@ export default function ProducersPage() {
         </Card>
       )}
 
-      {isLoading ? <Card className="h-40 animate-pulse bg-surface-subtle" /> : (
+      {isLoading ? <TableSkeleton /> : (
         <DataTable
           data={data}
           getKey={(p) => p.id}
-          emptyText="No hay productores cargados todavía."
+          emptyIcon={Milk}
+          emptyTitle="No hay tambos cargados todavía"
+          emptyDescription="Cargá tu primer tambo para poder registrar recepciones de leche y sus pagos."
           getSearchText={(p) => `${p.name} ${p.city ?? ''}`}
           searchPlaceholder="Buscar por nombre o ciudad…"
           columns={[

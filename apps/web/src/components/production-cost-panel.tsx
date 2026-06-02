@@ -3,7 +3,7 @@
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react';
 import type { ProductionCostBreakdown } from '@lasmarias/shared-schemas';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { cn } from '@/lib/utils';
+import { cn, formatMoney } from '@/lib/utils';
 
 // Panel de costo — el corazón del sistema (CLAUDE.md §4.7). Muestra el desglose REAL,
 // el costo por kg destacado, y la comparación REAL vs ESTÁNDAR con el desvío en $ y %.
@@ -24,7 +24,7 @@ function pesos(value: string | null | undefined): string {
   if (value === null || value === undefined || value === '') return '—';
   const n = Number(value);
   if (Number.isNaN(n)) return '—';
-  return `$${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatMoney(n);
 }
 
 function pct(value: string | null | undefined): string {
