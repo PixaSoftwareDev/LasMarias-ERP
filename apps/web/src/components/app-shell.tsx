@@ -50,7 +50,7 @@ export function AppShell({ user, onLogout, children }: Props) {
           aria-label={item.label}
           className={cn(
             'flex items-center rounded-lg text-sm font-medium transition-colors',
-            collapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5',
+            collapsed ? 'justify-center px-0 py-2' : 'gap-3 px-3 py-2',
             active
               ? 'bg-primary-600 text-white shadow-sm'
               : 'text-secondary-100 hover:bg-white/10 hover:text-white',
@@ -97,8 +97,8 @@ export function AppShell({ user, onLogout, children }: Props) {
           </button>
         </div>
 
-        <nav aria-label="Navegación principal" className="flex-1 overflow-y-auto p-3">
-          <ul className="space-y-1.5">{items.map(renderItem)}</ul>
+        <nav aria-label="Navegación principal" className="flex-1 overflow-y-auto px-3 pb-2 pt-4">
+          <ul className="space-y-1">{items.map(renderItem)}</ul>
         </nav>
 
         {/* Footer: cuenta + cerrar sesión */}

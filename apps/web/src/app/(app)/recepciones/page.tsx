@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Milk, Plus, Search } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, GitBranch, Milk, Plus, Search } from 'lucide-react';
 import type { MilkReception } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -242,6 +242,13 @@ export default function ReceptionsPage() {
                       {r.blockedReason && (
                         <p className="mt-2 rounded-md bg-red-50 px-2 py-1 text-xs text-danger">{r.blockedReason}</p>
                       )}
+                      {r.batchId && (
+                        <Button asChild size="sm" variant="ghost" className="mt-2 w-full">
+                          <Link href={`/trazabilidad?lote=${r.batchId}`}>
+                            <GitBranch className="h-4 w-4" /> Ver recorrido
+                          </Link>
+                        </Button>
+                      )}
                     </Card>
                   );
                 })}
@@ -257,6 +264,7 @@ export default function ReceptionsPage() {
                       <SortTh label="Productor" col="producerName" />
                       <SortTh label="Litros" col="liters" align="right" />
                       <th className="px-4 py-3 font-medium">Estado</th>
+                      <th className="px-4 py-3" />
                     </tr>
                   </thead>
                   <tbody>
@@ -270,6 +278,15 @@ export default function ReceptionsPage() {
                           <td className="px-4 py-3 text-right text-sm font-semibold">{formatLiters(r.liters)}</td>
                           <td className="px-4 py-3">
                             <StatusBadge status={s.variant}>{s.label}</StatusBadge>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {r.batchId && (
+                              <Button asChild size="sm" variant="ghost">
+                                <Link href={`/trazabilidad?lote=${r.batchId}`}>
+                                  <GitBranch className="h-4 w-4" /> Ver recorrido
+                                </Link>
+                              </Button>
+                            )}
                           </td>
                         </tr>
                       );

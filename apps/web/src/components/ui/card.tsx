@@ -23,5 +23,13 @@ export function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHead
 }
 
 export function CardContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('p-4 pt-0 sm:p-6 sm:pt-0', className)} {...props} />;
+  // pt-0 asume que va debajo de un CardHeader (que ya da el espacio superior).
+  // Si CardContent es el primer hijo (tarjeta SIN header), recuperamos el padding
+  // superior para que el contenido no quede pegado al borde. Arregla toda la app.
+  return (
+    <div
+      className={cn('p-4 pt-0 first:pt-4 sm:p-6 sm:pt-0 sm:first:pt-6', className)}
+      {...props}
+    />
+  );
 }

@@ -11,6 +11,39 @@
   body {
     @apply text-base text-foreground;
   }
+
+  /* Barra de scroll fina y discreta (estilo apps modernas) en lugar de la gris
+     gruesa del sistema. Aplica a la página y a cualquier contenedor con scroll. */
+  * {
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: rgba(15, 23, 42, 0.25) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: rgba(15, 23, 42, 0.2);
+    border-radius: 9999px;
+    border: 2px solid transparent; /* deja aire alrededor del pulgar → se ve más fino */
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(15, 23, 42, 0.38);
+  }
+  /* Sidebar oscura: pulgar claro para que se vea sobre el fondo navy. */
+  aside * {
+    scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+  }
+  aside ::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.24);
+  }
+  aside ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.4);
+  }
 }
 
 /* Impresión de comprobantes (remito A4). Ocultamos el chrome de la app

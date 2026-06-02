@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, CheckCircle2, Lock } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, GitBranch, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -114,6 +114,33 @@ export default function CloseProductionPage({ params }: { params: { id: string }
         ) : (
           <Card className="p-6 text-center text-sm text-foreground-muted">
             Esta orden no tiene desglose de costo disponible.
+          </Card>
+        )}
+
+        {/* Entrada natural a la trazabilidad: seguir cada lote producido. */}
+        {closedOrder.actualOutputs.some((o) => o.batchId) && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Seguí estos lotes</CardTitle>
+              <p className="text-sm text-foreground-muted">Mirá el recorrido completo: de qué leche salió y a qué clientes llegó.</p>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-2">
+              {closedOrder.actualOutputs
+                .filter((o) => o.batchId)
+                .map((o) => (
+                  <div key={o.batchId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle px-3 py-2">
+                    <span className="text-sm">
+                      <span className="font-medium text-foreground">{o.productName}</span>{' '}
+                      <span className="font-mono text-xs text-foreground-muted">{o.batchCode}</span>
+                    </span>
+                    <Button asChild size="sm" variant="secondary">
+                      <Link href={`/trazabilidad?lote=${o.batchId}`}>
+                        <GitBranch className="h-4 w-4" /> Ver recorrido
+                      </Link>
+                    </Button>
+                  </div>
+                ))}
+            </CardContent>
           </Card>
         )}
       </div>
