@@ -4,7 +4,11 @@
 
 import type { AuthTokens } from '@lasmarias/shared-schemas';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+// Por defecto usamos rutas RELATIVAS ('') para que las llamadas vayan al mismo
+// origen que sirve la web; Next reenvía /api al backend (ver rewrites en next.config).
+// Así un único puerto/túnel expone todo y no hay CORS. Se puede forzar una URL
+// absoluta con NEXT_PUBLIC_API_URL si hiciera falta apuntar a otro host.
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? '';
 const ACCESS_KEY = 'lm.accessToken';
 const REFRESH_KEY = 'lm.refreshToken';
 
