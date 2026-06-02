@@ -92,9 +92,11 @@ export default function InventoryPage() {
           <DataTable
             data={stockQuery.data ?? []}
             getKey={(s) => s.productId}
+            getSearchText={(s) => `${s.productName} ${s.sku}`}
+            searchPlaceholder="Buscar producto o SKU…"
             columns={[
-              { key: 'product', header: 'Producto', render: (s) => s.productName, primary: true },
-              { key: 'sku', header: 'SKU', render: (s) => <span className="font-mono text-xs">{s.sku}</span>, secondary: true },
+              { key: 'product', header: 'Producto', render: (s) => s.productName, primary: true, sortValue: (s) => s.productName },
+              { key: 'sku', header: 'SKU', render: (s) => <span className="font-mono text-xs">{s.sku}</span>, secondary: true, sortValue: (s) => s.sku },
               { key: 'qty', header: 'Cantidad', align: 'right', render: (s) => (
                 <div className="flex flex-col items-end">
                   <span>{`${s.totalQuantity.toLocaleString('es-AR', { maximumFractionDigits: 2 })} ${s.unit}`}</span>
@@ -132,16 +134,18 @@ export default function InventoryPage() {
             data={movementsQuery.data ?? []}
             getKey={(m) => m.id}
             emptyText="Sin movimientos registrados."
+            getSearchText={(m) => `${m.batchCode ?? ''} ${m.productName ?? ''}`}
+            searchPlaceholder="Buscar por lote o producto…"
             columns={[
-              { key: 'when', header: 'Fecha', render: (m) => formatDateTime(m.createdAt), secondary: true },
-              { key: 'batch', header: 'Lote', render: (m) => <span className="font-mono text-xs">{m.batchCode || '—'}</span>, primary: true },
-              { key: 'product', header: 'Producto', render: (m) => m.productName || '—' },
+              { key: 'when', header: 'Fecha', render: (m) => formatDateTime(m.createdAt), secondary: true, sortValue: (m) => new Date(m.createdAt).getTime() },
+              { key: 'batch', header: 'Lote', render: (m) => <span className="font-mono text-xs">{m.batchCode || '—'}</span>, primary: true, sortValue: (m) => m.batchCode ?? '' },
+              { key: 'product', header: 'Producto', render: (m) => m.productName || '—', sortValue: (m) => m.productName ?? '' },
               { key: 'type', header: 'Movimiento', render: (m) => (
                 <StatusBadge status={m.type === 'in' ? 'success' : m.type === 'out' ? 'info' : 'warning'}>
                   {labelOr(movementTypeLabel, m.type)}
                 </StatusBadge>
               )},
-              { key: 'qty', header: 'Cantidad', render: (m) => `${m.quantity} ${m.unit}`, align: 'right' },
+              { key: 'qty', header: 'Cantidad', render: (m) => `${m.quantity} ${m.unit}`, align: 'right', sortValue: (m) => Number(m.quantity) },
               { key: 'reason', header: 'Motivo', render: (m) => labelOr(movementReasonLabel, m.reason) },
             ]}
           />

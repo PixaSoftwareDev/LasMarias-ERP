@@ -170,11 +170,11 @@ function ProductionSection({ from, to }: { from: string; to: string }) {
         data={rows}
         getKey={(r) => r.period}
         columns={[
-          { key: 'period', header: 'Período', primary: true, render: (r: ProductionReportRow) => periodLabel(r.period) },
-          { key: 'orders', header: 'Órdenes', align: 'right', render: (r: ProductionReportRow) => num(r.ordersCount) },
-          { key: 'milk', header: 'Litros de leche', align: 'right', render: (r: ProductionReportRow) => num(r.totalMilkLiters, 1) },
-          { key: 'kg', header: 'Kg producidos', align: 'right', render: (r: ProductionReportRow) => num(r.totalPrincipalKg, 1) },
-          { key: 'cost', header: 'Costo total', align: 'right', render: (r: ProductionReportRow) => money(r.totalCost) },
+          { key: 'period', header: 'Período', primary: true, render: (r: ProductionReportRow) => periodLabel(r.period), sortValue: (r: ProductionReportRow) => new Date(r.period).getTime() },
+          { key: 'orders', header: 'Órdenes', align: 'right', render: (r: ProductionReportRow) => num(r.ordersCount), sortValue: (r: ProductionReportRow) => r.ordersCount },
+          { key: 'milk', header: 'Litros de leche', align: 'right', render: (r: ProductionReportRow) => num(r.totalMilkLiters, 1), sortValue: (r: ProductionReportRow) => r.totalMilkLiters },
+          { key: 'kg', header: 'Kg producidos', align: 'right', render: (r: ProductionReportRow) => num(r.totalPrincipalKg, 1), sortValue: (r: ProductionReportRow) => r.totalPrincipalKg },
+          { key: 'cost', header: 'Costo total', align: 'right', render: (r: ProductionReportRow) => money(r.totalCost), sortValue: (r: ProductionReportRow) => r.totalCost },
         ]}
       />
     </div>
@@ -250,10 +250,12 @@ function SalesSection({ from, to }: { from: string; to: string }) {
           <DataTable
             data={clientRows}
             getKey={(r) => r.clientId}
+            getSearchText={(r: SalesByClientRow) => r.clientName}
+            searchPlaceholder="Buscar cliente…"
             columns={[
-              { key: 'client', header: 'Cliente', primary: true, render: (r: SalesByClientRow) => r.clientName },
-              { key: 'dispatches', header: 'Despachos', align: 'right', render: (r: SalesByClientRow) => num(r.dispatchCount) },
-              { key: 'total', header: 'Total', align: 'right', render: (r: SalesByClientRow) => money(r.total) },
+              { key: 'client', header: 'Cliente', primary: true, render: (r: SalesByClientRow) => r.clientName, sortValue: (r: SalesByClientRow) => r.clientName },
+              { key: 'dispatches', header: 'Despachos', align: 'right', render: (r: SalesByClientRow) => num(r.dispatchCount), sortValue: (r: SalesByClientRow) => r.dispatchCount },
+              { key: 'total', header: 'Total', align: 'right', render: (r: SalesByClientRow) => money(r.total), sortValue: (r: SalesByClientRow) => r.total },
             ]}
           />
         )
@@ -263,10 +265,12 @@ function SalesSection({ from, to }: { from: string; to: string }) {
         <DataTable
           data={productRows}
           getKey={(r) => r.productId}
+          getSearchText={(r: SalesByProductRow) => r.productName}
+          searchPlaceholder="Buscar producto…"
           columns={[
-            { key: 'product', header: 'Producto', primary: true, render: (r: SalesByProductRow) => r.productName },
-            { key: 'quantity', header: 'Cantidad', align: 'right', render: (r: SalesByProductRow) => num(r.quantity, 2) },
-            { key: 'subtotal', header: 'Subtotal', align: 'right', render: (r: SalesByProductRow) => money(r.subtotal) },
+            { key: 'product', header: 'Producto', primary: true, render: (r: SalesByProductRow) => r.productName, sortValue: (r: SalesByProductRow) => r.productName },
+            { key: 'quantity', header: 'Cantidad', align: 'right', render: (r: SalesByProductRow) => num(r.quantity, 2), sortValue: (r: SalesByProductRow) => r.quantity },
+            { key: 'subtotal', header: 'Subtotal', align: 'right', render: (r: SalesByProductRow) => money(r.subtotal), sortValue: (r: SalesByProductRow) => r.subtotal },
           ]}
         />
       )}
@@ -358,11 +362,14 @@ function ProfitabilitySection({ from, to }: { from: string; to: string }) {
       <DataTable
         data={rows}
         getKey={(r) => r.clientId}
+        getSearchText={(r: ProfitabilityRow) => r.clientName}
+        searchPlaceholder="Buscar cliente…"
         columns={[
           {
             key: 'client',
             header: 'Cliente',
             primary: true,
+            sortValue: (r: ProfitabilityRow) => r.clientName,
             render: (r: ProfitabilityRow) => (
               <span>
                 {r.clientName}
@@ -374,10 +381,10 @@ function ProfitabilitySection({ from, to }: { from: string; to: string }) {
               </span>
             ),
           },
-          { key: 'revenue', header: 'Facturado', align: 'right', render: (r: ProfitabilityRow) => money(r.revenue) },
-          { key: 'cost', header: 'Costo', align: 'right', render: renderCost },
-          { key: 'margin', header: 'Margen $', align: 'right', render: renderMargin },
-          { key: 'marginPct', header: 'Margen %', align: 'right', render: renderMarginPct },
+          { key: 'revenue', header: 'Facturado', align: 'right', render: (r: ProfitabilityRow) => money(r.revenue), sortValue: (r: ProfitabilityRow) => r.revenue },
+          { key: 'cost', header: 'Costo', align: 'right', render: renderCost, sortValue: (r: ProfitabilityRow) => r.cost ?? 0 },
+          { key: 'margin', header: 'Margen $', align: 'right', render: renderMargin, sortValue: (r: ProfitabilityRow) => r.margin ?? 0 },
+          { key: 'marginPct', header: 'Margen %', align: 'right', render: renderMarginPct, sortValue: (r: ProfitabilityRow) => r.marginPct ?? 0 },
         ]}
       />
 
@@ -446,14 +453,16 @@ function YieldSection({ from, to }: { from: string; to: string }) {
       <DataTable
         data={rows}
         getKey={(r) => r.orderCode}
+        getSearchText={(r: YieldReportRow) => `${r.orderCode} ${r.productName}`}
+        searchPlaceholder="Buscar por orden o producto…"
         columns={[
-          { key: 'order', header: 'Orden', secondary: true, render: (r: YieldReportRow) => <span className="font-mono text-xs">{r.orderCode}</span> },
-          { key: 'product', header: 'Producto', primary: true, render: (r: YieldReportRow) => r.productName },
-          { key: 'litros', header: 'Litros', align: 'right', render: (r: YieldReportRow) => num(r.litros, 1) },
-          { key: 'kg', header: 'Kg real', align: 'right', render: (r: YieldReportRow) => num(r.kgReal, 1) },
-          { key: 'real', header: 'Rend. real (kg/L)', align: 'right', render: (r: YieldReportRow) => renderYield(r.rendimientoReal) },
-          { key: 'esperado', header: 'Rend. esperado (kg/L)', align: 'right', render: (r: YieldReportRow) => renderYield(r.rendimientoEsperado) },
-          { key: 'desvio', header: 'Desvío', align: 'right', render: renderDesvio },
+          { key: 'order', header: 'Orden', secondary: true, render: (r: YieldReportRow) => <span className="font-mono text-xs">{r.orderCode}</span>, sortValue: (r: YieldReportRow) => r.orderCode },
+          { key: 'product', header: 'Producto', primary: true, render: (r: YieldReportRow) => r.productName, sortValue: (r: YieldReportRow) => r.productName },
+          { key: 'litros', header: 'Litros', align: 'right', render: (r: YieldReportRow) => num(r.litros, 1), sortValue: (r: YieldReportRow) => r.litros },
+          { key: 'kg', header: 'Kg real', align: 'right', render: (r: YieldReportRow) => num(r.kgReal, 1), sortValue: (r: YieldReportRow) => r.kgReal },
+          { key: 'real', header: 'Rend. real (kg/L)', align: 'right', render: (r: YieldReportRow) => renderYield(r.rendimientoReal), sortValue: (r: YieldReportRow) => r.rendimientoReal ?? 0 },
+          { key: 'esperado', header: 'Rend. esperado (kg/L)', align: 'right', render: (r: YieldReportRow) => renderYield(r.rendimientoEsperado), sortValue: (r: YieldReportRow) => r.rendimientoEsperado ?? 0 },
+          { key: 'desvio', header: 'Desvío', align: 'right', render: renderDesvio, sortValue: (r: YieldReportRow) => r.desvioRendimientoPct ?? 0 },
         ]}
       />
     </div>

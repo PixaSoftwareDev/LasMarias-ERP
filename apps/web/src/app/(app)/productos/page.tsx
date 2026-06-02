@@ -150,11 +150,13 @@ export default function ProductsPage() {
           data={data}
           getKey={(p) => p.id}
           emptyText="Todavía no hay productos cargados."
+          getSearchText={(p) => `${p.sku} ${p.name} ${p.category}`}
+          searchPlaceholder="Buscar por nombre, SKU o categoría…"
           columns={[
-            { key: 'sku', header: 'SKU', render: (p) => <span className="font-mono text-xs">{p.sku}</span>, secondary: true },
-            { key: 'name', header: 'Nombre', render: (p) => p.name, primary: true },
-            { key: 'category', header: 'Categoría', render: (p) => <span className="capitalize">{p.category.replace('_', ' ')}</span> },
-            { key: 'unit', header: 'Unidad', render: (p) => p.unit },
+            { key: 'sku', header: 'SKU', render: (p) => <span className="font-mono text-xs">{p.sku}</span>, secondary: true, sortValue: (p) => p.sku },
+            { key: 'name', header: 'Nombre', render: (p) => p.name, primary: true, sortValue: (p) => p.name },
+            { key: 'category', header: 'Categoría', render: (p) => <span className="capitalize">{p.category.replace('_', ' ')}</span>, sortValue: (p) => p.category },
+            { key: 'unit', header: 'Unidad', render: (p) => p.unit, sortValue: (p) => p.unit },
             { key: 'status', header: 'Estado', render: (p) => (
               <StatusBadge status={p.isActive ? 'success' : 'neutral'}>{p.isActive ? 'Activo' : 'Inactivo'}</StatusBadge>
             )},

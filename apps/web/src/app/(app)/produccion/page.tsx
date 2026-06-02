@@ -41,12 +41,14 @@ export default function ProductionPage() {
           data={data}
           getKey={(o) => o.id}
           onRowClick={(o) => router.push(`/produccion/${o.id}/cerrar`)}
+          getSearchText={(o) => `${o.code} ${o.recipeName}`}
+          searchPlaceholder="Buscar por código o receta…"
           columns={[
-            { key: 'code', header: 'Código', render: (o) => <span className="font-mono text-xs">{o.code}</span>, primary: true },
-            { key: 'recipe', header: 'Receta', render: (o) => o.recipeName, secondary: true },
-            { key: 'started', header: 'Inicio', render: (o) => formatDateTime(o.startedAt) },
-            { key: 'milk', header: 'Litros', render: (o) => o.totalMilkLiters.toLocaleString('es-AR'), align: 'right' },
-            { key: 'output', header: 'Producido', render: (o) => o.totalPrincipalKg ? `${o.totalPrincipalKg.toFixed(1)} kg` : '—', align: 'right' },
+            { key: 'code', header: 'Código', render: (o) => <span className="font-mono text-xs">{o.code}</span>, primary: true, sortValue: (o) => o.code },
+            { key: 'recipe', header: 'Receta', render: (o) => o.recipeName, secondary: true, sortValue: (o) => o.recipeName },
+            { key: 'started', header: 'Inicio', render: (o) => formatDateTime(o.startedAt), sortValue: (o) => new Date(o.startedAt).getTime() },
+            { key: 'milk', header: 'Litros', render: (o) => o.totalMilkLiters.toLocaleString('es-AR'), align: 'right', sortValue: (o) => Number(o.totalMilkLiters) },
+            { key: 'output', header: 'Producido', render: (o) => o.totalPrincipalKg ? `${o.totalPrincipalKg.toFixed(1)} kg` : '—', align: 'right', sortValue: (o) => Number(o.totalPrincipalKg ?? 0) },
             { key: 'cost', header: 'Costo/kg', render: (o) => o.unitCost ? `$${o.unitCost.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—', align: 'right' },
             { key: 'status', header: 'Estado', render: (o) => { const s = statusBadge(o.status); return <StatusBadge status={s.variant}>{s.label}</StatusBadge>; } },
             {

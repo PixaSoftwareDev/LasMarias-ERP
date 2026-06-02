@@ -141,11 +141,13 @@ export default function ProducersPage() {
           data={data}
           getKey={(p) => p.id}
           emptyText="No hay productores cargados todavía."
+          getSearchText={(p) => `${p.name} ${p.city ?? ''}`}
+          searchPlaceholder="Buscar por nombre o ciudad…"
           columns={[
-            { key: 'name', header: 'Nombre', render: (p) => p.name, primary: true },
-            { key: 'city', header: 'Ciudad', render: (p) => p.city ?? '—' },
+            { key: 'name', header: 'Nombre', render: (p) => p.name, primary: true, sortValue: (p) => p.name },
+            { key: 'city', header: 'Ciudad', render: (p) => p.city ?? '—', sortValue: (p) => p.city ?? '' },
             { key: 'phone', header: 'Teléfono', render: (p) => p.phone ?? '—' },
-            { key: 'price', header: 'Precio/L', render: (p) => p.agreedPricePerLiter ? `$${p.agreedPricePerLiter}` : '—', align: 'right' },
+            { key: 'price', header: 'Precio/L', render: (p) => p.agreedPricePerLiter ? `$${p.agreedPricePerLiter}` : '—', align: 'right', sortValue: (p) => Number(p.agreedPricePerLiter ?? 0) },
             { key: 'status', header: 'Estado', render: (p) => (
               <StatusBadge status={p.isActive ? 'success' : 'neutral'}>{p.isActive ? 'Activo' : 'Inactivo'}</StatusBadge>
             )},

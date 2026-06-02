@@ -392,12 +392,14 @@ export default function SalesPage() {
           <DataTable
             data={orders}
             getKey={(o) => o.id}
+            getSearchText={(o: SalesOrder) => `${o.code} ${o.clientName}`}
+            searchPlaceholder="Buscar por código o cliente…"
             columns={[
-              { key: 'code', header: 'Código', render: (o: SalesOrder) => <span className="font-mono text-xs">{o.code}</span>, secondary: true },
-              { key: 'client', header: 'Cliente', render: (o: SalesOrder) => o.clientName, primary: true },
-              { key: 'date', header: 'Fecha', render: (o: SalesOrder) => new Date(o.dispatchedAt).toLocaleDateString('es-AR') },
-              { key: 'items', header: 'Items', render: (o: SalesOrder) => o.lines.length, align: 'right' },
-              { key: 'total', header: 'Total', render: (o: SalesOrder) => money(o.total), align: 'right' },
+              { key: 'code', header: 'Código', render: (o: SalesOrder) => <span className="font-mono text-xs">{o.code}</span>, secondary: true, sortValue: (o: SalesOrder) => o.code },
+              { key: 'client', header: 'Cliente', render: (o: SalesOrder) => o.clientName, primary: true, sortValue: (o: SalesOrder) => o.clientName },
+              { key: 'date', header: 'Fecha', render: (o: SalesOrder) => new Date(o.dispatchedAt).toLocaleDateString('es-AR'), sortValue: (o: SalesOrder) => new Date(o.dispatchedAt).getTime() },
+              { key: 'items', header: 'Items', render: (o: SalesOrder) => o.lines.length, align: 'right', sortValue: (o: SalesOrder) => o.lines.length },
+              { key: 'total', header: 'Total', render: (o: SalesOrder) => money(o.total), align: 'right', sortValue: (o: SalesOrder) => Number(o.total) },
               {
                 key: 'actions',
                 header: '',

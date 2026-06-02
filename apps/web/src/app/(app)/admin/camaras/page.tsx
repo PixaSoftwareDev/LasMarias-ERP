@@ -162,10 +162,12 @@ export default function WarehousesPage() {
         <DataTable
           data={data}
           getKey={(w) => w.id}
+          getSearchText={(w) => `${w.code} ${w.name}`}
+          searchPlaceholder="Buscar por nombre o código…"
           columns={[
-            { key: 'code', header: 'Código', render: (w) => <span className="font-mono text-xs">{w.code}</span>, secondary: true },
-            { key: 'name', header: 'Nombre', render: (w) => w.name, primary: true },
-            { key: 'kind', header: 'Tipo', render: (w) => KIND_LABEL[w.kind] },
+            { key: 'code', header: 'Código', render: (w) => <span className="font-mono text-xs">{w.code}</span>, secondary: true, sortValue: (w) => w.code },
+            { key: 'name', header: 'Nombre', render: (w) => w.name, primary: true, sortValue: (w) => w.name },
+            { key: 'kind', header: 'Tipo', render: (w) => KIND_LABEL[w.kind], sortValue: (w) => KIND_LABEL[w.kind] },
             { key: 'temp', header: 'Temp. objetivo', align: 'right', render: (w) => (typeof w.targetTemperatureCelsius === 'number' ? `${w.targetTemperatureCelsius} °C` : '—') },
             { key: 'status', header: 'Estado', render: (w) => (
               <StatusBadge status={w.isActive ? 'success' : 'neutral'}>{w.isActive ? 'Activa' : 'Inactiva'}</StatusBadge>

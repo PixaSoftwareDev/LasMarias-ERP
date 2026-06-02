@@ -285,8 +285,10 @@ export default function CuentasPage() {
           data={accounts}
           getKey={(a) => a.clientId}
           onRowClick={(a) => setSelected(a.clientId)}
+          getSearchText={(a: AccountBalance) => a.clientName}
+          searchPlaceholder="Buscar cliente…"
           columns={[
-            { key: 'client', header: 'Cliente', primary: true, render: (a: AccountBalance) => a.clientName },
+            { key: 'client', header: 'Cliente', primary: true, render: (a: AccountBalance) => a.clientName, sortValue: (a: AccountBalance) => a.clientName },
             {
               key: 'warnings',
               header: 'Avisos',
@@ -297,6 +299,7 @@ export default function CuentasPage() {
               key: 'balance',
               header: 'Saldo',
               align: 'right',
+              sortValue: (a: AccountBalance) => Number(a.balance),
               render: (a: AccountBalance) => (
                 <span className={`font-semibold ${balanceTone(a.balance)}`}>{money(a.balance)}</span>
               ),

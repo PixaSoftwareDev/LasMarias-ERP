@@ -127,11 +127,13 @@ export default function ClientsPage() {
           data={data}
           getKey={(c) => c.id}
           emptyText="Todavía no hay clientes."
+          getSearchText={(c) => `${c.businessName} ${c.taxId ?? ''} ${c.city ?? ''}`}
+          searchPlaceholder="Buscar por razón social, CUIT o ciudad…"
           columns={[
-            { key: 'name', header: 'Razón social', render: (c) => c.businessName, primary: true },
-            { key: 'type', header: 'Tipo', render: (c) => <span className="capitalize">{c.type}</span> },
+            { key: 'name', header: 'Razón social', render: (c) => c.businessName, primary: true, sortValue: (c) => c.businessName },
+            { key: 'type', header: 'Tipo', render: (c) => <span className="capitalize">{c.type}</span>, sortValue: (c) => c.type },
             { key: 'taxId', header: 'CUIT', render: (c) => c.taxId ?? '—', secondary: true },
-            { key: 'city', header: 'Ciudad', render: (c) => c.city ?? '—' },
+            { key: 'city', header: 'Ciudad', render: (c) => c.city ?? '—', sortValue: (c) => c.city ?? '' },
             { key: 'phone', header: 'Teléfono', render: (c) => c.phone ?? '—' },
             { key: 'status', header: 'Estado', render: (c) => (
               <StatusBadge status={c.isActive ? 'success' : 'neutral'}>{c.isActive ? 'Activo' : 'Inactivo'}</StatusBadge>
