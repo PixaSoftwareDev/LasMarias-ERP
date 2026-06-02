@@ -51,10 +51,13 @@ export const inventoryMovementSchema = z.object({
 export type InventoryMovement = z.infer<typeof inventoryMovementSchema>;
 
 export const stockSummarySchema = z.object({
-  productId: uuidSchema,
+  // string (no uuid): la leche cruda usa un id sintético ('leche-cruda').
+  productId: z.string(),
   productName: z.string(),
   sku: z.string(),
   unit: z.string(),
+  // Categoría del producto para agrupar el inventario (materia_prima, intermedio, queso, etc.).
+  category: z.string().optional(),
   totalQuantity: z.number(),
   batchCount: z.number().int(),
   nearestExpiration: isoDateTimeSchema.optional(),
@@ -64,6 +67,37 @@ export const stockSummarySchema = z.object({
   alertLevel: z.enum(['ok', 'low', 'critical', 'expiring']).optional(),
 });
 export type StockSummary = z.infer<typeof stockSummarySchema>;
+
+// Ingreso directo de stock (insumos, envases). Genera un lote de entrada.
+// No es el módulo de compras completo (diferido); es una carga simple.
+export const stockEntryInputSchema = z.object({
+  productId: uuidSchema,
+  quantity: z.number().positive('La cantidad tiene que ser mayor a 0'),
+  unitCost: z.number().nonnegative().optional(),
+  warehouseId: uuidSchema.optional(),
+  notes: z.string().max(1000).optional(),
+});
+export type StockEntryInput = z.infer<typeof stockEntryInputSchema>;
+
+// Dar de baja stock por descarte/merma/vencimiento (salida con motivo, FEFO).
+export const discardReasonSchema = z.enum(['vencido', 'merma', 'descarte', 'rotura']);
+export type DiscardReason = z.infer<typeof discardReasonSchema>;
+
+export const discardStockInputSchema = z.object({
+  productId: uuidSchema,
+  quantity: z.number().positive('La cantidad tiene que ser mayor a 0'),
+  reason: discardReasonSchema,
+  notes: z.string().max(1000).optional(),
+});
+export type DiscardStockInput = z.infer<typeof discardStockInputSchema>;
+
+// Ajuste por conteo físico: el sistema lleva el stock a la cantidad contada.
+export const countAdjustInputSchema = z.object({
+  productId: uuidSchema,
+  countedQuantity: z.number().nonnegative('No puede ser negativo'),
+  notes: z.string().max(1000).optional(),
+});
+export type CountAdjustInput = z.infer<typeof countAdjustInputSchema>;
 
 export const createWarehouseInputSchema = z.object({
   code: z.string().min(1).max(20),

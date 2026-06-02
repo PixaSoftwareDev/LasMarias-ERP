@@ -34,9 +34,9 @@ export default function ComprobantePage() {
   if (orderQuery.isError || !orderQuery.data) {
     return (
       <div className="mx-auto max-w-3xl p-4 sm:p-6">
-        <p className="text-sm text-danger">No se encontró el despacho.</p>
+        <p className="text-sm text-danger">No se encontró la venta.</p>
         <Button asChild variant="secondary" className="mt-4">
-          <Link href="/ventas"><ArrowLeft className="h-4 w-4" /> Volver a despachos</Link>
+          <Link href="/ventas"><ArrowLeft className="h-4 w-4" /> Volver a ventas</Link>
         </Button>
       </div>
     );
@@ -81,7 +81,7 @@ export default function ComprobantePage() {
             {client?.city && <p className="text-sm text-foreground-muted">{client.city}</p>}
           </div>
           <div className="sm:text-right">
-            <p className="text-xs uppercase tracking-wide text-foreground-muted">Fecha de despacho</p>
+            <p className="text-xs uppercase tracking-wide text-foreground-muted">Fecha</p>
             <p className="font-medium">
               {new Date(order.dispatchedAt).toLocaleDateString('es-AR', {
                 day: '2-digit',

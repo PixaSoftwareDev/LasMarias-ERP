@@ -170,7 +170,7 @@ export default function CajaPage() {
   });
 
   const exportCsv = useMutation({
-    mutationFn: () => financeApi.exportCashFlowCsv(from, toEndOfDay(to), granularity),
+    mutationFn: () => financeApi.exportCashFlowXlsx(from, toEndOfDay(to), granularity),
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo exportar. Probá de nuevo.'),
   });
 
@@ -257,7 +257,7 @@ export default function CajaPage() {
                 loading={exportCsv.isPending}
                 loadingText="Generando..."
               >
-                <Download className="h-4 w-4" /> Exportar CSV
+                <Download className="h-4 w-4" /> Exportar Excel
               </Button>
             </div>
             {movementsQuery.isLoading ? (

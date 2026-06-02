@@ -3,9 +3,15 @@ import {
   createWarehouseInputSchema,
   updateWarehouseInputSchema,
   stockCountInputSchema,
+  stockEntryInputSchema,
+  discardStockInputSchema,
+  countAdjustInputSchema,
   type CreateWarehouseInput,
   type UpdateWarehouseInput,
   type StockCountInput,
+  type StockEntryInput,
+  type DiscardStockInput,
+  type CountAdjustInput,
 } from '@lasmarias/shared-schemas';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -86,6 +92,33 @@ export class InventoryController {
     @Query('quantity') quantity: string,
   ) {
     return this.inventory.fefoSuggestion(productId, Number(quantity));
+  }
+
+  @Post('stock-entry')
+  @Roles('admin', 'gerente', 'operario')
+  addStockEntry(
+    @Body(new ZodValidationPipe(stockEntryInputSchema)) body: StockEntryInput,
+    @CurrentUser() user: JwtUserPayload,
+  ) {
+    return this.inventory.addStockEntry(body, user.sub);
+  }
+
+  @Post('discard')
+  @Roles('admin', 'gerente', 'operario')
+  discardStock(
+    @Body(new ZodValidationPipe(discardStockInputSchema)) body: DiscardStockInput,
+    @CurrentUser() user: JwtUserPayload,
+  ) {
+    return this.inventory.discardStock(body, user.sub);
+  }
+
+  @Post('count-adjust')
+  @Roles('admin', 'gerente', 'operario')
+  countAdjust(
+    @Body(new ZodValidationPipe(countAdjustInputSchema)) body: CountAdjustInput,
+    @CurrentUser() user: JwtUserPayload,
+  ) {
+    return this.inventory.countAdjust(body, user.sub);
   }
 
   @Post('count')

@@ -13,8 +13,9 @@ import 'reflect-metadata';
 import 'dotenv/config';
 import AppDataSource from './data-source';
 
-// Solo lo transaccional. NO se tocan: users, products, clients, producers,
-// warehouses, recipes, recipe_versions, price_list_items, migrations.
+// Datos transaccionales + recetas (el seed las recrea con su configuración actual,
+// p. ej. el suero mapeado a producto). NO se tocan: users, products, clients,
+// producers, warehouses, price_list_items, migrations.
 const TRANSACTIONAL = [
   'inventory_movements',
   'batches',
@@ -24,6 +25,9 @@ const TRANSACTIONAL = [
   'account_movements',
   'credit_notes',
   'cash_movements',
+  'producer_payments',
+  'recipe_versions',
+  'recipes',
 ];
 
 async function reset() {
@@ -31,7 +35,7 @@ async function reset() {
   const list = TRANSACTIONAL.map((t) => `"${t}"`).join(', ');
   await AppDataSource.query(`TRUNCATE ${list} RESTART IDENTITY CASCADE`);
   console.log(`[reset-demo] ✓ Vaciadas: ${TRANSACTIONAL.join(', ')}`);
-  console.log('[reset-demo] Maestros (usuarios, productos, clientes, tambos, cámaras, recetas, precios) intactos.');
+  console.log('[reset-demo] Intactos: usuarios, productos, clientes, tambos, cámaras, precios.');
   await AppDataSource.destroy();
 }
 

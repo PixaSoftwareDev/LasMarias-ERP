@@ -177,13 +177,13 @@ export default function ReceptionsPage() {
         <>
           {/* Controles: buscador + estado + rango de fechas */}
           <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between">
-            <div className="relative w-full sm:max-w-xs">
+            <div className="relative w-full sm:max-w-md">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground-muted" aria-hidden="true" />
               <Input
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Buscar por código, tambo o remito…"
+                placeholder="Buscar código, tambo o remito…"
                 aria-label="Buscar recepciones"
                 className="pl-9"
               />

@@ -8,7 +8,7 @@ import type {
 } from '@lasmarias/shared-schemas';
 import { CashMovementEntity } from './cash-movement.entity';
 import { computeCashFlow, type CashFlowMovement } from './cash-flow.helpers';
-import { toCsv } from '../common/csv';
+import { toXlsx } from '../common/xlsx';
 
 @Injectable()
 export class FinanceService {
@@ -54,16 +54,17 @@ export class FinanceService {
     return computeCashFlow(movements, from, to, granularity);
   }
 
-  async exportCashFlowCsv(from: Date, to: Date, granularity: 'day' | 'month'): Promise<string> {
+  async exportCashFlowXlsx(from: Date, to: Date, granularity: 'day' | 'month'): Promise<Buffer> {
     const report = await this.cashFlow(from, to, granularity);
-    return toCsv(
-      report.rows.map((r) => ({
-        periodo: r.period,
-        ingresos: r.income,
-        egresos: r.expense,
-        neto: r.net,
-      })),
-      ['periodo', 'ingresos', 'egresos', 'neto'],
+    return toXlsx(
+      'Flujo de caja',
+      [
+        { header: 'Período', key: 'periodo' },
+        { header: 'Ingresos', key: 'ingresos' },
+        { header: 'Egresos', key: 'egresos' },
+        { header: 'Neto', key: 'neto' },
+      ],
+      report.rows.map((r) => ({ periodo: r.period, ingresos: r.income, egresos: r.expense, neto: r.net })),
     );
   }
 

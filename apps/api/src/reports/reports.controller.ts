@@ -58,14 +58,14 @@ export class ReportsController {
     return this.reports.profitability(q.from, q.to);
   }
 
-  @Get('export/sales.csv')
-  @Header('Content-Type', 'text/csv; charset=utf-8')
-  @Header('Content-Disposition', 'attachment; filename="ventas-por-cliente.csv"')
+  @Get('export/sales.xlsx')
+  @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  @Header('Content-Disposition', 'attachment; filename="ventas-por-cliente.xlsx"')
   async exportSales(
     @Query(new ZodValidationPipe(dateRangeSchema)) q: { from: Date; to: Date },
     @Res() res: Response,
   ) {
-    const csv = await this.reports.exportSalesCsv(q.from, q.to);
-    res.send(csv);
+    const buffer = await this.reports.exportSalesXlsx(q.from, q.to);
+    res.send(buffer);
   }
 }

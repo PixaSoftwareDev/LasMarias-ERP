@@ -21,21 +21,6 @@ const CLIENT_TYPES: { value: ClientType; label: string }[] = [
   { value: 'distribuidor', label: 'Distribuidor' },
 ];
 
-// Descarga un CSV generado en el cliente (BOM para que Excel respete los acentos).
-function downloadCsv(filename: string, content: string) {
-  const blob = new Blob([`﻿${content}`], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-const csvCell = (s: string | number) => `"${String(s).replace(/"/g, '""')}"`;
-
 // Listas de precio por tipo de cliente (CLAUDE.md §4.6). Una grilla de productos
 // vendibles con su precio editable. Guardar reemplaza los precios vigentes del tipo.
 export default function PreciosPage() {
@@ -78,27 +63,9 @@ export default function PreciosPage() {
       toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar la lista. Probá de nuevo.'),
   });
 
-  // Export para compartir: trae las 3 listas y arma una tabla por producto.
-  const exportCsv = useMutation({
-    mutationFn: async () => {
-      const [min, may, dist] = await Promise.all([
-        salesApi.priceList('minorista'),
-        salesApi.priceList('mayorista'),
-        salesApi.priceList('distribuidor'),
-      ]);
-      const toMap = (arr: { productId: string; unitPrice: number }[]) =>
-        new Map(arr.map((i) => [i.productId, i.unitPrice]));
-      const mm = toMap(min);
-      const my = toMap(may);
-      const dd = toMap(dist);
-      const lines = [['Producto', 'SKU', 'Minorista', 'Mayorista', 'Distribuidor'].map(csvCell).join(',')];
-      for (const p of sellableProducts) {
-        lines.push(
-          [csvCell(p.name), csvCell(p.sku), mm.get(p.id) ?? '', my.get(p.id) ?? '', dd.get(p.id) ?? ''].join(','),
-        );
-      }
-      downloadCsv('listas-de-precios.csv', lines.join('\r\n'));
-    },
+  // Export a Excel: una fila por producto con sus precios por tipo de cliente.
+  const exportXlsx = useMutation({
+    mutationFn: () => salesApi.exportPriceListXlsx(),
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo exportar. Probá de nuevo.'),
   });
 
@@ -112,16 +79,16 @@ export default function PreciosPage() {
       </Button>
       <PageHeader
         title="Listas de precios"
-        description="El precio de cada producto según el tipo de cliente. Se usa al tomar un despacho (editable a mano)."
+        description="El precio de cada producto según el tipo de cliente. Se usa al cargar una venta (editable a mano)."
         action={
           <Button
             variant="secondary"
-            onClick={() => exportCsv.mutate()}
-            loading={exportCsv.isPending}
+            onClick={() => exportXlsx.mutate()}
+            loading={exportXlsx.isPending}
             loadingText="Generando..."
             disabled={loading || sellableProducts.length === 0}
           >
-            <Download className="h-4 w-4" /> Exportar CSV
+            <Download className="h-4 w-4" /> Exportar Excel
           </Button>
         }
       />

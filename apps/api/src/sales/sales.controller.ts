@@ -117,13 +117,22 @@ export class SalesController {
     return this.accounts.registerPayment(body, user.sub);
   }
 
-  // --- Export CSV ---
-  @Get('export/accounts.csv')
+  // --- Export Excel ---
+  @Get('export/accounts.xlsx')
   @Roles('admin', 'gerente')
-  @Header('Content-Type', 'text/csv; charset=utf-8')
-  @Header('Content-Disposition', 'attachment; filename="cuentas-corrientes.csv"')
+  @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  @Header('Content-Disposition', 'attachment; filename="cuentas-corrientes.xlsx"')
   async exportAccounts(@Res() res: Response) {
-    const csv = await this.accounts.exportBalancesCsv();
-    res.send(csv);
+    const buffer = await this.accounts.exportBalancesXlsx();
+    res.send(buffer);
+  }
+
+  @Get('export/price-list.xlsx')
+  @Roles('admin', 'gerente')
+  @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  @Header('Content-Disposition', 'attachment; filename="listas-de-precios.xlsx"')
+  async exportPriceList(@Res() res: Response) {
+    const buffer = await this.pricing.exportXlsx();
+    res.send(buffer);
   }
 }

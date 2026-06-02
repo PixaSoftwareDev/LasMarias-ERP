@@ -105,6 +105,9 @@ export default function SalesPage() {
   const [notes, setNotes] = useState('');
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('contado');
   const [returnOrder, setReturnOrder] = useState<SalesOrder | null>(null);
+  // Filtro de fechas de la lista de despachos.
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
 
   const sellableProducts = useMemo(
     () => productsQuery.data?.filter((p) => p.category === 'queso' || p.category === 'subproducto') ?? [],
@@ -178,10 +181,10 @@ export default function SalesPage() {
       queryClient.invalidateQueries({ queryKey: ['stock'] });
       queryClient.invalidateQueries({ queryKey: ['accounts'] });
       const cobro = paymentMode === 'contado' ? 'Cobrado al contado.' : 'Quedó en cuenta corriente.';
-      toast.success(`Despacho ${o.code} registrado · ${money(o.total)}. Se descontó el stock. ${cobro}`);
+      toast.success(`Venta ${o.code} registrada · ${money(o.total)}. Se descontó el stock. ${cobro}`);
       resetForm();
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo registrar el despacho. Probá de nuevo.'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo registrar la venta. Probá de nuevo.'),
   });
 
   // Cuando se elige un producto, traemos su precio de lista (si existe).
@@ -204,7 +207,7 @@ export default function SalesPage() {
     const next = lines.filter((_, i) => i !== idx);
     setLines(next.length ? next : [{ ...EMPTY_LINE }]);
     if (removed?.productId) {
-      toast('Producto quitado del despacho', {
+      toast('Producto quitado de la venta', {
         action: { label: 'Deshacer', onClick: () => setLines(prev) },
       });
     }
@@ -212,14 +215,24 @@ export default function SalesPage() {
 
   const canSave = !!clientId && validLines.length > 0 && !create.isPending;
   const orders = ordersQuery.data ?? [];
+  const filteredOrders = useMemo(
+    () =>
+      orders.filter((o) => {
+        const day = o.dispatchedAt.slice(0, 10);
+        if (fromDate && day < fromDate) return false;
+        if (toDate && day > toDate) return false;
+        return true;
+      }),
+    [orders, fromDate, toDate],
+  );
 
   return (
     <div className="flex flex-col gap-6 pb-32">
       <PageHeader
-        title="Despacho"
-        description="Despachar mercadería a un cliente. Al despachar se descuenta el stock."        action={
+        title="Ventas"
+        description="Vender mercadería a un cliente. Al confirmar se descuenta el stock."        action={
           <Button onClick={() => (showForm ? resetForm() : setShowForm(true))}>
-            <Plus className="h-4 w-4" /> {showForm ? 'Cerrar' : 'Nuevo despacho'}
+            <Plus className="h-4 w-4" /> {showForm ? 'Cerrar' : 'Nueva venta'}
           </Button>
         }
       />
@@ -349,7 +362,7 @@ export default function SalesPage() {
                 aria-label="Notas"
                 className="w-full rounded-md border border-border bg-surface-elevated px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
                 rows={2}
-                placeholder="Observaciones del despacho (opcional)"
+                placeholder="Observaciones de la venta (opcional)"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
               />
@@ -364,7 +377,7 @@ export default function SalesPage() {
                   <ShoppingCart className="h-5 w-5" aria-hidden="true" />
                 </span>
                 <span>
-                  <span className="block text-[11px] uppercase tracking-wide text-foreground-muted">Total del despacho</span>
+                  <span className="block text-[11px] uppercase tracking-wide text-foreground-muted">Total de la venta</span>
                   <span className="block font-display text-2xl font-bold tracking-tight text-foreground">{money(total)}</span>
                 </span>
               </div>
@@ -385,15 +398,29 @@ export default function SalesPage() {
         ) : orders.length === 0 ? (
           <EmptyState
             icon={ShoppingCart}
-            title="Todavía no hay despachos"
-            action={<Button onClick={() => setShowForm(true)}>Hacer el primer despacho</Button>}
+            title="Todavía no hay ventas"
+            action={<Button onClick={() => setShowForm(true)}>Hacer la primera venta</Button>}
           />
         ) : (
           <DataTable
-            data={orders}
+            data={filteredOrders}
             getKey={(o) => o.id}
+            emptyText="No hay ventas en el período elegido."
             getSearchText={(o: SalesOrder) => `${o.code} ${o.clientName}`}
             searchPlaceholder="Buscar por código o cliente…"
+            filters={
+              <>
+                <span className="text-sm text-foreground-muted">Período:</span>
+                <Input type="date" value={fromDate} max={toDate || undefined} onChange={(e) => setFromDate(e.target.value)} aria-label="Desde" className="w-40" />
+                <span className="text-sm text-foreground-muted">a</span>
+                <Input type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} aria-label="Hasta" className="w-40" />
+                {(fromDate || toDate) && (
+                  <Button variant="ghost" size="sm" onClick={() => { setFromDate(''); setToDate(''); }}>
+                    Limpiar
+                  </Button>
+                )}
+              </>
+            }
             columns={[
               { key: 'code', header: 'Código', render: (o: SalesOrder) => <span className="font-mono text-xs">{o.code}</span>, secondary: true, sortValue: (o: SalesOrder) => o.code },
               { key: 'client', header: 'Cliente', render: (o: SalesOrder) => o.clientName, primary: true, sortValue: (o: SalesOrder) => o.clientName },

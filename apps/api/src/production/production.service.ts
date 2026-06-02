@@ -11,6 +11,7 @@ import type {
 import { ProductionOrderEntity } from './production-order.entity';
 import { RecipesService } from '../recipes/recipes.service';
 import { BatchEntity } from '../batches/batch.entity';
+import { ProductEntity } from '../products/product.entity';
 import { InventoryMovementEntity } from '../inventory/inventory-movement.entity';
 import { computeByproducts, computeIngredients, computeYield } from '../recipes/yield-calculator';
 import {
@@ -96,13 +97,18 @@ export class ProductionService {
           unit: 'kg',
           isPrincipal: true,
         },
-        ...byproducts.map((bp) => ({
-          productId: recipe.productId, // placeholder; los subproductos no siempre son producto del catálogo
-          productName: bp.name,
-          quantity: bp.expectedQuantity,
-          unit: bp.unit as 'kg' | 'litro' | 'unidad',
-          isPrincipal: false,
-        })),
+        ...byproducts.map((bp) => {
+          // Si el subproducto está mapeado a un producto del catálogo (destinationProductId),
+          // usamos ese id para que al cerrar genere su propio lote de stock (ej. suero).
+          const recipeBp = version.byproducts.find((b) => b.name === bp.name);
+          return {
+            productId: recipeBp?.destinationProductId ?? recipe.productId,
+            productName: bp.name,
+            quantity: bp.expectedQuantity,
+            unit: bp.unit as 'kg' | 'litro' | 'unidad',
+            isPrincipal: false,
+          };
+        }),
       ];
 
       // Generar código de orden de producción: OP-YYYYMMDD-NNNN
@@ -275,15 +281,102 @@ export class ProductionService {
         }),
       );
 
-      const actualOutputs: ProductionOutput[] = input.actualOutputs.map((o) => ({
-        productId: o.productId,
-        productName: order.expectedOutputs.find((e) => e.productId === o.productId)?.productName ?? '',
-        quantity: o.quantity,
-        unit: 'kg',
-        isPrincipal: o.isPrincipal,
-        batchId: o.isPrincipal ? productionBatch.id : undefined,
-        batchCode: o.isPrincipal ? productionBatch.code : undefined,
-      }));
+      // --- 4b. Subproductos con producto del catálogo (ej. suero) → generan su lote de stock ---
+      const byproductBatch = new Map<string, { id: string; code: string }>();
+      let bpIdx = 0;
+      for (const o of input.actualOutputs) {
+        if (o.isPrincipal || o.quantity <= 0) continue;
+        if (o.productId === principalProductId) continue; // sin producto propio: solo descuenta costo
+        const bpProduct = await manager.getRepository(ProductEntity).findOne({ where: { id: o.productId } });
+        if (!bpProduct) continue;
+        bpIdx += 1;
+        const bpBatch = await manager.getRepository(BatchEntity).save(
+          manager.getRepository(BatchEntity).create({
+            code: `LM-SP-${order.code.replace('OP-', '')}-${bpIdx}`,
+            productId: o.productId,
+            productionDate: new Date(),
+            initialQuantity: String(o.quantity),
+            remainingQuantity: String(o.quantity),
+            unit: bpProduct.unit,
+            status: 'activo',
+            parentBatchId: productionBatch.id,
+            warehouseId: input.warehouseId ?? null,
+            unitCost: null, // el valor del subproducto es el de recupero, no un costo de producción
+            notes: `Subproducto de ${order.code}`,
+          }),
+        );
+        await manager.getRepository(InventoryMovementEntity).save(
+          manager.getRepository(InventoryMovementEntity).create({
+            batchId: bpBatch.id,
+            productId: o.productId,
+            type: 'in',
+            reason: 'production',
+            quantity: String(o.quantity),
+            unit: bpProduct.unit,
+            referenceType: 'production_order',
+            referenceId: order.id,
+            createdById: order.operatorId,
+          }),
+        );
+        byproductBatch.set(o.productId, { id: bpBatch.id, code: bpBatch.code });
+      }
+
+      // --- 4c. Descontar insumos del stock por FEFO. No bloquea si falta (solo descuenta lo
+      // disponible); los insumos sin stock trackeado (ej. mano de obra, energía) se ignoran. ---
+      for (const ing of version.ingredients) {
+        const consumed =
+          ing.basis === 'per_liter_milk'
+            ? Number(ing.quantity) * totalLiters
+            : ing.basis === 'per_kg_product'
+              ? Number(ing.quantity) * Number(principalOutput.quantity)
+              : Number(ing.quantity);
+        if (!(consumed > 0)) continue;
+        const lots = await manager.getRepository(BatchEntity).find({
+          where: { productId: ing.productId, status: 'activo' },
+          order: { expirationDate: 'ASC' },
+        });
+        if (lots.length === 0) continue;
+        let toConsume = consumed;
+        for (const lot of lots) {
+          if (toConsume <= 0) break;
+          const avail = Number(lot.remainingQuantity);
+          const take = Math.min(avail, toConsume);
+          if (take <= 0) continue;
+          lot.remainingQuantity = String(avail - take);
+          if (Number(lot.remainingQuantity) <= 0) lot.status = 'agotado';
+          await manager.getRepository(BatchEntity).save(lot);
+          await manager.getRepository(InventoryMovementEntity).save(
+            manager.getRepository(InventoryMovementEntity).create({
+              batchId: lot.id,
+              productId: ing.productId,
+              type: 'out',
+              reason: 'consumption',
+              quantity: String(take),
+              unit: lot.unit,
+              referenceType: 'production_order',
+              referenceId: order.id,
+              createdById: order.operatorId,
+            }),
+          );
+          toConsume -= take;
+        }
+      }
+
+      const actualOutputs: ProductionOutput[] = input.actualOutputs.map((o) => {
+        const exp = order.expectedOutputs.find((e) => e.productId === o.productId);
+        const batch = o.isPrincipal
+          ? { id: productionBatch.id, code: productionBatch.code }
+          : byproductBatch.get(o.productId);
+        return {
+          productId: o.productId,
+          productName: exp?.productName ?? '',
+          quantity: o.quantity,
+          unit: exp?.unit ?? 'kg',
+          isPrincipal: o.isPrincipal,
+          batchId: batch?.id,
+          batchCode: batch?.code,
+        };
+      });
 
       // --- 5. Cerrar la orden y persistir el costo ---
       order.status = 'closed';

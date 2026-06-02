@@ -33,6 +33,8 @@ interface Props<T> {
   /** Si se provee, muestra un buscador que filtra por el texto que devuelve esta función. */
   getSearchText?: (row: T) => string;
   searchPlaceholder?: string;
+  /** Controles de filtro extra (fechas, chips…). Se renderizan en la MISMA fila que el buscador, a la derecha. */
+  filters?: React.ReactNode;
 }
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -46,6 +48,7 @@ export function DataTable<T>({
   pageSize = DEFAULT_PAGE_SIZE,
   getSearchText,
   searchPlaceholder = 'Buscar…',
+  filters,
 }: Props<T>) {
   const [page, setPage] = React.useState(0);
   const [query, setQuery] = React.useState('');
@@ -99,18 +102,25 @@ export function DataTable<T>({
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Buscador */}
-      {getSearchText && (
-        <div className="relative w-full sm:max-w-xs">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground-muted" aria-hidden="true" />
-          <Input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={searchPlaceholder}
-            aria-label="Buscar en la tabla"
-            className="pl-9"
-          />
+      {/* Barra superior: buscador (izquierda) + filtros (derecha), en una misma fila. */}
+      {(getSearchText || filters) && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          {getSearchText ? (
+            <div className="relative w-full sm:max-w-xs">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground-muted" aria-hidden="true" />
+              <Input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={searchPlaceholder}
+                aria-label="Buscar en la tabla"
+                className="pl-9"
+              />
+            </div>
+          ) : (
+            <span aria-hidden="true" />
+          )}
+          {filters && <div className="flex flex-wrap items-center gap-2">{filters}</div>}
         </div>
       )}
 

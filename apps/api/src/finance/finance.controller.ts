@@ -54,16 +54,16 @@ export class FinanceController {
     return this.finance.cashFlow(q.from, q.to, q.granularity);
   }
 
-  @Get('export/cash-flow.csv')
+  @Get('export/cash-flow.xlsx')
   @Roles('admin', 'gerente')
-  @Header('Content-Type', 'text/csv; charset=utf-8')
-  @Header('Content-Disposition', 'attachment; filename="flujo-de-caja.csv"')
+  @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  @Header('Content-Disposition', 'attachment; filename="flujo-de-caja.xlsx"')
   async exportCashFlow(
     @Query(new ZodValidationPipe(cashFlowQuerySchema))
     q: { from: Date; to: Date; granularity: 'day' | 'month' },
     @Res() res: Response,
   ) {
-    const csv = await this.finance.exportCashFlowCsv(q.from, q.to, q.granularity);
-    res.send(csv);
+    const buffer = await this.finance.exportCashFlowXlsx(q.from, q.to, q.granularity);
+    res.send(buffer);
   }
 }

@@ -85,7 +85,7 @@ export function ReturnDialog({ order, onClose, onDone }: Props) {
               Devolver mercadería
             </h2>
             <p className="mt-1 text-sm text-foreground-muted">
-              Despacho <span className="font-mono">{order.code}</span> · {order.clientName}
+              Venta <span className="font-mono">{order.code}</span> · {order.clientName}
             </p>
           </div>
           <button

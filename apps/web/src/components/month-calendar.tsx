@@ -14,7 +14,7 @@ const WEEKDAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 const TYPE_STYLE: Record<HomeEventType, { dot: string; label: string }> = {
   cobro: { dot: 'bg-amber-500', label: 'Cobro' },
   vencimiento_lote: { dot: 'bg-red-500', label: 'Vencimiento de lote' },
-  despacho: { dot: 'bg-secondary-500', label: 'Despacho' },
+  despacho: { dot: 'bg-secondary-500', label: 'Venta' },
 };
 
 const money = (n: number) => `$${n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;

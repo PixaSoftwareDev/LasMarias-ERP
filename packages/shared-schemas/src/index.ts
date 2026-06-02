@@ -12,3 +12,4 @@ export * from './sales';
 export * from './finance';
 export * from './home';
 export * from './report';
+export * from './producer-account';

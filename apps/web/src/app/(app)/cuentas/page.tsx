@@ -67,7 +67,7 @@ function StatChip({
 }
 
 const KIND_LABEL: Record<AccountMovement['kind'], string> = {
-  charge: 'Despacho',
+  charge: 'Venta',
   payment: 'Cobro',
   credit_note: 'Nota de crédito',
 };
@@ -246,7 +246,7 @@ export default function CuentasPage() {
   const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: () => salesApi.accounts() });
 
   const exportCsv = useMutation({
-    mutationFn: () => salesApi.exportAccountsCsv(),
+    mutationFn: () => salesApi.exportAccountsXlsx(),
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo exportar. Probá de nuevo.'),
   });
 
@@ -264,7 +264,7 @@ export default function CuentasPage() {
               loading={exportCsv.isPending}
               loadingText="Generando..."
             >
-              <Download className="h-4 w-4" /> Exportar CSV
+              <Download className="h-4 w-4" /> Exportar Excel
             </Button>
           ) : undefined
         }

@@ -11,7 +11,7 @@ import { AccountMovementEntity } from './account-movement.entity';
 import { ClientEntity } from '../clients/client.entity';
 import { CashMovementEntity } from '../finance/cash-movement.entity';
 import { computeReceivable, type ReceivableMovement } from './accounts.helpers';
-import { toCsv } from '../common/csv';
+import { toXlsx } from '../common/xlsx';
 
 @Injectable()
 export class AccountsService {
@@ -98,15 +98,16 @@ export class AccountsService {
     });
   }
 
-  // CSV de saldos por cliente (cuentas corrientes).
-  async exportBalancesCsv(): Promise<string> {
+  // Excel de saldos por cliente (cuentas corrientes).
+  async exportBalancesXlsx(): Promise<Buffer> {
     const balances = await this.listBalances();
-    return toCsv(
-      balances.map((b) => ({
-        cliente: b.clientName,
-        saldo: b.balance,
-      })),
-      ['cliente', 'saldo'],
+    return toXlsx(
+      'Cuentas corrientes',
+      [
+        { header: 'Cliente', key: 'cliente' },
+        { header: 'Saldo', key: 'saldo' },
+      ],
+      balances.map((b) => ({ cliente: b.clientName, saldo: b.balance })),
     );
   }
 

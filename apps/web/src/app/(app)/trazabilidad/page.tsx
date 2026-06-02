@@ -300,7 +300,7 @@ export default function TraceabilityPage() {
                 <ArrowDownToLine className="h-5 w-5 text-primary-600" aria-hidden="true" />
                 <div>
                   <CardTitle>A dónde fue</CardTitle>
-                  <p className="text-xs text-foreground-muted">Órdenes, productos y despachos a clientes.</p>
+                  <p className="text-xs text-foreground-muted">Órdenes, productos y ventas a clientes.</p>
                 </div>
               </CardHeader>
               <CardContent>

@@ -21,6 +21,9 @@ import type {
   Warehouse,
   CreateWarehouseInput,
   UpdateWarehouseInput,
+  StockEntryInput,
+  DiscardStockInput,
+  CountAdjustInput,
   User,
   UpdateMeInput,
   ChangePasswordInput,
@@ -47,6 +50,10 @@ import type {
   ProfitabilityRow,
   HomeSummary,
   HomeCalendar,
+  ProducerBalance,
+  ProducerAccountDetail,
+  ProducerPayment,
+  RegisterProducerPaymentInput,
 } from '@lasmarias/shared-schemas';
 import type { ProducerDto } from './receptions/types';
 import { api, downloadFile } from '@/lib/api-client';
@@ -82,6 +89,12 @@ export const producersApi = {
     api<ProducerDto>('/api/producers', { method: 'POST', body: input }),
   update: (id: string, input: UpdateProducerInput) =>
     api<ProducerDto>(`/api/producers/${id}`, { method: 'PATCH', body: input }),
+  // Cuentas por pagar a tambos (lo que se le debe + pagos).
+  accounts: () => api<ProducerBalance[]>('/api/producers/accounts'),
+  account: (id: string, month?: string) =>
+    api<ProducerAccountDetail>(`/api/producers/${id}/account${month ? `?month=${encodeURIComponent(month)}` : ''}`),
+  registerPayment: (input: RegisterProducerPaymentInput) =>
+    api<ProducerPayment>('/api/producers/payments', { method: 'POST', body: input }),
 };
 
 export const recipesApi = {
@@ -129,6 +142,15 @@ export const inventoryApi = {
     ),
   consumableBatches: (category?: string) =>
     api<ConsumableBatch[]>(`/api/inventory/batches${category ? `?category=${encodeURIComponent(category)}` : ''}`),
+  // Ingreso directo de stock (insumos/envases).
+  addStockEntry: (input: StockEntryInput) =>
+    api<InventoryMovement>('/api/inventory/stock-entry', { method: 'POST', body: input }),
+  // Dar de baja stock por descarte/merma/vencimiento.
+  discardStock: (input: DiscardStockInput) =>
+    api<{ discarded: number }>('/api/inventory/discard', { method: 'POST', body: input }),
+  // Ajuste por conteo físico.
+  countAdjust: (input: CountAdjustInput) =>
+    api<{ adjusted: number }>('/api/inventory/count-adjust', { method: 'POST', body: input }),
   // Cámaras / sectores físicos de almacenamiento (CLAUDE.md §4.4).
   // includeInactive=true para la pantalla de gestión (poder reactivar las desactivadas).
   listWarehouses: (includeInactive = false) =>
@@ -167,9 +189,9 @@ export const reportsApi = {
   // Rentabilidad por cliente (ingresos − costo de lo despachado).
   profitability: (from: string, to: string) =>
     api<ProfitabilityRow[]>(`/api/reports/profitability?${reportQs({ from, to })}`),
-  // Exportar ventas por cliente del rango.
-  exportSalesCsv: (from: string, to: string) =>
-    downloadFile(`/api/reports/export/sales.csv?${reportQs({ from, to })}`, 'ventas-por-cliente.csv'),
+  // Exportar ventas por cliente del rango (Excel).
+  exportSalesXlsx: (from: string, to: string) =>
+    downloadFile(`/api/reports/export/sales.xlsx?${reportQs({ from, to })}`, 'ventas-por-cliente.xlsx'),
 };
 
 // Fase comercial — Flujo de caja simple (ingresos = cobros, egresos = gastos).
@@ -181,8 +203,8 @@ export const financeApi = {
     api<CashMovement>('/api/finance/cash-movements', { method: 'POST', body: input }),
   cashFlow: (from: string, to: string, granularity: ReportGranularity) =>
     api<CashFlowReport>(`/api/finance/cash-flow?${reportQs({ from, to, granularity })}`),
-  exportCashFlowCsv: (from: string, to: string, granularity: ReportGranularity) =>
-    downloadFile(`/api/finance/export/cash-flow.csv?${reportQs({ from, to, granularity })}`, 'flujo-de-caja.csv'),
+  exportCashFlowXlsx: (from: string, to: string, granularity: ReportGranularity) =>
+    downloadFile(`/api/finance/export/cash-flow.xlsx?${reportQs({ from, to, granularity })}`, 'flujo-de-caja.xlsx'),
 };
 
 // Fase comercial — Home: resumen de KPIs + calendario mensual de eventos.
@@ -211,5 +233,6 @@ export const salesApi = {
   // Devolución de un despacho → repone stock + nota de crédito en cuenta.
   createReturn: (orderId: string, input: CreateReturnInput) =>
     api<CreditNote>(`/api/sales/orders/${orderId}/returns`, { method: 'POST', body: input }),
-  exportAccountsCsv: () => downloadFile('/api/sales/export/accounts.csv', 'cuentas-corrientes.csv'),
+  exportAccountsXlsx: () => downloadFile('/api/sales/export/accounts.xlsx', 'cuentas-corrientes.xlsx'),
+  exportPriceListXlsx: () => downloadFile('/api/sales/export/price-list.xlsx', 'listas-de-precios.xlsx'),
 };

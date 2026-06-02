@@ -1,9 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import type {
   CreateWarehouseInput,
   UpdateWarehouseInput,
+  StockEntryInput,
+  DiscardStockInput,
+  CountAdjustInput,
+  MovementReason,
   FefoSuggestion,
   InventoryMovement,
   StockCountInput,
@@ -18,6 +22,7 @@ import type {
 import { WarehouseEntity } from './warehouse.entity';
 import { InventoryMovementEntity } from './inventory-movement.entity';
 import { BatchEntity } from '../batches/batch.entity';
+import { ProductEntity } from '../products/product.entity';
 import { ProductionOrderEntity } from '../production/production-order.entity';
 import { SalesOrderEntity } from '../sales/sales-order.entity';
 import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
@@ -109,6 +114,7 @@ export class InventoryService {
       .addSelect('p.name', 'productName')
       .addSelect('p.sku', 'sku')
       .addSelect('p.unit', 'unit')
+      .addSelect('p.category', 'category')
       .addSelect('p.min_stock_level', 'minStockLevel')
       .addSelect('SUM(b.remaining_quantity)', 'totalQuantity')
       .addSelect('COUNT(*)', 'batchCount')
@@ -117,16 +123,18 @@ export class InventoryService {
       .addSelect("ARRAY_AGG(DISTINCT w.name) FILTER (WHERE w.name IS NOT NULL)", 'warehouses')
       .where("b.status IN ('activo', 'en_proceso')")
       .andWhere('b.product_id IS NOT NULL')
+      .andWhere('b.remaining_quantity > 0')
       .groupBy('b.product_id')
       .addGroupBy('p.name')
       .addGroupBy('p.sku')
       .addGroupBy('p.unit')
+      .addGroupBy('p.category')
       .addGroupBy('p.min_stock_level')
       .orderBy('p.name', 'ASC')
       .getRawMany();
 
     const now = Date.now();
-    return rows.map((r) => {
+    const summary: StockSummary[] = rows.map((r) => {
       const nearest = r.nearestExpiration ? new Date(r.nearestExpiration) : null;
       const minStock = r.minStockLevel != null ? Number(r.minStockLevel) : null;
       const totalQuantity = Number(r.totalQuantity);
@@ -138,6 +146,7 @@ export class InventoryService {
         productName: r.productName as string,
         sku: r.sku as string,
         unit: r.unit as string,
+        category: (r.category as string) ?? undefined,
         totalQuantity,
         batchCount: Number(r.batchCount),
         nearestExpiration: nearest?.toISOString(),
@@ -145,6 +154,204 @@ export class InventoryService {
         warehouses,
         alertLevel: resolveAlertLevel({ totalQuantity, minStock, daysToExpire }),
       };
+    });
+
+    // Leche cruda: lotes sin producto del catálogo. Se agregan como una fila propia
+    // (litros disponibles) para que el inventario muestre la materia prima.
+    const milk = await this.batches
+      .createQueryBuilder('b')
+      .leftJoin('b.warehouse', 'w')
+      .select('SUM(b.remaining_quantity)', 'totalQuantity')
+      .addSelect('COUNT(*)', 'batchCount')
+      .addSelect('MIN(b.expiration_date)', 'nearestExpiration')
+      .addSelect("ARRAY_AGG(DISTINCT w.name) FILTER (WHERE w.name IS NOT NULL)", 'warehouses')
+      .where("b.status IN ('activo', 'en_proceso')")
+      .andWhere('b.product_id IS NULL')
+      .andWhere('b.remaining_quantity > 0')
+      .getRawOne();
+
+    const milkQty = milk?.totalQuantity != null ? Number(milk.totalQuantity) : 0;
+    if (milkQty > 0) {
+      const nearest = milk.nearestExpiration ? new Date(milk.nearestExpiration) : null;
+      const warehouses: string[] | undefined =
+        Array.isArray(milk.warehouses) && milk.warehouses.length > 0 ? milk.warehouses : undefined;
+      summary.unshift({
+        productId: 'leche-cruda',
+        productName: 'Leche cruda',
+        sku: '—',
+        unit: 'litro',
+        category: 'materia_prima',
+        totalQuantity: milkQty,
+        batchCount: Number(milk.batchCount),
+        nearestExpiration: nearest?.toISOString(),
+        minStock: undefined,
+        warehouses,
+        alertLevel: 'ok',
+      });
+    }
+
+    // Insumos/productos con stock mínimo configurado que quedaron SIN stock (agotados):
+    // los mostramos igual con cantidad 0 para alertar que hay que reponer.
+    const present = new Set(summary.map((s) => s.productId));
+    const withMin = await this.dataSource
+      .getRepository(ProductEntity)
+      .createQueryBuilder('p')
+      .where('p.is_active = true')
+      .andWhere('p.min_stock_level IS NOT NULL')
+      .getMany();
+    for (const p of withMin) {
+      if (present.has(p.id)) continue;
+      const minStock = p.minStockLevel != null ? Number(p.minStockLevel) : null;
+      summary.push({
+        productId: p.id,
+        productName: p.name,
+        sku: p.sku,
+        unit: p.unit,
+        category: p.category,
+        totalQuantity: 0,
+        batchCount: 0,
+        nearestExpiration: undefined,
+        minStock: minStock ?? undefined,
+        warehouses: undefined,
+        alertLevel: resolveAlertLevel({ totalQuantity: 0, minStock, daysToExpire: null }),
+      });
+    }
+
+    return summary;
+  }
+
+  // Ingreso directo de stock (insumos/envases): crea un lote de entrada. CLAUDE.md §4.4.
+  // No es el módulo de compras completo (diferido); es una carga simple para tener stock real.
+  async addStockEntry(input: StockEntryInput, userId: string): Promise<InventoryMovement> {
+    return this.dataSource.transaction(async (manager) => {
+      const product = await manager.getRepository(ProductEntity).findOne({ where: { id: input.productId } });
+      if (!product) throw new NotFoundException('Producto no encontrado');
+      const code = `LM-IN-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 1000)}`;
+      const batch = await manager.getRepository(BatchEntity).save(
+        manager.getRepository(BatchEntity).create({
+          code,
+          productId: product.id,
+          productionDate: new Date(),
+          initialQuantity: String(input.quantity),
+          remainingQuantity: String(input.quantity),
+          unit: product.unit,
+          status: 'activo',
+          warehouseId: input.warehouseId ?? null,
+          unitCost: input.unitCost != null ? String(input.unitCost) : null,
+          notes: input.notes ?? 'Ingreso de stock',
+        }),
+      );
+      const mov = await manager.getRepository(InventoryMovementEntity).save(
+        manager.getRepository(InventoryMovementEntity).create({
+          batchId: batch.id,
+          productId: product.id,
+          type: 'in',
+          reason: 'purchase',
+          quantity: String(input.quantity),
+          unit: product.unit,
+          warehouseId: input.warehouseId ?? null,
+          referenceType: 'stock_entry',
+          createdById: userId,
+        }),
+      );
+      return this.movementToDto(mov);
+    });
+  }
+
+  // Helper: descuenta `quantity` de un producto por FEFO, registrando salidas con el
+  // motivo dado. No bloquea si falta (descuenta lo disponible). Devuelve lo descontado.
+  private async discardFefo(
+    manager: EntityManager,
+    productId: string,
+    quantity: number,
+    reason: MovementReason,
+    type: 'out' | 'adjustment',
+    notes: string | null,
+    userId: string,
+  ): Promise<number> {
+    const lots = await manager.getRepository(BatchEntity).find({
+      where: { productId, status: 'activo' },
+      order: { expirationDate: 'ASC' },
+    });
+    let toConsume = quantity;
+    for (const lot of lots) {
+      if (toConsume <= 0) break;
+      const avail = Number(lot.remainingQuantity);
+      const take = Math.min(avail, toConsume);
+      if (take <= 0) continue;
+      lot.remainingQuantity = String(avail - take);
+      if (Number(lot.remainingQuantity) <= 0) lot.status = 'agotado';
+      await manager.getRepository(BatchEntity).save(lot);
+      await manager.getRepository(InventoryMovementEntity).save(
+        manager.getRepository(InventoryMovementEntity).create({
+          batchId: lot.id,
+          productId,
+          type,
+          reason,
+          quantity: String(take),
+          unit: lot.unit,
+          referenceType: 'stock_adjustment',
+          notes,
+          createdById: userId,
+        }),
+      );
+      toConsume -= take;
+    }
+    return quantity - toConsume;
+  }
+
+  // Dar de baja stock por descarte/merma/vencimiento (salida con motivo, FEFO).
+  async discardStock(input: DiscardStockInput, userId: string): Promise<{ discarded: number }> {
+    return this.dataSource.transaction(async (manager) => {
+      const product = await manager.getRepository(ProductEntity).findOne({ where: { id: input.productId } });
+      if (!product) throw new NotFoundException('Producto no encontrado');
+      const notes = `Baja: ${input.reason}${input.notes ? ` — ${input.notes}` : ''}`;
+      const discarded = await this.discardFefo(manager, input.productId, input.quantity, 'discard', 'out', notes, userId);
+      return { discarded };
+    });
+  }
+
+  // Ajuste por conteo físico: lleva el stock del producto a la cantidad contada.
+  async countAdjust(input: CountAdjustInput, userId: string): Promise<{ adjusted: number }> {
+    return this.dataSource.transaction(async (manager) => {
+      const product = await manager.getRepository(ProductEntity).findOne({ where: { id: input.productId } });
+      if (!product) throw new NotFoundException('Producto no encontrado');
+      const lots = await manager.getRepository(BatchEntity).find({ where: { productId: input.productId, status: 'activo' } });
+      const current = lots.reduce((a, l) => a + Number(l.remainingQuantity), 0);
+      const diff = input.countedQuantity - current;
+      const notes = `Conteo físico${input.notes ? ` — ${input.notes}` : ''}`;
+      if (Math.abs(diff) < 1e-9) return { adjusted: 0 };
+      if (diff < 0) {
+        await this.discardFefo(manager, input.productId, -diff, 'count', 'adjustment', notes, userId);
+      } else {
+        const code = `LM-AJ-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 1000)}`;
+        const batch = await manager.getRepository(BatchEntity).save(
+          manager.getRepository(BatchEntity).create({
+            code,
+            productId: input.productId,
+            productionDate: new Date(),
+            initialQuantity: String(diff),
+            remainingQuantity: String(diff),
+            unit: product.unit,
+            status: 'activo',
+            notes,
+          }),
+        );
+        await manager.getRepository(InventoryMovementEntity).save(
+          manager.getRepository(InventoryMovementEntity).create({
+            batchId: batch.id,
+            productId: input.productId,
+            type: 'adjustment',
+            reason: 'count',
+            quantity: String(diff),
+            unit: product.unit,
+            referenceType: 'stock_count',
+            notes,
+            createdById: userId,
+          }),
+        );
+      }
+      return { adjusted: diff };
     });
   }
 

@@ -211,7 +211,7 @@ export default function DashboardPage() {
         { href: '/cuentas', label: 'A cobrar', value: money(s.saldoTotalPorCobrar), icon: Wallet, tone: 'danger' },
         { href: '/caja', label: 'Caja del mes', value: money(s.cajaNetaMes), icon: Banknote, tone: s.cajaNetaMes < 0 ? 'danger' : 'primary' },
         { href: '/ventas', label: 'Ventas del mes', value: money(s.ventasMes), icon: TrendingUp, tone: 'primary' },
-        { href: '/ventas', label: 'Despachos hoy', value: num(s.despachosHoy), icon: ShoppingCart, tone: 'secondary' },
+        { href: '/ventas', label: 'Ventas hoy', value: num(s.despachosHoy), icon: ShoppingCart, tone: 'secondary' },
         { href: '/inventario', label: 'Lotes por vencer', value: num(s.lotesPorVencer), icon: TriangleAlert, tone: s.lotesPorVencer > 0 ? 'amber' : 'primary' },
       ]
     : [];

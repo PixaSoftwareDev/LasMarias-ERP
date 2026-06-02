@@ -20,7 +20,7 @@ import {
   type CostRow,
   type RevenueRow,
 } from './reports.helpers';
-import { toCsv } from '../common/csv';
+import { toXlsx } from '../common/xlsx';
 
 @Injectable()
 export class ReportsService {
@@ -170,16 +170,17 @@ export class ReportsService {
     return computeMargin(revenueRows, costRows);
   }
 
-  // CSV de ventas por cliente (reporte comercial).
-  async exportSalesCsv(from: Date, to: Date): Promise<string> {
+  // Excel de ventas por cliente (reporte comercial).
+  async exportSalesXlsx(from: Date, to: Date): Promise<Buffer> {
     const rows = await this.salesByClient(from, to);
-    return toCsv(
-      rows.map((r) => ({
-        cliente: r.clientName,
-        despachos: r.dispatchCount,
-        total: r.total,
-      })),
-      ['cliente', 'despachos', 'total'],
+    return toXlsx(
+      'Ventas por cliente',
+      [
+        { header: 'Cliente', key: 'cliente' },
+        { header: 'Ventas', key: 'ventas' },
+        { header: 'Total', key: 'total' },
+      ],
+      rows.map((r) => ({ cliente: r.clientName, ventas: r.dispatchCount, total: r.total })),
     );
   }
 }

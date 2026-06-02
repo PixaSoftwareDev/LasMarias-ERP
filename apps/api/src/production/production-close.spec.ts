@@ -17,7 +17,7 @@ jest.mock('./production-order.entity', () => ({
 
 const PRINCIPAL_PRODUCT_ID = 'prod-mozza';
 
-function makeService() {
+function makeService(opts: { ingredients?: any[]; insumoLots?: any[] } = {}) {
   // Orden abierta: 1000 L de leche, receta con rendimiento 0.1 kg/L y un insumo a $/L.
   const order: any = {
     id: 'order-1',
@@ -43,7 +43,7 @@ function makeService() {
       baselineFatPercent: '3.4',
       baselineProteinPercent: '3.2',
       standardWastePercent: '0',
-      ingredients: [
+      ingredients: opts.ingredients ?? [
         // fermento: 0.2 $/L de leche → 1000 × 0.2 = $200... usamos quantity por litro
         { productName: 'Fermento', quantity: 1, unitCost: 0.5, basis: 'per_liter_milk' },
       ],
@@ -72,6 +72,8 @@ function makeService() {
       savedBatches.push(b);
       return Promise.resolve(b);
     }),
+    // Lotes de insumo para el descuento FEFO (vacío por defecto → no descuenta).
+    find: jest.fn().mockResolvedValue(opts.insumoLots ?? []),
   };
   const movementRepo = {
     create: jest.fn().mockImplementation((m) => m),
@@ -156,5 +158,31 @@ describe('ProductionService.close', () => {
     expect(order.costBreakdown.real.costoPorKg).toBe('105.0000');
     expect(order.costBreakdown.estandar).toBeDefined();
     expect(order.costBreakdown.variance).toBeDefined();
+  });
+
+  it('descuenta el stock de insumos por FEFO al cerrar', async () => {
+    const insumoLot: any = {
+      id: 'sal-1',
+      productId: 'prod-sal',
+      remainingQuantity: '100',
+      status: 'activo',
+      unit: 'kg',
+      expirationDate: null,
+    };
+    const { service, savedMovements } = makeService({
+      // Sal: 0,02 kg por kg de producto → 0,02 × 100 kg = 2 kg consumidos.
+      ingredients: [{ productName: 'Sal', productId: 'prod-sal', quantity: 0.02, unitCost: 300, basis: 'per_kg_product' }],
+      insumoLots: [insumoLot],
+    });
+
+    await service.close('order-1', {
+      actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true }],
+    } as any);
+
+    const salOut = savedMovements.find((m) => m.reason === 'consumption' && m.productId === 'prod-sal');
+    expect(salOut).toBeDefined();
+    expect(salOut.quantity).toBe('2');
+    // El lote de sal queda con 98 kg.
+    expect(insumoLot.remainingQuantity).toBe('98');
   });
 });

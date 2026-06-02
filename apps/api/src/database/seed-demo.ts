@@ -85,9 +85,11 @@ async function main() {
     { sku: 'MUZ-001', name: 'Muzzarella', category: 'queso', unit: 'kg', trackBatches: true },
     { sku: 'MASA-001', name: 'Masa base', category: 'intermedio', unit: 'kg', trackBatches: true },
     { sku: 'RIC-001', name: 'Ricota', category: 'subproducto', unit: 'kg', trackBatches: true },
+    { sku: 'SUE-001', name: 'Suero', category: 'subproducto', unit: 'litro', trackBatches: true },
     { sku: 'FER-001', name: 'Fermento láctico', category: 'insumo', unit: 'unidad', trackBatches: false, minStockLevel: 20 },
     { sku: 'CUA-001', name: 'Cuajo líquido', category: 'insumo', unit: 'litro', trackBatches: false, minStockLevel: 5 },
     { sku: 'SAL-001', name: 'Sal entrefina', category: 'insumo', unit: 'kg', trackBatches: false, minStockLevel: 40 },
+    { sku: 'ENV-001', name: 'Bolsas 1kg', category: 'envase', unit: 'unidad', trackBatches: false, minStockLevel: 200 },
     { sku: 'MO-001', name: 'Mano de obra', category: 'insumo', unit: 'unidad', trackBatches: false },
     { sku: 'ENE-001', name: 'Energía', category: 'insumo', unit: 'unidad', trackBatches: false },
   ];
@@ -157,6 +159,7 @@ async function main() {
     unit: 'litro',
     basis: 'per_liter_milk',
     destination: 'sale',
+    destinationProductId: idBySku('SUE-001'), // genera lote de stock de suero al producir
     referenceValuePerUnit: 30,
   };
   const recipeSeeds = [
@@ -222,6 +225,25 @@ async function main() {
     );
     console.log('[seed:demo] ✓ Maestros verificados. Listo.');
     return;
+  }
+
+  // 6b) STOCK INICIAL DE INSUMOS (para que tengan saldo y la producción descuente) -----
+  console.log('→ Stock inicial de insumos');
+  const stockSeeds = [
+    { sku: 'FER-001', quantity: 450, unitCost: 50 },
+    { sku: 'CUA-001', quantity: 60, unitCost: 4000 },
+    { sku: 'SAL-001', quantity: 120, unitCost: 300 },
+  ];
+  for (const s of stockSeeds) {
+    const pid = idBySku(s.sku);
+    if (pid) {
+      await post('/api/inventory/stock-entry', {
+        productId: pid,
+        quantity: s.quantity,
+        unitCost: s.unitCost,
+        warehouseId: camaraFrio,
+      });
+    }
   }
 
   // 7) RECEPCIONES DE LECHE (calidad buena → aceptadas, generan lote) ----------
@@ -364,6 +386,24 @@ async function main() {
     if (ok) expenses++;
   }
   console.log(`   ${expenses} gastos cargados.`);
+
+  // 12) PAGOS A TAMBOS (cuenta por pagar) — pago parcial para ver saldos -------
+  console.log('→ Pagos a tambos');
+  const tamboAccounts = (await get<Array<{ producerId: string; balance: number }>>('/api/producers/accounts')) ?? [];
+  let tamboPayments = 0;
+  for (let i = 0; i < Math.min(2, tamboAccounts.length); i++) {
+    const acc = tamboAccounts[i];
+    if (acc && acc.balance > 0) {
+      const ok = await post('/api/producers/payments', {
+        producerId: acc.producerId,
+        amount: Math.round(acc.balance * rnd(0.4, 0.6)),
+        occurredAt: daysAgo(Math.round(rnd(1, 10))),
+        method: 'Transferencia',
+      });
+      if (ok) tamboPayments++;
+    }
+  }
+  console.log(`   ${tamboPayments} pagos a tambos.`);
 
   console.log('[seed:demo] ✓ Listo. Entrá a la app: producción, costos, stock, cuentas, caja y reportes poblados.');
 }

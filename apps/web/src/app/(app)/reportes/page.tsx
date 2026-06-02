@@ -197,7 +197,7 @@ function SalesSection({ from, to }: { from: string; to: string }) {
   });
 
   const exportCsv = useMutation({
-    mutationFn: () => reportsApi.exportSalesCsv(from, to),
+    mutationFn: () => reportsApi.exportSalesXlsx(from, to),
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo exportar. Probá de nuevo.'),
   });
 
@@ -213,7 +213,7 @@ function SalesSection({ from, to }: { from: string; to: string }) {
       {by === 'client' && !clientQuery.isLoading && !clientQuery.isError && clientRows.length > 0 && (
         <KpiRow>
           <KpiChip label="Total facturado" value={money(totalFacturado)} icon={Coins} tone="primary" />
-          <KpiChip label="Despachos" value={num(totalDespachos)} icon={ShoppingCart} tone="secondary" />
+          <KpiChip label="Ventas" value={num(totalDespachos)} icon={ShoppingCart} tone="secondary" />
           <KpiChip label="Clientes" value={num(clientRows.length)} icon={TrendingUp} tone="secondary" />
         </KpiRow>
       )}
@@ -235,7 +235,7 @@ function SalesSection({ from, to }: { from: string; to: string }) {
           loading={exportCsv.isPending}
           loadingText="Generando..."
         >
-          <Download className="h-4 w-4" /> Exportar ventas CSV
+          <Download className="h-4 w-4" /> Exportar ventas
         </Button>
       </div>
 
@@ -254,7 +254,7 @@ function SalesSection({ from, to }: { from: string; to: string }) {
             searchPlaceholder="Buscar cliente…"
             columns={[
               { key: 'client', header: 'Cliente', primary: true, render: (r: SalesByClientRow) => r.clientName, sortValue: (r: SalesByClientRow) => r.clientName },
-              { key: 'dispatches', header: 'Despachos', align: 'right', render: (r: SalesByClientRow) => num(r.dispatchCount), sortValue: (r: SalesByClientRow) => r.dispatchCount },
+              { key: 'dispatches', header: 'Ventas', align: 'right', render: (r: SalesByClientRow) => num(r.dispatchCount), sortValue: (r: SalesByClientRow) => r.dispatchCount },
               { key: 'total', header: 'Total', align: 'right', render: (r: SalesByClientRow) => money(r.total), sortValue: (r: SalesByClientRow) => r.total },
             ]}
           />
@@ -335,7 +335,7 @@ function ProfitabilitySection({ from, to }: { from: string; to: string }) {
       <EmptyState
         icon={Coins}
         title="No hubo ventas en este período"
-        description="La rentabilidad se calcula sobre los despachos del rango elegido."
+        description="La rentabilidad se calcula sobre las ventas del rango elegido."
       />
     );
 

@@ -10,6 +10,7 @@ import {
   BarChart3,
   Wallet,
   Banknote,
+  HandCoins,
   type LucideIcon,
 } from 'lucide-react';
 import type { UserRole } from '@lasmarias/shared-schemas';
@@ -27,12 +28,13 @@ export const NAV: NavItem[] = [
   { href: '/dashboard',     label: 'Inicio',              icon: LayoutDashboard, roles: ['admin', 'gerente', 'operario', 'vendedor', 'repartidor', 'contable'] },
   { href: '/recepciones',   label: 'Recepción de leche',  icon: Milk,            roles: ['admin', 'gerente', 'operario'] },
   { href: '/produccion',    label: 'Producción',          icon: Factory,         roles: ['admin', 'gerente', 'operario'] },
-  { href: '/inventario',    label: 'Inventario',          icon: Package,         roles: ['admin', 'gerente', 'operario', 'vendedor'] },
-  { href: '/trazabilidad',  label: 'Trazabilidad',        icon: GitBranch,       roles: ['admin', 'gerente', 'operario'] },
-  { href: '/ventas',        label: 'Despacho',            icon: ShoppingCart,    roles: ['admin', 'gerente', 'vendedor'] },
+  { href: '/inventario',    label: 'Stock',               icon: Package,         roles: ['admin', 'gerente', 'operario', 'vendedor'] },
+  { href: '/ventas',        label: 'Ventas',              icon: ShoppingCart,    roles: ['admin', 'gerente', 'vendedor'] },
   { href: '/cuentas',       label: 'Cuenta corriente',    icon: Wallet,          roles: ['admin', 'gerente', 'vendedor'] },
+  { href: '/pagos-tambos',  label: 'Pagos a tambos',      icon: HandCoins,       roles: ['admin', 'gerente'] },
   { href: '/caja',          label: 'Flujo de caja',       icon: Banknote,        roles: ['admin', 'gerente'] },
   { href: '/reportes',      label: 'Reportes',            icon: BarChart3,       roles: ['admin', 'gerente'] },
+  { href: '/trazabilidad',  label: 'Trazabilidad',        icon: GitBranch,       roles: ['admin', 'gerente', 'operario'] },
   { href: '/recetas',       label: 'Recetas',             icon: ChefHat,         roles: ['admin', 'gerente', 'operario'] },
   { href: '/admin',         label: 'Datos maestros',      icon: Settings,        roles: ['admin'] },
 ];
@@ -47,6 +49,7 @@ const PHASE1_HREFS = new Set<string>([
   '/trazabilidad',
   '/ventas',
   '/cuentas',
+  '/pagos-tambos',
   '/caja',
   '/reportes',
   '/admin',

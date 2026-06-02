@@ -153,7 +153,7 @@ export default function NewProductionPage() {
               <p className="rounded-md bg-warning/10 px-3 py-2 text-xs text-warning">
                 {source === 'leche'
                   ? 'No hay lotes de leche disponibles. Cargá primero una recepción aceptada.'
-                  : 'No hay lotes de masa en stock. Elaborá primero la masa o revisá el inventario.'}
+                  : 'No hay lotes de masa en stock. Elaborá primero la masa o revisá el stock.'}
               </p>
             )}
             <div className="space-y-2">
