@@ -185,9 +185,8 @@ function StockEntryForm({ onClose }: { onClose: () => void }) {
   const [unitCost, setUnitCost] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
 
-  // Se ingresan a mano: insumos, envases y materia prima (no productos terminados).
   const entryProducts = useMemo(
-    () => (productsQuery.data ?? []).filter((p) => ['insumo', 'envase', 'materia_prima'].includes(p.category) && p.isActive),
+    () => (productsQuery.data ?? []).filter((p) => p.isActive),
     [productsQuery.data],
   );
 
@@ -215,7 +214,7 @@ function StockEntryForm({ onClose }: { onClose: () => void }) {
       <CardHeader><CardTitle>Ingresar stock</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Insumo / envase" htmlFor="entry-product" required>
+          <Field label="Producto" htmlFor="entry-product" required>
             <select
               id="entry-product"
               className="min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
@@ -255,7 +254,7 @@ function StockEntryForm({ onClose }: { onClose: () => void }) {
           </Button>
         </div>
         {entryProducts.length === 0 && !productsQuery.isLoading && (
-          <p className="text-xs text-foreground-muted">No hay insumos/envases cargados. Creálos primero en Datos maestros → Productos.</p>
+          <p className="text-xs text-foreground-muted">No hay productos activos. Creálos primero en Datos maestros → Productos.</p>
         )}
       </CardContent>
     </Card>

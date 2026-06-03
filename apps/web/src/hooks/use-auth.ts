@@ -18,17 +18,25 @@ export function useAuth() {
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const raw = localStorage.getItem(USER_KEY);
-      if (raw) {
-        try {
-          setUser(JSON.parse(raw) as User);
-        } catch {
-          localStorage.removeItem(USER_KEY);
-        }
+    const raw = localStorage.getItem(USER_KEY);
+    const hasToken = !!localStorage.getItem('lm.accessToken');
+    if (raw && hasToken) {
+      try {
+        setUser(JSON.parse(raw) as User);
+      } catch {
+        localStorage.removeItem(USER_KEY);
       }
-      setHydrated(true);
+    } else {
+      localStorage.removeItem(USER_KEY);
     }
+    setHydrated(true);
+
+    const handleExpired = () => {
+      localStorage.removeItem(USER_KEY);
+      setUser(null);
+    };
+    window.addEventListener('lm:auth:expired', handleExpired);
+    return () => window.removeEventListener('lm:auth:expired', handleExpired);
   }, []);
 
   const login = useCallback(async (input: LoginInput) => {

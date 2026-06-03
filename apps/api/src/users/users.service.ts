@@ -20,7 +20,7 @@ export class UsersService {
 
   async findById(id: string): Promise<UserEntity> {
     const user = await this.repo.findOne({ where: { id } });
-    if (!user) throw new NotFoundException('Usuario no encontrado');
+    if (!user) throw new NotFoundException(`Usuario ${id} no encontrado`);
     return user;
   }
 

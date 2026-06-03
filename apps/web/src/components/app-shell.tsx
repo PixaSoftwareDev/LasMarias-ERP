@@ -97,7 +97,7 @@ export function AppShell({ user, onLogout, children }: Props) {
           </button>
         </div>
 
-        <nav aria-label="Navegación principal" className="flex-1 overflow-y-auto px-3 pb-2 pt-4">
+        <nav aria-label="Navegación principal" className="min-h-0 flex-1 overflow-y-auto px-3 pb-2 pt-4">
           <ul className="space-y-1">{items.map(renderItem)}</ul>
         </nav>
 

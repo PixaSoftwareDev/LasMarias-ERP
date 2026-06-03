@@ -80,6 +80,7 @@ async function tryRefresh(): Promise<boolean> {
       return true;
     } catch {
       authStorage.clear();
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('lm:auth:expired'));
       return false;
     } finally {
       refreshInFlight = null;
@@ -95,7 +96,6 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     if (err instanceof ApiError && err.status === 401 && !opts.skipAuth) {
       const refreshed = await tryRefresh();
       if (refreshed) return rawFetch<T>(path, opts);
-      // Si el refresh falla, dejamos que la pantalla se ocupe del 401 (redirect a login).
     }
     throw err;
   }

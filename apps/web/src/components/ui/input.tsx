@@ -18,6 +18,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       <input
         ref={ref}
         type={type}
+        autoComplete="off"
         aria-invalid={invalid || undefined}
         className={cn(
           'flex min-h-touch w-full rounded-md border bg-surface-elevated px-3 py-2 text-base',

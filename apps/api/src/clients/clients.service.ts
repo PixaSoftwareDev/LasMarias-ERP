@@ -21,7 +21,7 @@ export class ClientsService {
 
   async get(id: string): Promise<Client> {
     const c = await this.repo.findOne({ where: { id } });
-    if (!c) throw new NotFoundException('Cliente no encontrado');
+    if (!c) throw new NotFoundException(`Cliente ${id} no encontrado`);
     return this.toDto(c);
   }
 
@@ -43,7 +43,7 @@ export class ClientsService {
 
   async update(id: string, input: UpdateClientInput): Promise<Client> {
     const c = await this.repo.findOne({ where: { id } });
-    if (!c) throw new NotFoundException('Cliente no encontrado');
+    if (!c) throw new NotFoundException(`Cliente ${id} no encontrado`);
     Object.assign(c, {
       ...(input.businessName !== undefined && { businessName: input.businessName }),
       ...(input.taxId !== undefined && { taxId: input.taxId }),

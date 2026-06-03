@@ -31,7 +31,7 @@ import type { HomeCalendarEvent, StockSummary, AccountBalance } from '@lasmarias
 // y ordenado. Izquierda (2/3): saludo + KPIs en chips + "Para resolver" (lo
 // accionable). Derecha (1/3): mini calendario + "Próximos".
 
-const num = (n: number) => n.toLocaleString('es-AR');
+const num = (n: number | undefined) => (n ?? 0).toLocaleString('es-AR');
 
 function currentMonthKey() {
   const d = new Date();
@@ -201,13 +201,14 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const [month, setMonth] = useState(currentMonthKey);
 
-  const summaryQuery = useQuery({ queryKey: ['home', 'summary'], queryFn: () => homeApi.summary() });
+  const summaryQuery = useQuery({ queryKey: ['home', 'summary'], queryFn: () => homeApi.summary(), enabled: !!user });
   const calendarQuery = useQuery({
     queryKey: ['home', 'calendar', month],
     queryFn: () => homeApi.calendar(month),
+    enabled: !!user,
   });
-  const stockQuery = useQuery({ queryKey: ['inventory', 'stock'], queryFn: () => inventoryApi.stock() });
-  const accountsQuery = useQuery({ queryKey: ['sales', 'accounts'], queryFn: () => salesApi.accounts() });
+  const stockQuery = useQuery({ queryKey: ['inventory', 'stock'], queryFn: () => inventoryApi.stock(), enabled: !!user });
+  const accountsQuery = useQuery({ queryKey: ['sales', 'accounts'], queryFn: () => salesApi.accounts(), enabled: !!user });
 
   const s = summaryQuery.data;
   // Bloque PLATA: todo en $ (finanzas y comercial).

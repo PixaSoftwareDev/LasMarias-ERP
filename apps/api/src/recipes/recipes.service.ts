@@ -41,7 +41,7 @@ export class RecipesService {
       where: { id },
       relations: { product: true, versions: true },
     });
-    if (!r) throw new NotFoundException('Receta no encontrada');
+    if (!r) throw new NotFoundException(`Receta ${id} no encontrada`);
     return this.toDto(r);
   }
 
@@ -89,7 +89,7 @@ export class RecipesService {
       where: { id: recipeId },
       relations: { versions: true },
     });
-    if (!recipe) throw new NotFoundException('Receta no encontrada');
+    if (!recipe) throw new NotFoundException(`Receta ${recipeId} no encontrada`);
 
     return this.dataSource.transaction(async (manager) => {
       const versionRepo = manager.getRepository(RecipeVersionEntity);
@@ -121,9 +121,9 @@ export class RecipesService {
       where: { id: input.recipeId },
       relations: { versions: true },
     });
-    if (!recipe) throw new NotFoundException('Receta no encontrada');
+    if (!recipe) throw new NotFoundException(`Receta ${input.recipeId} no encontrada`);
     const version = recipe.versions.find((v) => v.isActive);
-    if (!version) throw new BadRequestException('La receta no tiene versión activa');
+    if (!version) throw new BadRequestException(`La receta "${recipe.name}" no tiene versión activa — creá una versión antes de simular`);
 
     const yieldResult = computeYield({
       liters: input.liters,
@@ -210,7 +210,7 @@ export class RecipesService {
 
   async getActiveVersionOrThrow(recipeId: string): Promise<RecipeVersionEntity> {
     const v = await this.versions.findOne({ where: { recipeId, isActive: true } });
-    if (!v) throw new BadRequestException('La receta no tiene versión activa');
+    if (!v) throw new BadRequestException(`La receta ${recipeId} no tiene versión activa`);
     return v;
   }
 }

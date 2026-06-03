@@ -70,7 +70,7 @@ export class SalesService {
 
   async getOrder(id: string): Promise<SalesOrder> {
     const o = await this.orders.findOne({ where: { id }, relations: { client: true } });
-    if (!o) throw new NotFoundException('Despacho no encontrado');
+    if (!o) throw new NotFoundException(`Despacho ${id} no encontrado`);
     return this.orderToDto(o);
   }
 
@@ -172,7 +172,7 @@ export class SalesService {
     userId: string,
   ): Promise<CreditNote> {
     const order = await this.orders.findOne({ where: { id: orderId } });
-    if (!order) throw new NotFoundException('Despacho no encontrado');
+    if (!order) throw new NotFoundException(`Despacho ${orderId} no encontrado`);
 
     return this.dataSource.transaction(async (manager) => {
       // Lo ya devuelto previamente por este despacho (para no exceder).
@@ -270,7 +270,7 @@ export class SalesService {
       order: { createdAt: 'ASC' },
     });
     if (saleMovements.length === 0) {
-      throw new BadRequestException('No se encontró el movimiento de salida del despacho');
+      throw new BadRequestException(`No se encontró el movimiento de salida para el despacho ${orderCode}`);
     }
     let pending = quantity;
     for (const mv of saleMovements) {

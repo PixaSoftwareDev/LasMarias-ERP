@@ -225,7 +225,7 @@ export class InventoryService {
   async addStockEntry(input: StockEntryInput, userId: string): Promise<InventoryMovement> {
     return this.dataSource.transaction(async (manager) => {
       const product = await manager.getRepository(ProductEntity).findOne({ where: { id: input.productId } });
-      if (!product) throw new NotFoundException('Producto no encontrado');
+      if (!product) throw new NotFoundException(`Producto ${input.productId} no encontrado`);
       const code = `LM-IN-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 1000)}`;
       const batch = await manager.getRepository(BatchEntity).save(
         manager.getRepository(BatchEntity).create({
@@ -304,7 +304,7 @@ export class InventoryService {
   async discardStock(input: DiscardStockInput, userId: string): Promise<{ discarded: number }> {
     return this.dataSource.transaction(async (manager) => {
       const product = await manager.getRepository(ProductEntity).findOne({ where: { id: input.productId } });
-      if (!product) throw new NotFoundException('Producto no encontrado');
+      if (!product) throw new NotFoundException(`Producto ${input.productId} no encontrado`);
       const notes = `Baja: ${input.reason}${input.notes ? ` — ${input.notes}` : ''}`;
       const discarded = await this.discardFefo(manager, input.productId, input.quantity, 'discard', 'out', notes, userId);
       return { discarded };
@@ -315,7 +315,7 @@ export class InventoryService {
   async countAdjust(input: CountAdjustInput, userId: string): Promise<{ adjusted: number }> {
     return this.dataSource.transaction(async (manager) => {
       const product = await manager.getRepository(ProductEntity).findOne({ where: { id: input.productId } });
-      if (!product) throw new NotFoundException('Producto no encontrado');
+      if (!product) throw new NotFoundException(`Producto ${input.productId} no encontrado`);
       const lots = await manager.getRepository(BatchEntity).find({ where: { productId: input.productId, status: 'activo' } });
       const current = lots.reduce((a, l) => a + Number(l.remainingQuantity), 0);
       const diff = input.countedQuantity - current;

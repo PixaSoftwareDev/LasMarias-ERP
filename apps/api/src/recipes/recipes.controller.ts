@@ -19,13 +19,13 @@ export class RecipesController {
   constructor(private readonly recipes: RecipesService) {}
 
   @Get()
-  @Roles('admin', 'gerente', 'operario')
+  @Roles('admin', 'gerente', 'operario', 'vendedor')
   list() {
     return this.recipes.list();
   }
 
   @Get(':id')
-  @Roles('admin', 'gerente', 'operario')
+  @Roles('admin', 'gerente', 'operario', 'vendedor')
   get(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.recipes.get(id);
   }
@@ -46,7 +46,7 @@ export class RecipesController {
   }
 
   @Post('simulate')
-  @Roles('admin', 'gerente', 'operario')
+  @Roles('admin', 'gerente', 'operario', 'vendedor')
   simulate(@Body(new ZodValidationPipe(simulateRecipeInputSchema)) body: SimulateRecipeInput) {
     return this.recipes.simulate(body);
   }

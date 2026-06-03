@@ -24,8 +24,8 @@ export function formatLiters(liters: number): string {
 
 // Dinero en pesos, siempre con 2 decimales y separador de miles (ej: "$1.250,00").
 // Único formato de plata en toda la app — no definir `money` local en cada pantalla.
-export function formatMoney(n: number): string {
-  return `$${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+export function formatMoney(n: number | undefined | null): string {
+  return `$${(n ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 // Igual que formatMoney pero con signo explícito para flujos (ingreso/egreso): "−$1.250,00".

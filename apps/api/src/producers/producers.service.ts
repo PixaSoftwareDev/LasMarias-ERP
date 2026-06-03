@@ -52,7 +52,7 @@ export class ProducersService {
 
   async get(id: string): Promise<ProducerEntity> {
     const p = await this.repo.findOne({ where: { id } });
-    if (!p) throw new NotFoundException('Productor no encontrado');
+    if (!p) throw new NotFoundException(`Productor ${id} no encontrado`);
     return p;
   }
 
@@ -73,7 +73,7 @@ export class ProducersService {
   // Edición de productor: mergea solo los campos provistos (CLAUDE.md §4.5).
   async update(id: string, input: UpdateProducerInput): Promise<ProducerDto> {
     const p = await this.repo.findOne({ where: { id } });
-    if (!p) throw new NotFoundException('Productor no encontrado');
+    if (!p) throw new NotFoundException(`Productor ${id} no encontrado`);
     if (input.name !== undefined) p.name = input.name;
     if (input.taxId !== undefined) p.taxId = input.taxId;
     if (input.phone !== undefined) p.phone = input.phone;

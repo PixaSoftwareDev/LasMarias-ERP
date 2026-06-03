@@ -46,7 +46,7 @@ export class ProductionService {
       where: { id },
       relations: { recipe: true, operator: true },
     });
-    if (!r) throw new NotFoundException('Orden de producción no encontrada');
+    if (!r) throw new NotFoundException(`Orden de producción ${id} no encontrada`);
     return this.toDto(r);
   }
 
@@ -146,9 +146,9 @@ export class ProductionService {
         where: { id: orderId },
         relations: { recipe: true, operator: true, recipeVersion: true },
       });
-      if (!order) throw new NotFoundException('Orden no encontrada');
-      if (order.status === 'closed') throw new ForbiddenException('La orden ya está cerrada');
-      if (order.status === 'cancelled') throw new ForbiddenException('La orden fue cancelada');
+      if (!order) throw new NotFoundException(`Orden ${orderId} no encontrada`);
+      if (order.status === 'closed') throw new ForbiddenException(`La orden ${order.code} ya está cerrada`);
+      if (order.status === 'cancelled') throw new ForbiddenException(`La orden ${order.code} fue cancelada`);
 
       const recipe = order.recipe;
       const version = order.recipeVersion;
@@ -190,7 +190,7 @@ export class ProductionService {
         (o) => o.isPrincipal && o.productId === principalProductId,
       );
       if (!principalOutput || principalOutput.quantity <= 0)
-        throw new BadRequestException('Tenés que cargar la cantidad producida del producto principal');
+        throw new BadRequestException(`Tenés que cargar la cantidad producida de ${recipe.name} (producto principal)`);
 
       // --- 3. Calcular el costo real y estándar con la calculadora de elaboración ---
       const totalLiters = Number(order.totalMilkLiters);

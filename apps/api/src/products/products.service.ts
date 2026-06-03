@@ -18,7 +18,7 @@ export class ProductsService {
 
   async get(id: string): Promise<Product> {
     const p = await this.repo.findOne({ where: { id } });
-    if (!p) throw new NotFoundException('Producto no encontrado');
+    if (!p) throw new NotFoundException(`Producto ${id} no encontrado`);
     return this.toDto(p);
   }
 
@@ -38,7 +38,7 @@ export class ProductsService {
 
   async update(id: string, input: UpdateProductInput): Promise<Product> {
     const p = await this.repo.findOne({ where: { id } });
-    if (!p) throw new NotFoundException('Producto no encontrado');
+    if (!p) throw new NotFoundException(`Producto ${id} no encontrado`);
     Object.assign(p, {
       ...(input.sku !== undefined && { sku: input.sku }),
       ...(input.name !== undefined && { name: input.name }),

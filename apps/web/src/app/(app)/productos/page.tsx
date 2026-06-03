@@ -17,7 +17,7 @@ import { TableSkeleton } from '@/components/ui/skeleton';
 import { RowActions } from '@/components/ui/row-actions';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/ui/status-badge';
-import { productsApi } from '@/features/api';
+import { productsApi, inventoryApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useConfirm } from '@/hooks/use-confirm';
 
@@ -26,6 +26,7 @@ export default function ProductsPage() {
   const confirm = useConfirm();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
+  const [stockInicial, setStockInicial] = useState('');
 
   const { data = [], isLoading } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
 
@@ -53,14 +54,23 @@ export default function ProductsPage() {
   function closeForm() {
     setShowForm(false);
     setEditing(null);
+    setStockInicial('');
     form.reset({ category: 'queso', unit: 'kg', trackBatches: true });
   }
 
   const save = useMutation({
-    mutationFn: (i: CreateProductInput) =>
-      editing ? productsApi.update(editing.id, i) : productsApi.create(i),
+    mutationFn: async (i: CreateProductInput) => {
+      if (editing) return productsApi.update(editing.id, i);
+      const product = await productsApi.create(i);
+      const qty = Number(stockInicial);
+      if (qty > 0) {
+        await inventoryApi.addStockEntry({ productId: product.id, quantity: qty });
+      }
+      return product;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['stock'] });
       toast.success(editing ? 'Producto actualizado' : 'Producto creado');
       closeForm();
     },
@@ -138,6 +148,25 @@ export default function ProductsPage() {
                   {...form.register('minStockLevel', { setValueAs: (v) => (v === '' || v === null || Number.isNaN(Number(v)) ? undefined : Number(v)) })}
                 />
               </Field>
+              {!editing && (
+                <Field
+                  label="Stock inicial"
+                  htmlFor="stockInicial"
+                  hint="Opcional. Cantidad en planta al momento de crear el producto."
+                  error={undefined}
+                >
+                  <Input
+                    id="stockInicial"
+                    type="number"
+                    inputMode="decimal"
+                    step="0.01"
+                    min={0}
+                    placeholder="0"
+                    value={stockInicial}
+                    onChange={(e) => setStockInicial(e.target.value)}
+                  />
+                </Field>
+              )}
               <label className="flex items-center gap-2 sm:col-span-2">
                 <input type="checkbox" className="h-5 w-5" {...form.register('trackBatches')} />
                 <span className="text-sm">Trabajar por lote (trazabilidad)</span>
