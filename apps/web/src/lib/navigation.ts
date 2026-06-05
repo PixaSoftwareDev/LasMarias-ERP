@@ -18,32 +18,70 @@ import {
 } from 'lucide-react';
 import type { UserRole } from '@lasmarias/shared-schemas';
 
-// Navegación principal. Lista plana, ordenada por el flujo del negocio
-// (leche → producir → vender → plata → configurar).
+// Navegación principal, AGRUPADA por área del negocio (CLAUDE.md §7 — el menú da
+// la ubicación; agrupar evita la sensación de "islas" de una lista plana larga).
 export interface NavItem {
   href: string;
   label: string;
   icon: LucideIcon;
   roles: UserRole[];
+  // Etiqueta corta para la bottom-nav mobile (si no, se usa label).
+  short?: string;
 }
 
-export const NAV: NavItem[] = [
-  { href: '/dashboard',     label: 'Inicio',              icon: LayoutDashboard, roles: ['admin', 'gerente', 'operario', 'vendedor', 'repartidor', 'contable'] },
-  { href: '/recepciones',   label: 'Recepción de leche',  icon: Milk,            roles: ['admin', 'gerente', 'operario'] },
-  { href: '/produccion',    label: 'Producción',          icon: Factory,         roles: ['admin', 'gerente', 'operario'] },
-  { href: '/inventario',    label: 'Stock',               icon: Package,         roles: ['admin', 'gerente', 'operario', 'vendedor'] },
-  { href: '/silos',         label: 'Silos de leche',      icon: Droplets,        roles: ['admin', 'gerente', 'operario'] },
-  { href: '/ventas',        label: 'Ventas',              icon: ShoppingCart,    roles: ['admin', 'gerente', 'vendedor'] },
-  { href: '/cuentas',       label: 'Cuenta corriente',    icon: Wallet,          roles: ['admin', 'gerente', 'vendedor'] },
-  { href: '/pagos-tambos',  label: 'Pagos a tambos',      icon: HandCoins,       roles: ['admin', 'gerente'] },
-  { href: '/cuentas-pagar', label: 'Cuentas por pagar',   icon: Receipt,         roles: ['admin', 'gerente'] },
-  { href: '/caja',          label: 'Flujo de caja',       icon: Banknote,        roles: ['admin', 'gerente'] },
-  { href: '/cheques',       label: 'Cheques',             icon: ScrollText,      roles: ['admin', 'gerente'] },
-  { href: '/reportes',      label: 'Reportes',            icon: BarChart3,       roles: ['admin', 'gerente'] },
-  { href: '/trazabilidad',  label: 'Trazabilidad',        icon: GitBranch,       roles: ['admin', 'gerente', 'operario'] },
-  { href: '/recetas',       label: 'Recetas',             icon: ChefHat,         roles: ['admin', 'gerente', 'operario'] },
-  { href: '/admin',         label: 'Datos maestros',      icon: Settings,        roles: ['admin'] },
+export interface NavGroup {
+  // Encabezado del área. '' = sin encabezado (Inicio va solo, arriba de todo).
+  area: string;
+  items: NavItem[];
+}
+
+const ALL: UserRole[] = ['admin', 'gerente', 'operario', 'vendedor', 'repartidor', 'contable'];
+
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    area: '',
+    items: [
+      { href: '/dashboard', label: 'Inicio', icon: LayoutDashboard, roles: ALL },
+    ],
+  },
+  {
+    area: 'Planta',
+    items: [
+      { href: '/recepciones', label: 'Recepción de leche', short: 'Recepción', icon: Milk, roles: ['admin', 'gerente', 'operario'] },
+      { href: '/produccion', label: 'Producción', icon: Factory, roles: ['admin', 'gerente', 'operario'] },
+      { href: '/inventario', label: 'Stock', icon: Package, roles: ['admin', 'gerente', 'operario', 'vendedor'] },
+      { href: '/silos', label: 'Silos de leche', short: 'Silos', icon: Droplets, roles: ['admin', 'gerente', 'operario'] },
+      { href: '/recetas', label: 'Recetas', icon: ChefHat, roles: ['admin', 'gerente', 'operario'] },
+      { href: '/trazabilidad', label: 'Trazabilidad', icon: GitBranch, roles: ['admin', 'gerente', 'operario'] },
+    ],
+  },
+  {
+    area: 'Ventas',
+    items: [
+      { href: '/ventas', label: 'Ventas', icon: ShoppingCart, roles: ['admin', 'gerente', 'vendedor'] },
+      { href: '/cuentas', label: 'Cuenta corriente', short: 'Cuentas', icon: Wallet, roles: ['admin', 'gerente', 'vendedor'] },
+    ],
+  },
+  {
+    area: 'Administración',
+    items: [
+      { href: '/pagos-tambos', label: 'Pagos a tambos', short: 'Tambos', icon: HandCoins, roles: ['admin', 'gerente'] },
+      { href: '/cuentas-pagar', label: 'Cuentas por pagar', short: 'A pagar', icon: Receipt, roles: ['admin', 'gerente'] },
+      { href: '/caja', label: 'Flujo de caja', short: 'Caja', icon: Banknote, roles: ['admin', 'gerente'] },
+      { href: '/cheques', label: 'Cheques', icon: ScrollText, roles: ['admin', 'gerente'] },
+      { href: '/reportes', label: 'Reportes', icon: BarChart3, roles: ['admin', 'gerente'] },
+    ],
+  },
+  {
+    area: 'Configuración',
+    items: [
+      { href: '/admin', label: 'Datos maestros', short: 'Config', icon: Settings, roles: ['admin'] },
+    ],
+  },
 ];
+
+// Lista plana derivada (compatibilidad con consumidores que la usan).
+export const NAV: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
 
 // Pantallas habilitadas en Fase 1 (MVP).
 const PHASE1_HREFS = new Set<string>([
@@ -66,6 +104,14 @@ const PHASE1_HREFS = new Set<string>([
 
 export function visibleFor(role: UserRole): NavItem[] {
   return NAV.filter((n) => n.roles.includes(role) && PHASE1_HREFS.has(n.href));
+}
+
+// Grupos visibles para el rol (filtra ítems por rol + fase y descarta grupos vacíos).
+export function groupedFor(role: UserRole): NavGroup[] {
+  return NAV_GROUPS.map((g) => ({
+    area: g.area,
+    items: g.items.filter((n) => n.roles.includes(role) && PHASE1_HREFS.has(n.href)),
+  })).filter((g) => g.items.length > 0);
 }
 
 // Bottom-nav (mobile): los 5 de uso diario en planta + despacho, respetando rol.

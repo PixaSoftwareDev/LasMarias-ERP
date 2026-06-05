@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { LogOut, UserCog, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import type { User } from '@lasmarias/shared-schemas';
-import { visibleFor, mobileNavFor, type NavItem } from '@/lib/navigation';
+import { groupedFor, mobileNavFor, type NavItem } from '@/lib/navigation';
 import { cn } from '@/lib/utils';
 
 // CLAUDE.md §5.3:
@@ -21,7 +21,7 @@ interface Props {
 const COLLAPSE_KEY = 'lm.sidebarCollapsed';
 
 export function AppShell({ user, onLogout, children }: Props) {
-  const items = visibleFor(user.role);
+  const groups = groupedFor(user.role);
   const pathname = usePathname();
   const router = useRouter();
 
@@ -98,7 +98,20 @@ export function AppShell({ user, onLogout, children }: Props) {
         </div>
 
         <nav aria-label="Navegación principal" className="min-h-0 flex-1 overflow-y-auto px-3 pb-2 pt-4">
-          <ul className="space-y-1">{items.map(renderItem)}</ul>
+          {groups.map((group, i) => (
+            <div key={group.area || 'inicio'} className={i > 0 ? 'mt-4' : undefined}>
+              {/* Encabezado de área. Colapsado: una línea divisoria en vez del texto. */}
+              {group.area &&
+                (collapsed ? (
+                  <div className="mx-2 mb-1 border-t border-white/10" aria-hidden="true" />
+                ) : (
+                  <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-secondary-300">
+                    {group.area}
+                  </p>
+                ))}
+              <ul className="space-y-1">{group.items.map(renderItem)}</ul>
+            </div>
+          ))}
         </nav>
 
         {/* Footer: cuenta + cerrar sesión */}
@@ -205,7 +218,7 @@ export function AppShell({ user, onLogout, children }: Props) {
                   )}
                 >
                   <Icon className="h-5 w-5" aria-hidden="true" />
-                  <span className="truncate text-[11px]">{item.label.split(' ')[0]}</span>
+                  <span className="truncate text-[11px]">{item.short ?? item.label}</span>
                 </button>
               </li>
             );
