@@ -112,7 +112,7 @@ export function DataTable<T>({
     <div className="flex flex-col gap-3">
       {/* Barra superior: buscador (izquierda) + filtros (derecha), en una misma fila. */}
       {(getSearchText || filters) && (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           {getSearchText ? (
             <div className="relative w-full sm:max-w-xs">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground-muted" aria-hidden="true" />
@@ -128,7 +128,7 @@ export function DataTable<T>({
           ) : (
             <span aria-hidden="true" />
           )}
-          {filters && <div className="flex flex-wrap items-center gap-2">{filters}</div>}
+          {filters && <div className="flex flex-wrap items-end gap-2">{filters}</div>}
         </div>
       )}
 
