@@ -26,6 +26,8 @@ export const salesOrderSchema = z.object({
   total: z.number().nonnegative(),
   notes: z.string().max(1000).optional(),
   documentType: z.enum(['remito']).default('remito'), // remito interno (NO fiscal)
+  // Forma de pago con la que se registró la venta (informativo). Nullable en ventas viejas.
+  paymentMode: z.enum(['contado', 'cuenta_corriente']).nullable().optional(),
   createdById: uuidSchema,
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,

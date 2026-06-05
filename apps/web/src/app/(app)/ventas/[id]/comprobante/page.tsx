@@ -49,10 +49,13 @@ export default function ComprobantePage() {
   // si el cliente no tiene plazo (paymentTermDays null) es contado; si tiene plazo,
   // es cuenta corriente y el vencimiento = fecha de despacho + plazo en días.
   const termDays = client?.paymentTermDays ?? null;
-  const isContado = termDays == null;
-  const dueDate = isContado
-    ? null
-    : new Date(new Date(order.dispatchedAt).getTime() + termDays * 24 * 60 * 60 * 1000);
+  // Preferimos la forma de pago guardada en la venta; si no está (ventas viejas), la derivamos del cliente.
+  const isContado = order.paymentMode ? order.paymentMode === 'contado' : termDays == null;
+  // Solo mostramos vencimiento si es cuenta corriente Y el cliente tiene plazo definido.
+  const dueDate =
+    isContado || termDays == null
+      ? null
+      : new Date(new Date(order.dispatchedAt).getTime() + termDays * 24 * 60 * 60 * 1000);
   const fmtDate = (d: Date) => formatDate(d);
 
   return (

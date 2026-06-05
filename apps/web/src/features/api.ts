@@ -32,6 +32,7 @@ import type {
   FefoSuggestion,
   ProductionReportRow,
   SalesByClientRow,
+  SalesByPeriodRow,
   SalesByProductRow,
   YieldReportRow,
   ReportGranularity,
@@ -199,6 +200,9 @@ export const reportsApi = {
   production: (from: string, to: string, granularity: ReportGranularity) =>
     api<ProductionReportRow[]>(`/api/reports/production?${reportQs({ from, to, granularity })}`),
   sales: reportSales,
+  // Ventas totales por período (día / semana / mes).
+  salesByPeriod: (from: string, to: string, granularity: ReportGranularity) =>
+    api<SalesByPeriodRow[]>(`/api/reports/sales-by-period?${reportQs({ from, to, granularity })}`),
   yield: (from: string, to: string) => api<YieldReportRow[]>(`/api/reports/yield?${reportQs({ from, to })}`),
   // Rentabilidad por cliente (ingresos − costo de lo despachado).
   profitability: (from: string, to: string) =>

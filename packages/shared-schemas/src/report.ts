@@ -3,8 +3,8 @@ import { z } from 'zod';
 // Reportes básicos (CLAUDE.md §4.9 / Fase 2). Solo SELECT agregados, sin BI.
 // Los valores de dinero/cantidades se devuelven como number ya agregados.
 
-// --- Producción agrupada por período ---
-export const reportGranularitySchema = z.enum(['day', 'month']);
+// --- Granularidad de período (día / semana / mes). 'week' arranca lunes (date_trunc). ---
+export const reportGranularitySchema = z.enum(['day', 'week', 'month']);
 export type ReportGranularity = z.infer<typeof reportGranularitySchema>;
 
 export const productionReportRowSchema = z.object({
@@ -15,6 +15,14 @@ export const productionReportRowSchema = z.object({
   totalCost: z.number(),
 });
 export type ProductionReportRow = z.infer<typeof productionReportRowSchema>;
+
+// --- Ventas totales por período (día / semana / mes) ---
+export const salesByPeriodRowSchema = z.object({
+  period: z.string(), // ISO date del inicio del período (date_trunc sobre la fecha de venta)
+  dispatchCount: z.number(),
+  total: z.number(),
+});
+export type SalesByPeriodRow = z.infer<typeof salesByPeriodRowSchema>;
 
 // --- Ventas por cliente ---
 export const salesByClientRowSchema = z.object({

@@ -17,7 +17,7 @@ export default function RecipesPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Recetas"
-        description="Recetas de fabricación con versionado por producto."        action={
+        description="Cada producto tiene su receta con el rinde (kg por litro) y los costos. Para cambiar el rinde o los costos, creá una nueva versión: las producciones ya hechas conservan la versión con la que se elaboraron."        action={
           <div className="flex gap-2">
             <Button asChild variant="secondary"><Link href="/recetas/simulador">Simulador</Link></Button>
             <Button asChild><Link href="/recetas/nueva"><Plus className="h-4 w-4" /> Nueva</Link></Button>

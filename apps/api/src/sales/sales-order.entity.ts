@@ -35,6 +35,11 @@ export class SalesOrderEntity extends BaseEntity {
   @Column({ type: 'varchar', length: 16, name: 'document_type', default: 'remito' })
   documentType!: string;
 
+  // Forma de pago elegida al despachar (contado / cuenta_corriente). Solo informativo;
+  // la lógica de cuenta corriente no depende de esto. Nullable: ventas viejas sin dato.
+  @Column({ type: 'varchar', length: 20, name: 'payment_mode', nullable: true })
+  paymentMode!: string | null;
+
   @Column({ type: 'uuid', name: 'created_by' })
   createdById!: string;
 

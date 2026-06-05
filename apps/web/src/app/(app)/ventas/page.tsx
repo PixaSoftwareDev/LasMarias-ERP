@@ -474,6 +474,7 @@ export default function SalesPage() {
               { key: 'date', header: 'Fecha', render: (o: SalesOrder) => formatDate(o.dispatchedAt), sortValue: (o: SalesOrder) => new Date(o.dispatchedAt).getTime() },
               { key: 'items', header: 'Items', render: (o: SalesOrder) => o.lines.length, align: 'right', sortValue: (o: SalesOrder) => o.lines.length },
               { key: 'total', header: 'Total', render: (o: SalesOrder) => money(o.total), align: 'right', sortValue: (o: SalesOrder) => Number(o.total) },
+              { key: 'pago', header: 'Pago', render: (o: SalesOrder) => o.paymentMode === 'contado' ? 'Contado' : o.paymentMode === 'cuenta_corriente' ? 'Cuenta corriente' : '—', sortValue: (o: SalesOrder) => o.paymentMode ?? '' },
               {
                 key: 'actions',
                 header: '',

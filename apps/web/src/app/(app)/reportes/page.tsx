@@ -27,6 +27,7 @@ import type {
   ProductionReportRow,
   ProfitabilityRow,
   SalesByClientRow,
+  SalesByPeriodRow,
   SalesByProductRow,
   YieldReportRow,
   ReportGranularity,
@@ -118,7 +119,9 @@ function ProductionSection({ from, to }: { from: string; to: string }) {
   const periodLabel = (iso: string) =>
     granularity === 'month'
       ? new Date(iso).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
-      : formatDate(iso);
+      : granularity === 'week'
+        ? `Semana del ${formatDate(iso)}`
+        : formatDate(iso);
 
   const rows = query.data ?? [];
 
@@ -162,6 +165,7 @@ function ProductionSection({ from, to }: { from: string; to: string }) {
           onChange={setGranularity}
           options={[
             { value: 'day', label: 'Por día' },
+            { value: 'week', label: 'Por semana' },
             { value: 'month', label: 'Por mes' },
           ]}
         />
@@ -184,8 +188,15 @@ function ProductionSection({ from, to }: { from: string; to: string }) {
 
 // ─── Pestaña Ventas ────────────────────────────────────────────────────────────
 function SalesSection({ from, to }: { from: string; to: string }) {
-  const [by, setBy] = useState<'client' | 'product'>('client');
+  const [by, setBy] = useState<'period' | 'client' | 'product'>('period');
+  // Granularidad para la vista "Por período" (total $ por día / semana / mes).
+  const [granularity, setGranularity] = useState<ReportGranularity>('month');
 
+  const periodQuery = useQuery({
+    queryKey: ['report', 'sales', 'period', from, to, granularity],
+    queryFn: () => reportsApi.salesByPeriod(from, to, granularity),
+    enabled: by === 'period',
+  });
   const clientQuery = useQuery({
     queryKey: ['report', 'sales', 'client', from, to],
     queryFn: () => reportsApi.sales(from, to, 'client'),
@@ -197,14 +208,23 @@ function SalesSection({ from, to }: { from: string; to: string }) {
     enabled: by === 'product',
   });
 
+  const periodLabel = (iso: string) =>
+    granularity === 'month'
+      ? new Date(iso).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
+      : granularity === 'week'
+        ? `Semana del ${formatDate(iso)}`
+        : formatDate(iso);
+
   const exportCsv = useMutation({
     mutationFn: () => reportsApi.exportSalesXlsx(from, to),
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo exportar. Probá de nuevo.'),
   });
 
-  const active = by === 'client' ? clientQuery : productQuery;
+  const active = by === 'period' ? periodQuery : by === 'client' ? clientQuery : productQuery;
+  const periodRows = periodQuery.data ?? [];
   const clientRows = clientQuery.data ?? [];
   const productRows = productQuery.data ?? [];
+  const totalPeriodo = useMemo(() => periodRows.reduce((acc, r) => acc + r.total, 0), [periodRows]);
 
   const totalFacturado = useMemo(() => clientRows.reduce((acc, r) => acc + r.total, 0), [clientRows]);
   const totalDespachos = useMemo(() => clientRows.reduce((acc, r) => acc + r.dispatchCount, 0), [clientRows]);
@@ -220,15 +240,30 @@ function SalesSection({ from, to }: { from: string; to: string }) {
       )}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <SegmentedControl
-          label="Agrupar ventas"
-          value={by}
-          onChange={setBy}
-          options={[
-            { value: 'client', label: 'Por cliente' },
-            { value: 'product', label: 'Por producto' },
-          ]}
-        />
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <SegmentedControl
+            label="Agrupar ventas"
+            value={by}
+            onChange={setBy}
+            options={[
+              { value: 'period', label: 'Por período' },
+              { value: 'client', label: 'Por cliente' },
+              { value: 'product', label: 'Por producto' },
+            ]}
+          />
+          {by === 'period' && (
+            <SegmentedControl
+              label="Granularidad"
+              value={granularity}
+              onChange={setGranularity}
+              options={[
+                { value: 'day', label: 'Día' },
+                { value: 'week', label: 'Semana' },
+                { value: 'month', label: 'Mes' },
+              ]}
+            />
+          )}
+        </div>
         <Button
           variant="secondary"
           size="sm"
@@ -244,6 +279,26 @@ function SalesSection({ from, to }: { from: string; to: string }) {
         <LoadingCard />
       ) : active.isError ? (
         <ErrorCard />
+      ) : by === 'period' ? (
+        periodRows.length === 0 ? (
+          <EmptyState icon={ShoppingCart} title="No hubo ventas en este período" description="Probá ampliar el rango de fechas." />
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface-subtle/50 px-4 py-3">
+              <span className="text-sm text-foreground-muted">Total facturado en el rango</span>
+              <span className="font-display text-xl font-bold tracking-tight text-foreground">{money(totalPeriodo)}</span>
+            </div>
+            <DataTable
+              data={periodRows}
+              getKey={(r) => r.period}
+              columns={[
+                { key: 'period', header: 'Período', primary: true, render: (r: SalesByPeriodRow) => periodLabel(r.period), sortValue: (r: SalesByPeriodRow) => new Date(r.period).getTime() },
+                { key: 'dispatches', header: 'Ventas', align: 'right', render: (r: SalesByPeriodRow) => num(r.dispatchCount), sortValue: (r: SalesByPeriodRow) => r.dispatchCount },
+                { key: 'total', header: 'Total', align: 'right', render: (r: SalesByPeriodRow) => money(r.total), sortValue: (r: SalesByPeriodRow) => r.total },
+              ]}
+            />
+          </>
+        )
       ) : by === 'client' ? (
         clientRows.length === 0 ? (
           <EmptyState icon={ShoppingCart} title="No hubo ventas en este período" description="Probá ampliar el rango de fechas." />

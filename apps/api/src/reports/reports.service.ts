@@ -6,6 +6,7 @@ import type {
   ProfitabilityRow,
   ReportGranularity,
   SalesByClientRow,
+  SalesByPeriodRow,
   SalesByProductRow,
   YieldReportRow,
 } from '@lasmarias/shared-schemas';
@@ -61,6 +62,27 @@ export class ReportsService {
       totalMilkLiters: Number(r.totalMilkLiters),
       totalPrincipalKg: Number(r.totalPrincipalKg),
       totalCost: Number(r.totalCost),
+    }));
+  }
+
+  // Ventas totales por período (día / semana / mes) sobre la fecha de venta (taken_at).
+  // Reusa el patrón date_trunc del reporte de producción. 'week' arranca lunes.
+  async salesByPeriod(from: Date, to: Date, granularity: ReportGranularity): Promise<SalesByPeriodRow[]> {
+    const rows = await this.salesRepo
+      .createQueryBuilder('s')
+      .select('date_trunc(:granularity, s.taken_at)', 'period')
+      .addSelect('COUNT(*)', 'dispatchCount')
+      .addSelect('COALESCE(SUM(s.total), 0)', 'total')
+      .where('s.taken_at BETWEEN :from AND :to', { from, to })
+      .groupBy('period')
+      .orderBy('period', 'ASC')
+      .setParameter('granularity', granularity)
+      .getRawMany();
+
+    return rows.map((r) => ({
+      period: r.period instanceof Date ? r.period.toISOString() : String(r.period),
+      dispatchCount: Number(r.dispatchCount),
+      total: Number(r.total),
     }));
   }
 

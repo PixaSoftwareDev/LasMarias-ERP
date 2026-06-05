@@ -101,6 +101,11 @@ export class SalesService {
       total = Math.round(total * 100) / 100;
 
       const dispatchedAt = new Date();
+      // Forma de pago efectiva: la elegida, o la del cliente (sin plazo = contado).
+      const isContado =
+        input.paymentMode === 'contado' ||
+        (input.paymentMode === undefined && client.paymentTermDays == null);
+      const paymentMode = isContado ? 'contado' : 'cuenta_corriente';
       const code = await this.nextOrderCode(manager);
       const entity = manager.getRepository(SalesOrderEntity).create({
         code,
@@ -110,6 +115,7 @@ export class SalesService {
         total: String(total),
         notes: input.notes ?? null,
         documentType: 'remito',
+        paymentMode,
         createdById: userId,
       });
       const saved = await manager.getRepository(SalesOrderEntity).save(entity);
@@ -118,9 +124,6 @@ export class SalesService {
       await this.dischargeStock(manager, saved);
 
       // Cuenta corriente: cargo por el total del despacho.
-      const isContado =
-        input.paymentMode === 'contado' ||
-        (input.paymentMode === undefined && client.paymentTermDays == null);
       const dueDate =
         client.paymentTermDays != null
           ? new Date(dispatchedAt.getTime() + client.paymentTermDays * 24 * 60 * 60 * 1000)
@@ -382,6 +385,7 @@ export class SalesService {
       total: Number(o.total),
       notes: o.notes ?? undefined,
       documentType: 'remito',
+      paymentMode: o.paymentMode === 'contado' || o.paymentMode === 'cuenta_corriente' ? o.paymentMode : undefined,
       createdById: o.createdById,
       createdAt: o.createdAt.toISOString(),
       updatedAt: o.updatedAt.toISOString(),

@@ -10,13 +10,19 @@ import { ReportsService } from './reports.service';
 const productionQuerySchema = z.object({
   from: z.coerce.date(),
   to: z.coerce.date(),
-  granularity: z.enum(['day', 'month']).default('day'),
+  granularity: z.enum(['day', 'week', 'month']).default('day'),
 });
 
 const salesQuerySchema = z.object({
   from: z.coerce.date(),
   to: z.coerce.date(),
   by: z.enum(['client', 'product']).default('client'),
+});
+
+const salesByPeriodQuerySchema = z.object({
+  from: z.coerce.date(),
+  to: z.coerce.date(),
+  granularity: z.enum(['day', 'week', 'month']).default('month'),
 });
 
 const dateRangeSchema = z.object({
@@ -33,9 +39,18 @@ export class ReportsController {
   @Get('production')
   production(
     @Query(new ZodValidationPipe(productionQuerySchema))
-    q: { from: Date; to: Date; granularity: 'day' | 'month' },
+    q: { from: Date; to: Date; granularity: 'day' | 'week' | 'month' },
   ) {
     return this.reports.production(q.from, q.to, q.granularity);
+  }
+
+  // Ventas totales por período (día / semana / mes).
+  @Get('sales-by-period')
+  salesByPeriod(
+    @Query(new ZodValidationPipe(salesByPeriodQuerySchema))
+    q: { from: Date; to: Date; granularity: 'day' | 'week' | 'month' },
+  ) {
+    return this.reports.salesByPeriod(q.from, q.to, q.granularity);
   }
 
   @Get('sales')
