@@ -12,7 +12,7 @@ import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/page-header';
 import { inventoryApi, productionApi, recipesApi } from '@/features/api';
-import { api, ApiError } from '@/lib/api-client';
+import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
 
 interface MilkBatch {
@@ -36,22 +36,30 @@ export default function NewProductionPage() {
   const recipes = useQuery({ queryKey: ['recipes'], queryFn: () => recipesApi.list() });
 
   // Origen de la materia prima a consumir.
-  // - "leche": flujo actual (lotes provenientes de recepciones aceptadas).
+  // - "leche": lotes de leche cruda en stock, filtrables por silo (CLAUDE.md §9).
   // - "masa": lotes intermedios en stock (ej. para elaborar mozzarella desde masa).
   const [source, setSource] = useState<SourceKind>('leche');
+  // Silo de origen (opcional): filtra los lotes de leche disponibles a ese silo.
+  const [siloId, setSiloId] = useState('');
 
-  // Lotes de leche disponibles. Como no tenemos endpoint dedicado, usamos un workaround:
-  // pegar al endpoint de recepciones aceptadas y mapearlas a sus batchIds.
-  const receptions = useQuery({
-    queryKey: ['receptions-for-production'],
-    queryFn: () => api<Array<{ id: string; code: string; liters: number; status: string; batchId?: string }>>('/api/milk-receptions'),
+  // Silos definidos, para el selector de origen.
+  const warehousesQuery = useQuery({ queryKey: ['warehouses'], queryFn: () => inventoryApi.listWarehouses() });
+  const silos = useMemo(() => (warehousesQuery.data ?? []).filter((w) => w.kind === 'silo'), [warehousesQuery.data]);
+
+  // Lotes de leche cruda disponibles (con su silo). Filtra por silo si se eligió uno.
+  const milkBatchesQuery = useQuery({
+    queryKey: ['milk-batches', siloId],
+    queryFn: () => inventoryApi.milkBatches(siloId || undefined),
   });
   const milkBatchesFromReceptions: MilkBatch[] = useMemo(
     () =>
-      (receptions.data ?? [])
-        .filter((r) => r.status === 'aceptada' && r.batchId)
-        .map((r) => ({ id: r.batchId!, code: r.code, remainingQuantity: r.liters, label: `${r.code} (${r.liters} L)` })),
-    [receptions.data],
+      (milkBatchesQuery.data ?? []).map((b) => ({
+        id: b.id,
+        code: b.code,
+        remainingQuantity: b.remainingQuantity,
+        label: `${b.code} (${b.remainingQuantity} ${b.unit})${b.warehouseName ? ` · ${b.warehouseName}` : ''}`,
+      })),
+    [milkBatchesQuery.data],
   );
 
   // Lotes de masa (categoría intermedio) en stock.
@@ -146,6 +154,15 @@ export default function NewProductionPage() {
               <option value="masa">Masa en stock (paso 2: hacer mozzarella o queso)</option>
             </select>
           </Field>
+
+          {source === 'leche' && silos.length > 0 && (
+            <Field label="Silo de origen" htmlFor="silo" hint="Filtrá los lotes de leche por silo. Vacío = todos los silos.">
+              <select id="silo" className="min-h-touch w-full rounded-md border border-border px-3" value={siloId} onChange={(e) => { setSiloId(e.target.value); setInputs([{ batchId: '', liters: 0 }]); }}>
+                <option value="">Todos los silos</option>
+                {silos.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </Field>
+          )}
 
           <div>
             <div className="mb-2 flex items-center justify-between">

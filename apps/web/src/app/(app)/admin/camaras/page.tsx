@@ -32,6 +32,7 @@ const KIND_LABEL: Record<Warehouse['kind'], string> = {
   sector: 'Sector',
   dry_storage: 'Depósito seco',
   maturation: 'Maduración',
+  silo: 'Silo de leche',
 };
 
 const EMPTY: CreateWarehouseInput = { code: '', name: '', kind: 'cold_chamber' };
@@ -63,6 +64,7 @@ export default function WarehousesPage() {
         name: editing.name,
         kind: editing.kind,
         targetTemperatureCelsius: editing.targetTemperatureCelsius,
+        capacityLiters: editing.capacityLiters,
       });
     }
   }, [editing, form]);
@@ -113,7 +115,7 @@ export default function WarehousesPage() {
       </Button>
       <PageHeader
         title="Cámaras y sectores"
-        description="Lugares físicos donde se almacenan los lotes (cámaras de frío, depósitos, maduración)."
+        description="Lugares físicos donde se almacenan los lotes: cámaras de frío, depósitos, maduración y silos de leche (con su capacidad en litros)."
         action={
           <Button onClick={() => (showForm ? closeForm() : setShowForm(true))}>
             <Plus className="h-4 w-4" /> {showForm ? 'Cerrar' : 'Nueva cámara'}
@@ -138,17 +140,30 @@ export default function WarehousesPage() {
                   <option value="sector">Sector</option>
                   <option value="dry_storage">Depósito seco</option>
                   <option value="maturation">Maduración</option>
+                  <option value="silo">Silo de leche</option>
                 </select>
               </Field>
-              <Field label="Temperatura objetivo (°C)" htmlFor="targetTemperatureCelsius" error={form.formState.errors.targetTemperatureCelsius?.message} hint="Opcional">
-                <Input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.1"
-                  placeholder="Ej: 4"
-                  {...form.register('targetTemperatureCelsius', { setValueAs: (v) => (v === '' || v === null || Number.isNaN(Number(v)) ? undefined : Number(v)) })}
-                />
-              </Field>
+              {form.watch('kind') === 'silo' ? (
+                <Field label="Capacidad (litros)" htmlFor="capacityLiters" required error={form.formState.errors.capacityLiters?.message} hint="Para mostrar el nivel del silo.">
+                  <Input
+                    type="number"
+                    inputMode="decimal"
+                    step="1"
+                    placeholder="Ej: 10000"
+                    {...form.register('capacityLiters', { setValueAs: (v) => (v === '' || v === null || Number.isNaN(Number(v)) ? undefined : Number(v)) })}
+                  />
+                </Field>
+              ) : (
+                <Field label="Temperatura objetivo (°C)" htmlFor="targetTemperatureCelsius" error={form.formState.errors.targetTemperatureCelsius?.message} hint="Opcional">
+                  <Input
+                    type="number"
+                    inputMode="decimal"
+                    step="0.1"
+                    placeholder="Ej: 4"
+                    {...form.register('targetTemperatureCelsius', { setValueAs: (v) => (v === '' || v === null || Number.isNaN(Number(v)) ? undefined : Number(v)) })}
+                  />
+                </Field>
+              )}
               <div className="flex justify-end gap-2 sm:col-span-2">
                 <Button type="button" variant="ghost" onClick={closeForm}>Cancelar</Button>
                 <Button type="submit" loading={save.isPending}>Guardar</Button>
@@ -176,7 +191,11 @@ export default function WarehousesPage() {
             { key: 'code', header: 'Código', render: (w) => <span className="font-mono text-xs">{w.code}</span>, secondary: true, sortValue: (w) => w.code },
             { key: 'name', header: 'Nombre', render: (w) => w.name, primary: true, sortValue: (w) => w.name },
             { key: 'kind', header: 'Tipo', render: (w) => KIND_LABEL[w.kind], sortValue: (w) => KIND_LABEL[w.kind] },
-            { key: 'temp', header: 'Temp. objetivo', align: 'right', render: (w) => (typeof w.targetTemperatureCelsius === 'number' ? `${w.targetTemperatureCelsius} °C` : '—') },
+            { key: 'temp', header: 'Temp. / Capacidad', align: 'right', render: (w) => (
+              w.kind === 'silo'
+                ? (typeof w.capacityLiters === 'number' ? `${w.capacityLiters.toLocaleString('es-AR')} L` : '—')
+                : (typeof w.targetTemperatureCelsius === 'number' ? `${w.targetTemperatureCelsius} °C` : '—')
+            ) },
             { key: 'status', header: 'Estado', render: (w) => (
               <StatusBadge status={w.isActive ? 'success' : 'neutral'}>{w.isActive ? 'Activa' : 'Inactiva'}</StatusBadge>
             )},

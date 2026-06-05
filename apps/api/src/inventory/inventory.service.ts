@@ -18,6 +18,8 @@ import type {
   TraceForward,
   TraceProducer,
   Warehouse,
+  SilosOverview,
+  MilkBatchDto,
 } from '@lasmarias/shared-schemas';
 import { WarehouseEntity } from './warehouse.entity';
 import { InventoryMovementEntity } from './inventory-movement.entity';
@@ -29,6 +31,7 @@ import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import type { Currency } from '@lasmarias/shared-schemas';
 import { resolveAlertLevel } from './stock-alert';
+import { siloFillPercent } from './silo.helpers';
 import {
   buildBackwardTrace,
   buildFefoSuggestion,
@@ -87,6 +90,7 @@ export class InventoryService {
       kind: input.kind,
       targetTemperatureCelsius:
         input.targetTemperatureCelsius != null ? String(input.targetTemperatureCelsius) : null,
+      capacityLiters: input.capacityLiters != null ? String(input.capacityLiters) : null,
       isActive: true,
     });
     return this.warehouseToDto(await this.warehouses.save(w));
@@ -101,6 +105,9 @@ export class InventoryService {
     if (input.targetTemperatureCelsius !== undefined) {
       w.targetTemperatureCelsius =
         input.targetTemperatureCelsius != null ? String(input.targetTemperatureCelsius) : null;
+    }
+    if (input.capacityLiters !== undefined) {
+      w.capacityLiters = input.capacityLiters != null ? String(input.capacityLiters) : null;
     }
     if (typeof input.isActive === 'boolean') w.isActive = input.isActive;
     return this.warehouseToDto(await this.warehouses.save(w));
@@ -392,6 +399,77 @@ export class InventoryService {
     }));
   }
 
+  // Lotes de leche cruda disponibles (product_id IS NULL), opcionalmente de un silo.
+  // Para el selector de origen en elaboración (CLAUDE.md §9). FEFO por vencimiento.
+  async milkBatches(warehouseId?: string): Promise<MilkBatchDto[]> {
+    const qb = this.batches
+      .createQueryBuilder('b')
+      .leftJoinAndSelect('b.warehouse', 'w')
+      .where("b.status = 'activo'")
+      .andWhere('b.product_id IS NULL')
+      .andWhere('b.remaining_quantity > 0');
+    if (warehouseId) qb.andWhere('b.warehouse_id = :warehouseId', { warehouseId });
+    qb.orderBy('b.expiration_date', 'ASC').addOrderBy('b.code', 'ASC');
+    const rows = await qb.getMany();
+    return rows.map((b) => ({
+      id: b.id,
+      code: b.code,
+      remainingQuantity: Number(b.remainingQuantity),
+      unit: b.unit,
+      unitCost: b.unitCost != null ? Number(b.unitCost) : null,
+      warehouseId: b.warehouseId ?? null,
+      warehouseName: b.warehouse?.name ?? null,
+      expirationDate: b.expirationDate?.toISOString(),
+    }));
+  }
+
+  // Nivel de cada silo (Σ litros de leche de sus lotes) + total de la planta. Solo lectura:
+  // los números salen del stock real (remaining_quantity), nunca se cargan a mano (§9).
+  async silos(): Promise<SilosOverview> {
+    const silos = await this.warehouses.find({ where: { kind: 'silo', isActive: true }, order: { name: 'ASC' } });
+
+    // Litros de leche por silo: suma de remaining de lotes sin producto (leche cruda).
+    const rows = await this.batches
+      .createQueryBuilder('b')
+      .select('b.warehouse_id', 'warehouseId')
+      .addSelect('SUM(b.remaining_quantity)', 'liters')
+      .addSelect('COUNT(*)', 'batchCount')
+      .where("b.status IN ('activo', 'en_proceso')")
+      .andWhere('b.product_id IS NULL')
+      .andWhere('b.remaining_quantity > 0')
+      .andWhere('b.warehouse_id IS NOT NULL')
+      .groupBy('b.warehouse_id')
+      .getRawMany();
+    const byWarehouse = new Map<string, { liters: number; batchCount: number }>();
+    for (const r of rows) {
+      byWarehouse.set(r.warehouseId as string, { liters: Number(r.liters), batchCount: Number(r.batchCount) });
+    }
+
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const levels = silos.map((s) => {
+      const agg = byWarehouse.get(s.id) ?? { liters: 0, batchCount: 0 };
+      const capacity = s.capacityLiters != null ? Number(s.capacityLiters) : 0;
+      const current = round2(agg.liters);
+      return {
+        id: s.id,
+        name: s.name,
+        capacityLiters: round2(capacity),
+        currentLiters: current,
+        fillPercent: siloFillPercent(current, capacity),
+        batchCount: agg.batchCount,
+      };
+    });
+
+    const totalCapacity = round2(levels.reduce((a, s) => a + s.capacityLiters, 0));
+    const totalCurrent = round2(levels.reduce((a, s) => a + s.currentLiters, 0));
+    return {
+      silos: levels,
+      totalCapacity,
+      totalCurrent,
+      totalFillPercent: siloFillPercent(totalCurrent, totalCapacity),
+    };
+  }
+
   // FEFO — lotes activos ordenados por vencimiento más próximo.
   async fefoBatchesForProduct(productId: string): Promise<BatchEntity[]> {
     return this.batches.find({
@@ -595,6 +673,7 @@ export class InventoryService {
       name: w.name,
       kind: w.kind,
       targetTemperatureCelsius: w.targetTemperatureCelsius ? Number(w.targetTemperatureCelsius) : undefined,
+      capacityLiters: w.capacityLiters != null ? Number(w.capacityLiters) : undefined,
       isActive: w.isActive,
       createdAt: w.createdAt.toISOString(),
       updatedAt: w.updatedAt.toISOString(),

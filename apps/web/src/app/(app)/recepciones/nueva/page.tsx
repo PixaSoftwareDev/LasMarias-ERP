@@ -99,7 +99,11 @@ export default function NewReceptionPage() {
   });
 
   const producerOptions = useMemo(() => producersQuery.data ?? [], [producersQuery.data]);
-  const warehouseOptions = useMemo(() => warehousesQuery.data ?? [], [warehousesQuery.data]);
+  // La leche va a un SILO (CLAUDE.md §9). Si hay silos definidos, el destino se limita a
+  // ellos; si todavía no se crearon, dejamos todas las ubicaciones para no bloquear la carga.
+  const allWarehouses = useMemo(() => warehousesQuery.data ?? [], [warehousesQuery.data]);
+  const silos = useMemo(() => allWarehouses.filter((w) => w.kind === 'silo'), [allWarehouses]);
+  const warehouseOptions = silos.length > 0 ? silos : allWarehouses;
 
   const defaultDateTime = useMemo(() => nowLocalInput(), []);
 
@@ -191,10 +195,10 @@ export default function NewReceptionPage() {
             </Field>
 
             <Field
-              label="Cámara / sector destino"
+              label={silos.length > 0 ? 'Silo destino' : 'Cámara / sector destino'}
               htmlFor="warehouseId"
               error={errors.warehouseId?.message}
-              hint="Opcional — dónde se guarda el lote de leche cruda"
+              hint={silos.length > 0 ? 'A qué silo entra esta leche. El nivel del silo sube solo.' : 'Opcional — dónde se guarda el lote de leche cruda'}
             >
               <select
                 id="warehouseId"

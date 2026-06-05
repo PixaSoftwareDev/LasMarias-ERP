@@ -21,6 +21,8 @@ import type {
   Warehouse,
   CreateWarehouseInput,
   UpdateWarehouseInput,
+  SilosOverview,
+  MilkBatchDto,
   StockEntryInput,
   DiscardStockInput,
   CountAdjustInput,
@@ -217,6 +219,11 @@ export const inventoryApi = {
     api<Warehouse>('/api/inventory/warehouses', { method: 'POST', body: input }),
   updateWarehouse: (id: string, input: UpdateWarehouseInput) =>
     api<Warehouse>(`/api/inventory/warehouses/${id}`, { method: 'PATCH', body: input }),
+  // Silos de leche: nivel de cada silo + total de planta (CLAUDE.md §9). Solo lectura.
+  silos: () => api<SilosOverview>('/api/inventory/silos'),
+  // Lotes de leche cruda disponibles, opcionalmente de un silo (origen de elaboración).
+  milkBatches: (warehouseId?: string) =>
+    api<MilkBatchDto[]>(`/api/inventory/milk-batches${warehouseId ? `?warehouseId=${warehouseId}` : ''}`),
 };
 
 // "Mi cuenta": el usuario edita sus propios datos y cambia su contraseña.

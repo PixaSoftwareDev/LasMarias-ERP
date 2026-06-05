@@ -13,6 +13,7 @@ import {
   HandCoins,
   Receipt,
   ScrollText,
+  Droplets,
   type LucideIcon,
 } from 'lucide-react';
 import type { UserRole } from '@lasmarias/shared-schemas';
@@ -31,6 +32,7 @@ export const NAV: NavItem[] = [
   { href: '/recepciones',   label: 'Recepción de leche',  icon: Milk,            roles: ['admin', 'gerente', 'operario'] },
   { href: '/produccion',    label: 'Producción',          icon: Factory,         roles: ['admin', 'gerente', 'operario'] },
   { href: '/inventario',    label: 'Stock',               icon: Package,         roles: ['admin', 'gerente', 'operario', 'vendedor'] },
+  { href: '/silos',         label: 'Silos de leche',      icon: Droplets,        roles: ['admin', 'gerente', 'operario'] },
   { href: '/ventas',        label: 'Ventas',              icon: ShoppingCart,    roles: ['admin', 'gerente', 'vendedor'] },
   { href: '/cuentas',       label: 'Cuenta corriente',    icon: Wallet,          roles: ['admin', 'gerente', 'vendedor'] },
   { href: '/pagos-tambos',  label: 'Pagos a tambos',      icon: HandCoins,       roles: ['admin', 'gerente'] },
@@ -50,6 +52,7 @@ const PHASE1_HREFS = new Set<string>([
   '/recetas',
   '/produccion',
   '/inventario',
+  '/silos',
   '/trazabilidad',
   '/ventas',
   '/cuentas',

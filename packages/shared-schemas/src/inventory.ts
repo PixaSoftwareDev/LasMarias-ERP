@@ -19,12 +19,17 @@ export const movementReasonSchema = z.enum([
 ]);
 export type MovementReason = z.infer<typeof movementReasonSchema>;
 
+export const warehouseKindSchema = z.enum(['cold_chamber', 'sector', 'dry_storage', 'maturation', 'silo']);
+export type WarehouseKind = z.infer<typeof warehouseKindSchema>;
+
 export const warehouseSchema = z.object({
   id: uuidSchema,
   code: z.string(),
   name: z.string(),
-  kind: z.enum(['cold_chamber', 'sector', 'dry_storage', 'maturation']),
+  kind: warehouseKindSchema,
   targetTemperatureCelsius: z.number().optional(),
+  // Capacidad en litros — solo aplica a los silos de leche (CLAUDE.md §9).
+  capacityLiters: z.number().positive().optional(),
   isActive: z.boolean(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
@@ -106,16 +111,50 @@ export type CountAdjustInput = z.infer<typeof countAdjustInputSchema>;
 export const createWarehouseInputSchema = z.object({
   code: z.string().min(1).max(20),
   name: z.string().min(1).max(120),
-  kind: z.enum(['cold_chamber', 'sector', 'dry_storage', 'maturation']),
+  kind: warehouseKindSchema,
   targetTemperatureCelsius: z.number().optional(),
+  capacityLiters: z.number().positive('La capacidad tiene que ser mayor a 0').optional(),
 });
 export type CreateWarehouseInput = z.infer<typeof createWarehouseInputSchema>;
 
-// Edición de cámara: mismos campos opcionales + activar/desactivar.
+// Edición de cámara/silo: mismos campos opcionales + activar/desactivar.
 export const updateWarehouseInputSchema = createWarehouseInputSchema
   .partial()
   .extend({ isActive: z.boolean().optional() });
 export type UpdateWarehouseInput = z.infer<typeof updateWarehouseInputSchema>;
+
+// --- Silos de leche (CLAUDE.md §9) — vista de nivel. El silo agrupa lotes; su nivel
+// es la suma de remaining_quantity de los lotes de leche asignados. Solo lectura.
+export const siloLevelSchema = z.object({
+  id: uuidSchema,
+  name: z.string(),
+  capacityLiters: z.number(), // 0 si no se cargó capacidad
+  currentLiters: z.number(),
+  fillPercent: z.number(), // 0–100 (puede pasar 100 si se excede la capacidad)
+  batchCount: z.number().int(),
+});
+export type SiloLevel = z.infer<typeof siloLevelSchema>;
+
+export const silosOverviewSchema = z.object({
+  silos: z.array(siloLevelSchema),
+  totalCapacity: z.number(),
+  totalCurrent: z.number(),
+  totalFillPercent: z.number(),
+});
+export type SilosOverview = z.infer<typeof silosOverviewSchema>;
+
+// Lote de leche cruda disponible (para el selector de origen en elaboración), con su silo.
+export const milkBatchSchema = z.object({
+  id: uuidSchema,
+  code: z.string(),
+  remainingQuantity: z.number(),
+  unit: z.string(),
+  unitCost: z.number().nullable(),
+  warehouseId: uuidSchema.nullable(),
+  warehouseName: z.string().nullable(),
+  expirationDate: isoDateTimeSchema.optional(),
+});
+export type MilkBatchDto = z.infer<typeof milkBatchSchema>;
 
 // --- Trazabilidad bidireccional (CLAUDE.md §4.4)
 // Se construye recorriendo inventory_movements (no parent_batch_id), de modo que

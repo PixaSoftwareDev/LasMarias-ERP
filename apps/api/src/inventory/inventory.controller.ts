@@ -58,6 +58,20 @@ export class InventoryController {
     return this.inventory.consumableBatches(category);
   }
 
+  // Silos de leche: nivel de cada silo + total de la planta (CLAUDE.md §9). Solo lectura.
+  @Get('silos')
+  @Roles('admin', 'gerente', 'operario', 'vendedor')
+  silos() {
+    return this.inventory.silos();
+  }
+
+  // Lotes de leche cruda disponibles, opcionalmente filtrados por silo (origen de elaboración).
+  @Get('milk-batches')
+  @Roles('admin', 'gerente', 'operario')
+  milkBatches(@Query('warehouseId') warehouseId?: string) {
+    return this.inventory.milkBatches(warehouseId || undefined);
+  }
+
   @Get('movements')
   @Roles('admin', 'gerente', 'operario')
   movements() {
