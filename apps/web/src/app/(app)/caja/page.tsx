@@ -307,34 +307,30 @@ export default function CajaPage() {
 
       <FinanceTabs />
 
-      {/* Rango + granularidad. */}
-      <Card>
-        <CardContent className="flex flex-col gap-4 py-4 md:flex-row md:flex-wrap md:items-end md:justify-between">
-          <div className="space-y-1.5">
-            <span className="block text-sm font-medium text-foreground">Período</span>
-            <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-            {!validRange && (
-              <p className="text-xs text-danger">Revisá las fechas: &quot;desde&quot; no puede ser mayor que &quot;hasta&quot;.</p>
-            )}
-          </div>
-          <div className="space-y-1.5">
-            <span className="block text-sm font-medium text-foreground">Agrupar</span>
-            <SegmentedControl
-              label="Agrupar caja"
-              value={granularity}
-              onChange={setGranularity}
-              options={[
-                { value: 'day', label: 'Por día' },
-                { value: 'month', label: 'Por mes' },
-              ]}
-            />
-          </div>
-        </CardContent>
-      </Card>
-
+      {/* Cuentas/bancos: el encabezado de esta pestaña (igual que las otras muestran su contenido directo). */}
       <AccountsPanel />
 
       {showForm && <ExpenseForm onDone={() => setShowForm(false)} />}
+
+      {/* Filtro liviano del período (controla los KPIs y movimientos de abajo). Sin card pesada. */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+        <div className="space-y-1">
+          <span className="block text-xs font-medium text-foreground-muted">Agrupar</span>
+          <SegmentedControl
+            label="Agrupar caja"
+            value={granularity}
+            onChange={setGranularity}
+            options={[
+              { value: 'day', label: 'Por día' },
+              { value: 'month', label: 'Por mes' },
+            ]}
+          />
+        </div>
+      </div>
+      {!validRange && (
+        <p className="text-xs text-danger">Revisá las fechas: &quot;desde&quot; no puede ser mayor que &quot;hasta&quot;.</p>
+      )}
 
       {!validRange ? (
         <EmptyState icon={Banknote} title="Elegí un rango de fechas válido" description='La fecha "desde" debe ser anterior o igual a "hasta".' />
