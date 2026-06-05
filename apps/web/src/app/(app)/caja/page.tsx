@@ -85,7 +85,7 @@ const OTHER_CATEGORY = '__otra__';
 function ExpenseForm({ onDone }: { onDone: () => void }) {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
-  const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: () => financeApi.accounts() });
+  const accountsQuery = useQuery({ queryKey: ['finance-accounts'], queryFn: () => financeApi.accounts() });
   const categoriesQuery = useQuery({ queryKey: ['expense-categories'], queryFn: () => financeApi.categories() });
 
   const [amount, setAmount] = useState('');
@@ -116,7 +116,7 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
       queryClient.invalidateQueries({ queryKey: ['cash-movements'] });
       queryClient.invalidateQueries({ queryKey: ['cash-flow'] });
       queryClient.invalidateQueries({ queryKey: ['expense-categories'] });
-      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['finance-accounts'] });
       queryClient.invalidateQueries({ queryKey: ['home'] });
       toast.success(`Gasto de ${money(m.amount)} cargado.`);
       onDone();
@@ -195,7 +195,7 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
 // Panel de cuentas con su saldo calculado + alta rápida de cuenta.
 function AccountsPanel() {
   const queryClient = useQueryClient();
-  const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: () => financeApi.accounts() });
+  const accountsQuery = useQuery({ queryKey: ['finance-accounts'], queryFn: () => financeApi.accounts() });
   const [showNew, setShowNew] = useState(false);
   const [name, setName] = useState('');
   const [kind, setKind] = useState<AccountKind>('banco');
@@ -204,7 +204,7 @@ function AccountsPanel() {
   const create = useMutation({
     mutationFn: () => financeApi.createAccount({ name: name.trim(), kind, openingBalance: opening ? Number(opening) : 0 }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['finance-accounts'] });
       toast.success('Cuenta creada.');
       setName(''); setOpening(''); setKind('banco'); setShowNew(false);
     },

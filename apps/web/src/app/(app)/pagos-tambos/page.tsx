@@ -62,6 +62,7 @@ function PaymentForm({ producerId, producerName, onDone }: { producerId: string;
       queryClient.invalidateQueries({ queryKey: ['producer-account', producerId] });
       queryClient.invalidateQueries({ queryKey: ['cash-flow'] });
       queryClient.invalidateQueries({ queryKey: ['cash-movements'] });
+      queryClient.invalidateQueries({ queryKey: ['finance-accounts'] });
       toast.success(`Pago de ${money(p.amount)} registrado.`, {
         action: { label: 'Ver en caja', onClick: () => router.push('/caja') },
       });

@@ -43,7 +43,7 @@ function StatCard({
 }
 
 export default function FinanzasPage() {
-  const accountsQ = useQuery({ queryKey: ['accounts'], queryFn: () => financeApi.accounts() });
+  const accountsQ = useQuery({ queryKey: ['finance-accounts'], queryFn: () => financeApi.accounts() });
   const chequesQ = useQuery({ queryKey: ['cheques'], queryFn: () => financeApi.cheques() });
   const clientsAccQ = useQuery({ queryKey: ['accounts-receivable'], queryFn: () => salesApi.accounts() });
   const suppliersAccQ = useQuery({ queryKey: ['supplier-accounts'], queryFn: () => suppliersApi.accounts() });

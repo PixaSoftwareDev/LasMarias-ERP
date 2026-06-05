@@ -171,6 +171,7 @@ function PayForm({ payable, onDone }: { payable: Payable; onDone: () => void }) 
       queryClient.invalidateQueries({ queryKey: ['payables', payable.supplierId] });
       queryClient.invalidateQueries({ queryKey: ['cash-flow'] });
       queryClient.invalidateQueries({ queryKey: ['cash-movements'] });
+      queryClient.invalidateQueries({ queryKey: ['finance-accounts'] });
       toast.success(`Pago de ${money(p.amount)} registrado.`, {
         action: { label: 'Ver en caja', onClick: () => router.push('/caja') },
       });

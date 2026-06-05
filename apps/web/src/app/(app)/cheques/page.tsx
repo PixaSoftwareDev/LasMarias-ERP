@@ -32,7 +32,7 @@ const STATUS_BADGE: Record<ChequeStatus, { variant: Status; label: string }> = {
 
 function NewChequeForm({ onDone }: { onDone: () => void }) {
   const queryClient = useQueryClient();
-  const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: () => financeApi.accounts() });
+  const accountsQuery = useQuery({ queryKey: ['finance-accounts'], queryFn: () => financeApi.accounts() });
   const [kind, setKind] = useState<ChequeKind>('recibido');
   const [number, setNumber] = useState('');
   const [amount, setAmount] = useState('');
@@ -109,7 +109,7 @@ export default function ChequesPage() {
     mutationFn: ({ id, status }: { id: string; status: ChequeStatus }) => financeApi.updateChequeStatus(id, { status }),
     onSuccess: (c) => {
       queryClient.invalidateQueries({ queryKey: ['cheques'] });
-      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['finance-accounts'] });
       queryClient.invalidateQueries({ queryKey: ['cash-movements'] });
       queryClient.invalidateQueries({ queryKey: ['cash-flow'] });
       toast.success(c.status === 'cobrado' ? 'Cheque cobrado: impactó el saldo de la cuenta.' : 'Cheque actualizado.');
