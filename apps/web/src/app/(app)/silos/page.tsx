@@ -92,15 +92,16 @@ function Tank({ silo }: { silo: SiloLevel }) {
 
 // --- Velocímetro semicircular (gauge) del total de la planta. ---
 // Dibujado con polilíneas (sin arcos SVG) para que el render sea siempre correcto.
+// El % y el label van DEBAJO del arco (en HTML), nunca tapados por la aguja.
 function Gauge({ percent, label }: { percent: number; label: string }) {
   const cx = 130;
-  const cy = 130;
-  const r = 104;
+  const cy = 122;
+  const r = 100;
   const clamped = Math.max(0, Math.min(100, percent));
   // Punto sobre el semicírculo superior para una fracción 0–1 (0 = izquierda, 1 = derecha).
-  const point = (frac: number) => {
+  const point = (frac: number, radius = r) => {
     const a = Math.PI * (1 - frac);
-    return [cx + r * Math.cos(a), cy - r * Math.sin(a)] as const;
+    return [cx + radius * Math.cos(a), cy - radius * Math.sin(a)] as const;
   };
   const poly = (from: number, to: number, steps = 64) => {
     const pts: string[] = [];
@@ -111,22 +112,25 @@ function Gauge({ percent, label }: { percent: number; label: string }) {
     }
     return pts.join(' ');
   };
-  const [nx, ny] = point(clamped / 100);
+  // La aguja termina un poco antes del arco para no pisarlo.
+  const [nx, ny] = point(clamped / 100, r - 20);
   const color = clamped < LOW_THRESHOLD ? '#ef4444' : '#059669';
 
   return (
-    <svg width="260" height="160" viewBox="0 0 260 150" role="img" aria-label={`Capacidad total de la planta, ${pct(percent)}`}>
-      {/* Arco de fondo */}
-      <polyline points={poly(0, 1)} fill="none" className="stroke-surface-subtle" strokeWidth="18" strokeLinecap="round" />
-      {/* Arco de valor */}
-      <polyline points={poly(0, clamped / 100)} fill="none" stroke={color} strokeWidth="18" strokeLinecap="round" />
-      {/* Aguja */}
-      <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={color} strokeWidth="3" strokeLinecap="round" />
-      <circle cx={cx} cy={cy} r="7" fill={color} />
-      {/* Texto */}
-      <text x={cx} y={cy - 28} textAnchor="middle" className="fill-foreground" style={{ fontSize: 30, fontWeight: 700 }}>{pct(percent)}</text>
-      <text x={cx} y={cy - 6} textAnchor="middle" className="fill-foreground-muted" style={{ fontSize: 13 }}>{label}</text>
-    </svg>
+    <div className="flex flex-col items-center">
+      <svg width="240" height="136" viewBox="0 0 260 134" role="img" aria-label={`Capacidad total de la planta, ${pct(percent)}`}>
+        {/* Arco de fondo */}
+        <polyline points={poly(0, 1)} fill="none" className="stroke-surface-subtle" strokeWidth="18" strokeLinecap="round" />
+        {/* Arco de valor */}
+        <polyline points={poly(0, clamped / 100)} fill="none" stroke={color} strokeWidth="18" strokeLinecap="round" />
+        {/* Aguja + eje */}
+        <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={color} strokeWidth="3" strokeLinecap="round" />
+        <circle cx={cx} cy={cy} r="7" fill={color} />
+      </svg>
+      {/* Lectura, debajo del arco (fuera del recorrido de la aguja). */}
+      <p className="-mt-2 font-display text-3xl font-bold tracking-tight" style={{ color }}>{pct(percent)}</p>
+      <p className="text-xs uppercase tracking-wide text-foreground-muted">{label}</p>
+    </div>
   );
 }
 
