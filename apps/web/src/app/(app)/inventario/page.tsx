@@ -250,7 +250,7 @@ function StockEntryForm({ onClose }: { onClose: () => void }) {
               const eq = equivalentArs(unitCost, currency, latestRate.data ?? undefined);
               if (eq != null) return <p className="mt-1 text-xs text-foreground-muted">≈ {formatMoney(eq)} /unidad (cotización del día)</p>;
               if (currency !== 'ARS' && Number(unitCost) > 0)
-                return <p className="mt-1 text-xs text-warning-700">Cargá la cotización del día para ver el equivalente en pesos.</p>;
+                return <p className="mt-1 text-xs text-warning">Cargá la cotización del día para ver el equivalente en pesos.</p>;
               return null;
             })()}
           </Field>

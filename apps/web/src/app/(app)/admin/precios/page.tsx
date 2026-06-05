@@ -11,9 +11,11 @@ import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
-import { productsApi, salesApi } from '@/features/api';
+import { productsApi, salesApi, exchangeRatesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
-import type { ClientType } from '@lasmarias/shared-schemas';
+import { formatMoney } from '@/lib/utils';
+import { CURRENCY_OPTIONS, currencySymbol, equivalentArs } from '@/features/currency';
+import type { ClientType, Currency } from '@lasmarias/shared-schemas';
 
 const CLIENT_TYPES: { value: ClientType; label: string }[] = [
   { value: 'minorista', label: 'Minorista' },
@@ -28,12 +30,15 @@ export default function PreciosPage() {
   const [clientType, setClientType] = useState<ClientType>('minorista');
   // precio por productId (string para input controlado).
   const [prices, setPrices] = useState<Record<string, string>>({});
+  // Moneda de toda la lista (ej: la lista mayorista en USD).
+  const [currency, setCurrency] = useState<Currency>('ARS');
 
   const productsQuery = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
   const priceListQuery = useQuery({
     queryKey: ['price-list', clientType],
     queryFn: () => salesApi.priceList(clientType),
   });
+  const latestRate = useQuery({ queryKey: ['exchange-rate-latest'], queryFn: () => exchangeRatesApi.latest() });
 
   const sellableProducts = useMemo(
     () => productsQuery.data?.filter((p) => p.category === 'queso' || p.category === 'subproducto') ?? [],
@@ -46,6 +51,8 @@ export default function PreciosPage() {
     const map: Record<string, string> = {};
     for (const item of priceListQuery.data) map[item.productId] = String(item.unitPrice);
     setPrices(map);
+    // La moneda de la lista la toma del primer ítem cargado (toda la lista comparte moneda).
+    setCurrency(priceListQuery.data[0]?.currency ?? 'ARS');
   }, [priceListQuery.data]);
 
   const save = useMutation({
@@ -53,7 +60,7 @@ export default function PreciosPage() {
       const items = sellableProducts
         .map((p) => ({ productId: p.id, unitPrice: Number(prices[p.id]) }))
         .filter((i) => Number.isFinite(i.unitPrice) && i.unitPrice >= 0 && (prices[i.productId] ?? '') !== '');
-      return salesApi.upsertPriceList({ clientType, items });
+      return salesApi.upsertPriceList({ clientType, currency, items });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['price-list', clientType] });
@@ -94,7 +101,7 @@ export default function PreciosPage() {
       />
 
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="grid grid-cols-1 gap-4 pt-6 sm:grid-cols-2">
           <Field label="Tipo de cliente" htmlFor="clientType">
             <select
               id="clientType"
@@ -107,8 +114,25 @@ export default function PreciosPage() {
               ))}
             </select>
           </Field>
+          <Field label="Moneda de la lista" htmlFor="priceCurrency" hint="Si elegís dólares o euros, al vender se convierte con la cotización del día.">
+            <select
+              id="priceCurrency"
+              className="min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value as Currency)}
+            >
+              {CURRENCY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </Field>
         </CardContent>
       </Card>
+
+      {currency !== 'ARS' && !latestRate.data && !latestRate.isLoading && (
+        <div className="rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-foreground">
+          Esta lista está en moneda extranjera pero todavía no cargaste una cotización.{' '}
+          <Link href="/admin/cotizacion" className="font-medium underline">Cargá el dólar/euro del día</Link> para poder vender con estos precios.
+        </div>
+      )}
 
       <Card>
         <CardHeader><CardTitle>Precios</CardTitle></CardHeader>
@@ -132,19 +156,26 @@ export default function PreciosPage() {
                     <p className="truncate font-medium text-foreground">{p.name}</p>
                     <p className="font-mono text-xs text-foreground-muted">{p.sku} · por {p.unit}</p>
                   </div>
-                  <div className="relative w-36 flex-shrink-0">
-                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-foreground-muted">$</span>
-                    <Input
-                      type="number"
-                      inputMode="decimal"
-                      step="0.01"
-                      min={0}
-                      aria-label={`Precio de ${p.name}`}
-                      placeholder="0"
-                      className="pl-7 text-right"
-                      value={prices[p.id] ?? ''}
-                      onChange={(e) => setPrices((cur) => ({ ...cur, [p.id]: e.target.value }))}
-                    />
+                  <div className="flex-shrink-0 text-right">
+                    <div className="relative w-36">
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-foreground-muted">{currencySymbol(currency)}</span>
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        step="0.01"
+                        min={0}
+                        aria-label={`Precio de ${p.name}`}
+                        placeholder="0"
+                        className="pl-9 text-right"
+                        value={prices[p.id] ?? ''}
+                        onChange={(e) => setPrices((cur) => ({ ...cur, [p.id]: e.target.value }))}
+                      />
+                    </div>
+                    {(() => {
+                      const eq = equivalentArs(prices[p.id] ?? '', currency, latestRate.data ?? undefined);
+                      if (eq != null) return <p className="mt-1 text-xs text-foreground-muted">≈ {formatMoney(eq)}</p>;
+                      return null;
+                    })()}
                   </div>
                 </div>
               ))}

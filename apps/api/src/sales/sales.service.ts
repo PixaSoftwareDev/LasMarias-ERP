@@ -17,6 +17,8 @@ import { ClientEntity } from '../clients/client.entity';
 import { InventoryMovementEntity } from '../inventory/inventory-movement.entity';
 import { ClientsService } from '../clients/clients.service';
 import { ProductsService } from '../products/products.service';
+import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
+import type { Currency } from '@lasmarias/shared-schemas';
 
 // Asignación FEFO pura: dada la cantidad pedida y los lotes (ya ordenados por
 // vencimiento más próximo primero), devuelve cuánto tomar de cada lote y el faltante.
@@ -56,6 +58,7 @@ export class SalesService {
     private readonly orders: Repository<SalesOrderEntity>,
     private readonly clients: ClientsService,
     private readonly products: ProductsService,
+    private readonly exchangeRates: ExchangeRatesService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -80,6 +83,11 @@ export class SalesService {
   // registra el cobro → saldo 0.
   async createOrder(input: CreateSalesOrderInput, userId: string): Promise<SalesOrder> {
     const client = await this.clients.get(input.clientId);
+
+    // Moneda en que se cotizaron los precios + cotización del día (solo registro de
+    // referencia; los importes de las líneas YA llegan convertidos a pesos del front).
+    const orderCurrency = (input.currency as Currency) ?? 'ARS';
+    const exchangeRate = (await this.exchangeRates.rateToArs(orderCurrency, new Date())).toString();
 
     return this.dataSource.transaction(async (manager) => {
       const lines: SalesOrderLine[] = [];
@@ -116,6 +124,8 @@ export class SalesService {
         notes: input.notes ?? null,
         documentType: 'remito',
         paymentMode,
+        currency: orderCurrency,
+        exchangeRate,
         createdById: userId,
       });
       const saved = await manager.getRepository(SalesOrderEntity).save(entity);
@@ -386,6 +396,8 @@ export class SalesService {
       notes: o.notes ?? undefined,
       documentType: 'remito',
       paymentMode: o.paymentMode === 'contado' || o.paymentMode === 'cuenta_corriente' ? o.paymentMode : undefined,
+      currency: (o.currency as Currency) ?? 'ARS',
+      exchangeRate: o.exchangeRate != null ? Number(o.exchangeRate) : undefined,
       createdById: o.createdById,
       createdAt: o.createdAt.toISOString(),
       updatedAt: o.updatedAt.toISOString(),

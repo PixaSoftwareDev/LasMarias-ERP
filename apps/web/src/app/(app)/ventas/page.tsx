@@ -13,12 +13,13 @@ import { DataTable } from '@/components/ui/data-table';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { ReturnDialog } from '@/components/sales/return-dialog';
-import { clientsApi, inventoryApi, productsApi, salesApi } from '@/features/api';
+import { clientsApi, inventoryApi, productsApi, salesApi, exchangeRatesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useConfirm } from '@/hooks/use-confirm';
 import { formatMoney as money, formatDate } from '@/lib/utils';
+import { rateForCurrency } from '@/features/currency';
 import { TableSkeleton } from '@/components/ui/skeleton';
-import type { SalesOrder } from '@lasmarias/shared-schemas';
+import type { SalesOrder, Currency } from '@lasmarias/shared-schemas';
 
 // Condición de pago del despacho. El tipo vive en el schema como enum inline de
 // createSalesOrderInput; lo reflejamos acá para el selector.
@@ -127,11 +128,24 @@ export default function SalesPage() {
     queryFn: () => salesApi.priceList(selectedClient!.type),
     enabled: !!selectedClient,
   });
+  const latestRate = useQuery({ queryKey: ['exchange-rate-latest'], queryFn: () => exchangeRatesApi.latest() });
 
-  const priceByProduct = useMemo(
-    () => new Map((priceListQuery.data ?? []).map((p) => [p.productId, p.unitPrice])),
-    [priceListQuery.data],
-  );
+  // Moneda en que está cargada la lista de precios del cliente (toda la lista comparte moneda).
+  const listCurrency: Currency = priceListQuery.data?.[0]?.currency ?? 'ARS';
+  // Cotización (pesos por unidad) para esa moneda. null si falta cargar la del día.
+  const listRate = rateForCurrency(latestRate.data ?? undefined, listCurrency);
+  const needsRate = listCurrency !== 'ARS' && listRate == null;
+
+  // Precio de lista por producto YA convertido a pesos (la venta trabaja en $). Si la
+  // lista está en moneda extranjera y falta la cotización, no prellenamos (queda null).
+  const priceByProduct = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of priceListQuery.data ?? []) {
+      const ars = listCurrency === 'ARS' ? p.unitPrice : listRate != null ? Math.round(p.unitPrice * listRate * 100) / 100 : null;
+      if (ars != null) m.set(p.productId, ars);
+    }
+    return m;
+  }, [priceListQuery.data, listCurrency, listRate]);
 
   // Al elegir cliente: condición de pago default (sin plazo = contado) y prellenado
   // de precios cuando llega la lista. El precio sigue editable a mano (CLAUDE.md §4.6).
@@ -177,6 +191,7 @@ export default function SalesPage() {
         lines: validLines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitPrice: l.unitPrice })),
         notes: notes || undefined,
         paymentMode,
+        currency: listCurrency,
       }),
     onSuccess: (o) => {
       queryClient.invalidateQueries({ queryKey: ['sales-orders'] });
@@ -215,7 +230,7 @@ export default function SalesPage() {
     }
   }
 
-  const canSave = !!clientId && validLines.length > 0 && !create.isPending;
+  const canSave = !!clientId && validLines.length > 0 && !create.isPending && !needsRate;
 
   // ¿Alguna línea pide más de lo que hay en stock? (venta quedaría con stock negativo)
   const hasOverStock = useMemo(
@@ -312,6 +327,17 @@ export default function SalesPage() {
               </Field>
             </CardContent>
           </Card>
+
+          {selectedClient && listCurrency !== 'ARS' && (
+            <div className={`rounded-lg border px-4 py-3 text-sm ${needsRate ? 'border-warning/40 bg-warning/10 text-foreground' : 'border-border-subtle bg-surface-subtle/60 text-foreground-muted'}`}>
+              {needsRate ? (
+                <>La lista de este cliente está en {listCurrency}, pero todavía no cargaste la cotización del día.{' '}
+                <Link href="/admin/cotizacion" className="font-medium underline">Cargá el dólar/euro</Link> para poder vender.</>
+              ) : (
+                <>Lista en <span className="font-medium text-foreground">{listCurrency}</span> · cotización del día <span className="font-medium text-foreground">{money(listRate!)}</span>. Los precios se muestran ya convertidos a pesos.</>
+              )}
+            </div>
+          )}
 
           <Card>
             <CardHeader className="flex-row items-center justify-between">

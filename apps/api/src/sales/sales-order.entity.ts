@@ -40,6 +40,14 @@ export class SalesOrderEntity extends BaseEntity {
   @Column({ type: 'varchar', length: 20, name: 'payment_mode', nullable: true })
   paymentMode!: string | null;
 
+  // Moneda en que se cotizaron los precios + cotización del día (pesos por unidad).
+  // Los importes están en pesos; esto es solo el registro de referencia. Default ARS / 1.
+  @Column({ type: 'varchar', length: 3, default: 'ARS' })
+  currency!: string;
+
+  @Column({ type: 'numeric', precision: 14, scale: 4, name: 'exchange_rate', default: '1' })
+  exchangeRate!: string;
+
   @Column({ type: 'uuid', name: 'created_by' })
   createdById!: string;
 

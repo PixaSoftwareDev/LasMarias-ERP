@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { isoDateTimeSchema, uuidSchema } from './common';
 import { clientTypeSchema } from './client';
+import { currencySchema } from './money';
 
 // Fase comercial — Despacho de mercadería: cliente + líneas con precio (lista por
 // tipo de cliente, editable a mano) → baja de stock + cargo en cuenta corriente.
@@ -28,6 +29,11 @@ export const salesOrderSchema = z.object({
   documentType: z.enum(['remito']).default('remito'), // remito interno (NO fiscal)
   // Forma de pago con la que se registró la venta (informativo). Nullable en ventas viejas.
   paymentMode: z.enum(['contado', 'cuenta_corriente']).nullable().optional(),
+  // Moneda en que se cotizaron los precios y la cotización (pesos por unidad) usada ese día.
+  // Los importes de las líneas y el total SIEMPRE están en pesos; esto es el registro de
+  // referencia ("se cotizó en USD a $X"). ARS → exchangeRate 1.
+  currency: currencySchema.nullable().optional(),
+  exchangeRate: z.number().positive().nullable().optional(),
   createdById: uuidSchema,
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
@@ -49,6 +55,9 @@ export const createSalesOrderInputSchema = z.object({
   // Condición de pago de este despacho. Si se omite, se usa la del cliente
   // (paymentTermDays). Si es contado, además se registra el cobro → saldo 0.
   paymentMode: z.enum(['contado', 'cuenta_corriente']).optional(),
+  // Moneda en que se cotizaron los precios (los unitPrice ya llegan en pesos convertidos).
+  // El backend registra la cotización del día. Si se omite → ARS.
+  currency: currencySchema.optional(),
 });
 export type CreateSalesOrderInput = z.infer<typeof createSalesOrderInputSchema>;
 
@@ -62,13 +71,17 @@ export const priceListItemSchema = z.object({
   sku: z.string(),
   unit: z.string(),
   unitPrice: z.number().nonnegative(),
+  // Moneda en que está cargado el precio de la lista. Default ARS.
+  currency: currencySchema.optional(),
   isActive: z.boolean(),
 });
 export type PriceListItem = z.infer<typeof priceListItemSchema>;
 
 // Upsert masivo: reemplaza los precios vigentes del tipo de cliente indicado.
+// La lista entera usa una sola moneda (ej: la lista mayorista en USD).
 export const upsertPriceListInputSchema = z.object({
   clientType: clientTypeSchema,
+  currency: currencySchema.optional(),
   items: z
     .array(
       z.object({

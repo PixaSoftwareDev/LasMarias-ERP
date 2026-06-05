@@ -34,12 +34,14 @@ export class PricingService {
     await this.repo.manager.transaction(async (manager) => {
       const repo = manager.getRepository(PriceListItemEntity);
       await repo.update({ clientType: input.clientType, isActive: true }, { isActive: false });
+      const currency = input.currency ?? 'ARS';
       for (const item of input.items) {
         await repo.save(
           repo.create({
             clientType: input.clientType,
             productId: item.productId,
             unitPrice: String(item.unitPrice),
+            currency,
             isActive: true,
           }),
         );
@@ -107,6 +109,7 @@ export class PricingService {
       sku: e.product?.sku ?? '',
       unit: e.product?.unit ?? '',
       unitPrice: Number(e.unitPrice),
+      currency: (e.currency as PriceListItem['currency']) ?? 'ARS',
       isActive: e.isActive,
     };
   }

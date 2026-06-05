@@ -141,6 +141,12 @@ export default function ComprobantePage() {
           </tfoot>
         </table>
 
+        {order.currency && order.currency !== 'ARS' && (
+          <p className="mt-2 text-right text-xs text-foreground-muted">
+            Precios cotizados en {order.currency} · cotización usada {money(order.exchangeRate ?? 0)} por {order.currency}.
+          </p>
+        )}
+
         {order.notes && (
           <div className="mt-6 border-t border-border-subtle pt-4">
             <p className="text-xs uppercase tracking-wide text-foreground-muted">Observaciones</p>

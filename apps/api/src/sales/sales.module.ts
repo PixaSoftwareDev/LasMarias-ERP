@@ -12,6 +12,7 @@ import { ClientsModule } from '../clients/clients.module';
 import { ProductsModule } from '../products/products.module';
 import { ClientEntity } from '../clients/client.entity';
 import { CashMovementEntity } from '../finance/cash-movement.entity';
+import { ExchangeRatesModule } from '../exchange-rates/exchange-rates.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { CashMovementEntity } from '../finance/cash-movement.entity';
     ]),
     ClientsModule,
     ProductsModule,
+    ExchangeRatesModule,
   ],
   providers: [SalesService, PricingService, AccountsService],
   controllers: [SalesController],
