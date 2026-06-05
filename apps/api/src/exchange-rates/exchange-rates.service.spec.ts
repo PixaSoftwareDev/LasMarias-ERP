@@ -4,7 +4,7 @@ import { ExchangeRatesService } from './exchange-rates.service';
 // Mock mínimo del repo: solo lo que usa el servicio (findOne con order DESC).
 function makeService(rows: Array<{ date: string; usd: string; eur: string }>) {
   const repo = {
-    findOne: jest.fn(async (opts: { where?: { date?: unknown } }) => {
+    findOne: jest.fn(async (_opts: { where?: { date?: unknown } }) => {
       // Sin filtro de fecha → "latest". Con filtro → la última <= fecha (ya vienen ordenadas DESC).
       return rows[0] ?? null;
     }),

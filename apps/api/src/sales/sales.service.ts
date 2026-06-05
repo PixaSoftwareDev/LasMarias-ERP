@@ -13,7 +13,6 @@ import { SalesOrderEntity } from './sales-order.entity';
 import { AccountMovementEntity } from './account-movement.entity';
 import { CreditNoteEntity } from './credit-note.entity';
 import { BatchEntity } from '../batches/batch.entity';
-import { ClientEntity } from '../clients/client.entity';
 import { InventoryMovementEntity } from '../inventory/inventory-movement.entity';
 import { ClientsService } from '../clients/clients.service';
 import { ProductsService } from '../products/products.service';
