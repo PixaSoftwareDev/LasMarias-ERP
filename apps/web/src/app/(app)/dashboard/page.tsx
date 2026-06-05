@@ -252,6 +252,30 @@ export default function DashboardPage() {
       {/* Puesta en marcha: guía el primer uso. Se autooculta cuando ya está todo cargado. */}
       {(user?.role === 'admin' || user?.role === 'gerente') && <SetupChecklist />}
 
+      {/* Acciones del día: lo que más se usa, a un toque (sin buscar en el menú). */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          { href: '/recepciones/nueva', label: 'Recibir leche', icon: Milk },
+          { href: '/produccion/nueva', label: 'Producir', icon: Factory },
+          { href: '/ventas', label: 'Vender', icon: ShoppingCart },
+          { href: '/finanzas', label: 'Cobros y pagos', icon: Wallet },
+        ].map((a) => {
+          const Icon = a.icon;
+          return (
+            <Link
+              key={a.href}
+              href={a.href}
+              className="group flex flex-col items-center justify-center gap-2 rounded-xl border border-border-subtle bg-surface-elevated p-5 text-center shadow-sm transition-all hover:border-primary-300 hover:shadow-md"
+            >
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary-50 text-primary-700 transition-colors group-hover:bg-primary-600 group-hover:text-white">
+                <Icon className="h-6 w-6" aria-hidden="true" />
+              </span>
+              <span className="text-sm font-semibold text-foreground">{a.label}</span>
+            </Link>
+          );
+        })}
+      </div>
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* ── Columna principal ── */}
         <div className="flex flex-col gap-6 lg:col-span-2">
