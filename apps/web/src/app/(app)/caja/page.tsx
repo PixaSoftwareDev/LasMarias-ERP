@@ -14,6 +14,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { PageHeader } from '@/components/page-header';
 import { FinanceTabs } from '@/components/finance-tabs';
+import { DateRangeFilter } from '@/components/ui/date-range';
 import { financeApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useConfirm } from '@/hooks/use-confirm';
@@ -309,18 +310,12 @@ export default function CajaPage() {
       {/* Rango + granularidad. */}
       <Card>
         <CardContent className="flex flex-col gap-4 py-4 md:flex-row md:flex-wrap md:items-end md:justify-between">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-            <Field
-              label="Desde"
-              htmlFor="from"
-              className="w-full sm:w-52"
-              error={validRange ? undefined : 'Revisá las fechas: "desde" no puede ser mayor que "hasta".'}
-            >
-              <Input id="from" type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="w-full" />
-            </Field>
-            <Field label="Hasta" htmlFor="to" className="w-full sm:w-52">
-              <Input id="to" type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="w-full" />
-            </Field>
+          <div className="space-y-1.5">
+            <span className="block text-sm font-medium text-foreground">Período</span>
+            <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+            {!validRange && (
+              <p className="text-xs text-danger">Revisá las fechas: &quot;desde&quot; no puede ser mayor que &quot;hasta&quot;.</p>
+            )}
           </div>
           <div className="space-y-1.5">
             <span className="block text-sm font-medium text-foreground">Agrupar</span>

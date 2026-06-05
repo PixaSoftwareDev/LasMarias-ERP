@@ -8,6 +8,7 @@ import type { MilkReception } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { DateRangeFilter } from '@/components/ui/date-range';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge, type Status } from '@/components/ui/status-badge';
@@ -208,11 +209,13 @@ export default function ReceptionsPage() {
               </div>
 
               {/* Rango de fechas */}
-              <div className="flex items-center gap-1.5">
-                <Input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} aria-label="Desde" className="w-40" />
-                <span className="text-sm text-foreground-muted">a</span>
-                <Input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} aria-label="Hasta" className="w-40" />
-              </div>
+              <DateRangeFilter
+                from={from}
+                to={to}
+                onFromChange={setFrom}
+                onToChange={setTo}
+                onClear={from || to ? () => { setFrom(''); setTo(''); } : undefined}
+              />
             </div>
           </div>
 

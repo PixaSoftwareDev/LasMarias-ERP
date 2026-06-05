@@ -19,6 +19,7 @@ import { ApiError } from '@/lib/api-client';
 import { useConfirm } from '@/hooks/use-confirm';
 import { formatMoney as money, formatDate } from '@/lib/utils';
 import { rateForCurrency } from '@/features/currency';
+import { DateRangeFilter } from '@/components/ui/date-range';
 import { TableSkeleton } from '@/components/ui/skeleton';
 import type { SalesOrder, Currency } from '@lasmarias/shared-schemas';
 
@@ -502,17 +503,13 @@ export default function SalesPage() {
             getSearchText={(o: SalesOrder) => `${o.code} ${o.clientName}`}
             searchPlaceholder="Buscar por código o cliente…"
             filters={
-              <>
-                <span className="text-sm text-foreground-muted">Período:</span>
-                <Input type="date" value={fromDate} max={toDate || undefined} onChange={(e) => setFromDate(e.target.value)} aria-label="Desde" className="w-40" />
-                <span className="text-sm text-foreground-muted">a</span>
-                <Input type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} aria-label="Hasta" className="w-40" />
-                {(fromDate || toDate) && (
-                  <Button variant="ghost" size="sm" onClick={() => { setFromDate(''); setToDate(''); }}>
-                    Limpiar
-                  </Button>
-                )}
-              </>
+              <DateRangeFilter
+                from={fromDate}
+                to={toDate}
+                onFromChange={setFromDate}
+                onToChange={setToDate}
+                onClear={() => { setFromDate(''); setToDate(''); }}
+              />
             }
             columns={[
               { key: 'code', header: 'Código', render: (o: SalesOrder) => <span className="font-mono text-xs">{o.code}</span>, secondary: true, sortValue: (o: SalesOrder) => o.code },

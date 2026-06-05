@@ -20,6 +20,7 @@ import { DataTable } from '@/components/ui/data-table';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { PageHeader } from '@/components/page-header';
+import { DateRangeFilter } from '@/components/ui/date-range';
 import { reportsApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { formatMoney as money, formatDate } from '@/lib/utils';
@@ -555,18 +556,12 @@ export default function ReportsPage() {
 
       {/* Rango de fechas compartido por todas las pestañas. */}
       <Card>
-        <CardContent className="flex flex-col gap-4 py-4 sm:flex-row sm:items-end">
-          <Field
-            label="Desde"
-            htmlFor="from"
-            className="sm:w-48"
-            error={validRange ? undefined : 'Revisá las fechas: "desde" no puede ser mayor que "hasta".'}
-          >
-            <Input id="from" type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} />
-          </Field>
-          <Field label="Hasta" htmlFor="to" className="sm:w-48">
-            <Input id="to" type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
-          </Field>
+        <CardContent className="flex flex-col gap-1.5 py-4">
+          <span className="block text-sm font-medium text-foreground">Período</span>
+          <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+          {!validRange && (
+            <p className="text-xs text-danger">Revisá las fechas: &quot;desde&quot; no puede ser mayor que &quot;hasta&quot;.</p>
+          )}
         </CardContent>
       </Card>
 
