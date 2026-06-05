@@ -6,16 +6,17 @@ import { useForm } from 'react-hook-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Boxes, Gauge, History, NotebookPen, Plus, Recycle, Trash2 } from 'lucide-react';
-import type { IngredientBasis, ByproductDestination } from '@lasmarias/shared-schemas';
+import type { IngredientBasis, ByproductDestination, Currency } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/page-header';
-import { productsApi, recipesApi } from '@/features/api';
+import { productsApi, recipesApi, exchangeRatesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
-import { formatDate } from '@/lib/utils';
+import { formatDate, formatMoney } from '@/lib/utils';
+import { CURRENCY_OPTIONS, currencySymbol, equivalentArs } from '@/features/currency';
 
 interface FormValues {
   baseYieldKgPerLiter: number;
@@ -53,6 +54,7 @@ interface IngredientRow {
   unit: 'kg' | 'litro' | 'unidad' | 'gramo';
   basis: IngredientBasis;
   unitCost: string;
+  currency: Currency;
 }
 
 interface ByproductRow {
@@ -64,7 +66,7 @@ interface ByproductRow {
   referenceValuePerUnit: string;
 }
 
-const emptyIngredient: IngredientRow = { productId: '', quantity: '', unit: 'kg', basis: 'per_liter_milk', unitCost: '' };
+const emptyIngredient: IngredientRow = { productId: '', quantity: '', unit: 'kg', basis: 'per_liter_milk', unitCost: '', currency: 'ARS' };
 const emptyByproduct: ByproductRow = {
   name: '',
   expectedYield: '',
@@ -88,6 +90,7 @@ export default function NewRecipeVersionPage() {
 
   const recipe = useQuery({ queryKey: ['recipe', recipeId], queryFn: () => recipesApi.get(recipeId) });
   const products = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
+  const latestRate = useQuery({ queryKey: ['exchange-rate-latest'], queryFn: () => exchangeRatesApi.latest() });
 
   const form = useForm<FormValues>({
     mode: 'onBlur',
@@ -114,13 +117,18 @@ export default function NewRecipeVersionPage() {
       notes: '',
     });
     setIngredients(
-      active.ingredients.map((i) => ({
-        productId: i.productId,
-        quantity: String(i.quantity),
-        unit: i.unit,
-        basis: i.basis,
-        unitCost: i.unitCost == null ? '' : String(i.unitCost),
-      })),
+      active.ingredients.map((i) => {
+        // Precargamos el monto en su moneda original (si se cargó en USD/EUR), no el $ congelado.
+        const original = i.originalUnitCost ?? i.unitCost;
+        return {
+          productId: i.productId,
+          quantity: String(i.quantity),
+          unit: i.unit,
+          basis: i.basis,
+          unitCost: original == null ? '' : String(original),
+          currency: i.currency ?? 'ARS',
+        };
+      }),
     );
     setByproducts(
       active.byproducts.map((b) => ({
@@ -153,6 +161,7 @@ export default function NewRecipeVersionPage() {
           unit: r.unit,
           basis: r.basis,
           unitCost: r.unitCost === '' ? undefined : Number(r.unitCost),
+          currency: r.currency,
         })),
         byproducts: byproducts.map((r) => ({
           name: r.name.trim(),
@@ -315,15 +324,34 @@ export default function NewRecipeVersionPage() {
                       <option value="gramo">gramo</option>
                     </select>
                   </Field>
-                  <Field label="Costo unitario ($)" htmlFor={`ing-cost-${idx}`} hint="Por unidad del insumo (opcional)">
-                    <Input
-                      type="number"
-                      inputMode="decimal"
-                      step="0.01"
-                      placeholder="0"
-                      value={row.unitCost}
-                      onChange={(e) => updateIngredient(idx, { unitCost: e.target.value })}
-                    />
+                  <Field label="Costo unitario" htmlFor={`ing-cost-${idx}`} hint="Por unidad del insumo (opcional)">
+                    <div className="flex gap-2">
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        step="0.01"
+                        prefix={currencySymbol(row.currency)}
+                        placeholder="0"
+                        className="flex-1"
+                        value={row.unitCost}
+                        onChange={(e) => updateIngredient(idx, { unitCost: e.target.value })}
+                      />
+                      <select
+                        className={`${selectClass} w-28 flex-none`}
+                        aria-label="Moneda del costo"
+                        value={row.currency}
+                        onChange={(e) => updateIngredient(idx, { currency: e.target.value as Currency })}
+                      >
+                        {CURRENCY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.value}</option>)}
+                      </select>
+                    </div>
+                    {(() => {
+                      const eq = equivalentArs(row.unitCost, row.currency, latestRate.data ?? undefined);
+                      if (eq != null) return <p className="mt-1 text-xs text-foreground-muted">≈ {formatMoney(eq)} /unidad (cotización del día)</p>;
+                      if (row.currency !== 'ARS' && Number(row.unitCost) > 0)
+                        return <p className="mt-1 text-xs text-warning-700">Cargá la cotización del día para ver el equivalente en pesos.</p>;
+                      return null;
+                    })()}
                   </Field>
                 </div>
               </div>

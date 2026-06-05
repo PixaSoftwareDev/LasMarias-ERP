@@ -11,6 +11,8 @@ import type {
 } from '@lasmarias/shared-schemas';
 import { RecipeEntity, RecipeVersionEntity } from './recipe.entity';
 import { ProductsService } from '../products/products.service';
+import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
+import type { Currency } from '@lasmarias/shared-schemas';
 import {
   computeByproducts,
   computeIngredients,
@@ -25,6 +27,7 @@ export class RecipesService {
     @InjectRepository(RecipeVersionEntity)
     private readonly versions: Repository<RecipeVersionEntity>,
     private readonly products: ProductsService,
+    private readonly exchangeRates: ExchangeRatesService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -149,20 +152,32 @@ export class RecipesService {
   }
 
   private async enrichIngredients(
-    ingredients: { productId: string; quantity: number; unit: string; basis: string; unitCost?: number }[],
+    ingredients: { productId: string; quantity: number; unit: string; basis: string; unitCost?: number; currency?: string }[],
   ) {
+    // El costo se carga en la moneda del insumo (ARS/USD/EUR) y se CONGELA en pesos
+    // con la cotización del día al crear la versión. La calculadora siempre usa $ (CLAUDE.md §5).
+    const when = new Date();
     const enriched = await Promise.all(
       ingredients.map(async (i) => {
         const p = await this.products.get(i.productId);
+        const currency = (i.currency as Currency) ?? 'ARS';
+        const original = i.unitCost ?? 0;
+        const unitCostArs =
+          currency === 'ARS'
+            ? original
+            : Number(await this.exchangeRates.toArs(original, currency, when));
         return {
           productId: i.productId,
           productName: p.name,
           quantity: i.quantity,
           unit: i.unit as 'kg' | 'litro' | 'unidad' | 'gramo',
           basis: i.basis as 'per_liter_milk' | 'per_kg_product' | 'fixed_per_order',
-          // Costo unitario congelado en la versión ($/unidad del insumo). Default 0
+          // Costo unitario congelado en la versión, EN PESOS ($/unidad del insumo). Default 0
           // para tolerar recetas sin costo cargado (CLAUDE.md §4.2).
-          unitCost: i.unitCost ?? 0,
+          unitCost: unitCostArs,
+          // Moneda original cargada + monto original (informativo, para mostrar "USD 0,30 ≈ $300").
+          currency,
+          originalUnitCost: original,
         };
       }),
     );

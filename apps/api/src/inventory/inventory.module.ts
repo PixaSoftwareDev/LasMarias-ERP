@@ -8,6 +8,7 @@ import { BatchesModule } from '../batches/batches.module';
 import { ProductionOrderEntity } from '../production/production-order.entity';
 import { SalesOrderEntity } from '../sales/sales-order.entity';
 import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
+import { ExchangeRatesModule } from '../exchange-rates/exchange-rates.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
       MilkReceptionEntity,
     ]),
     BatchesModule,
+    ExchangeRatesModule,
   ],
   providers: [InventoryService],
   controllers: [InventoryController],

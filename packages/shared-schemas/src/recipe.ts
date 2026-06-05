@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isoDateTimeSchema, uuidSchema } from './common';
+import { currencySchema } from './money';
 
 // CLAUDE.md §4.2 — receta formal por producto con rendimiento base,
 // lista de insumos (per litro de leche, per kg de producto, o fijos),
@@ -18,9 +19,13 @@ export const recipeIngredientSchema = z.object({
   quantity: z.number().nonnegative(),
   unit: z.enum(['kg', 'litro', 'unidad', 'gramo']),
   basis: ingredientBasisSchema,
-  // Costo unitario congelado en la versión de receta ($/unidad del insumo).
-  // Opcional para tolerar recetas viejas sin costo; ausente = 0 (CLAUDE.md §5.5).
+  // Costo unitario congelado en la versión de receta, EN PESOS ($/unidad del insumo).
+  // Si se cargó en USD/EUR, ya viene convertido a $ con la cotización del día. La
+  // calculadora siempre usa este valor en $ (no se toca). Ausente = 0 (CLAUDE.md §5.5).
   unitCost: z.number().nonnegative().optional(),
+  // Moneda original con la que se cargó el costo (informativo) y el monto original.
+  currency: currencySchema.optional(),
+  originalUnitCost: z.number().nonnegative().optional(),
 });
 export type RecipeIngredient = z.infer<typeof recipeIngredientSchema>;
 

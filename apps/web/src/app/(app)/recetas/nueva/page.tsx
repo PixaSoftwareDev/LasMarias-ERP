@@ -6,14 +6,16 @@ import { useForm } from 'react-hook-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Boxes, FileText, Gauge, Plus, Recycle, Trash2 } from 'lucide-react';
-import type { IngredientBasis, ByproductDestination } from '@lasmarias/shared-schemas';
+import type { IngredientBasis, ByproductDestination, Currency } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/page-header';
-import { productsApi, recipesApi } from '@/features/api';
+import { productsApi, recipesApi, exchangeRatesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
+import { formatMoney } from '@/lib/utils';
+import { CURRENCY_OPTIONS, currencySymbol, equivalentArs } from '@/features/currency';
 
 interface FormValues {
   productId: string;
@@ -51,6 +53,7 @@ interface IngredientRow {
   unit: 'kg' | 'litro' | 'unidad' | 'gramo';
   basis: IngredientBasis;
   unitCost: string;
+  currency: Currency;
 }
 
 interface ByproductRow {
@@ -62,7 +65,7 @@ interface ByproductRow {
   referenceValuePerUnit: string;
 }
 
-const emptyIngredient: IngredientRow = { productId: '', quantity: '', unit: 'kg', basis: 'per_liter_milk', unitCost: '' };
+const emptyIngredient: IngredientRow = { productId: '', quantity: '', unit: 'kg', basis: 'per_liter_milk', unitCost: '', currency: 'ARS' };
 const emptyByproduct: ByproductRow = {
   name: '',
   expectedYield: '',
@@ -80,6 +83,8 @@ export default function NewRecipePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const products = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
+  // Última cotización cargada, para mostrar el equivalente en pesos al cargar costos en USD/EUR.
+  const latestRate = useQuery({ queryKey: ['exchange-rate-latest'], queryFn: () => exchangeRatesApi.latest() });
   const form = useForm<FormValues>({
     mode: 'onBlur',
     defaultValues: { baselineFatPercent: 3.4, baselineProteinPercent: 3.2, standardWastePercent: 0 },
@@ -129,6 +134,7 @@ export default function NewRecipePage() {
             unit: r.unit,
             basis: r.basis,
             unitCost: r.unitCost === '' ? undefined : Number(r.unitCost),
+            currency: r.currency,
           })),
           byproducts: byproducts.map((r) => ({
             name: r.name.trim(),
@@ -306,17 +312,35 @@ export default function NewRecipePage() {
                     </select>
                   </Field>
                   <Field label="Costo unitario" htmlFor={`ing-cost-${idx}`} hint="Por unidad del insumo (opcional)" error={shownIng(idx, row, 'unitCost')}>
-                    <Input
-                      type="number"
-                      inputMode="decimal"
-                      step="0.01"
-                      prefix="$"
-                      placeholder="0"
-                      invalid={!!shownIng(idx, row, 'unitCost')}
-                      value={row.unitCost}
-                      onChange={(e) => updateIngredient(idx, { unitCost: e.target.value })}
-                      onBlur={() => touch(`ing-${idx}-unitCost`)}
-                    />
+                    <div className="flex gap-2">
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        step="0.01"
+                        prefix={currencySymbol(row.currency)}
+                        placeholder="0"
+                        className="flex-1"
+                        invalid={!!shownIng(idx, row, 'unitCost')}
+                        value={row.unitCost}
+                        onChange={(e) => updateIngredient(idx, { unitCost: e.target.value })}
+                        onBlur={() => touch(`ing-${idx}-unitCost`)}
+                      />
+                      <select
+                        className={`${selectClass} w-28 flex-none`}
+                        aria-label="Moneda del costo"
+                        value={row.currency}
+                        onChange={(e) => updateIngredient(idx, { currency: e.target.value as Currency })}
+                      >
+                        {CURRENCY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.value}</option>)}
+                      </select>
+                    </div>
+                    {(() => {
+                      const eq = equivalentArs(row.unitCost, row.currency, latestRate.data ?? undefined);
+                      if (eq != null) return <p className="mt-1 text-xs text-foreground-muted">≈ {formatMoney(eq)} /unidad (cotización del día)</p>;
+                      if (row.currency !== 'ARS' && Number(row.unitCost) > 0)
+                        return <p className="mt-1 text-xs text-warning-700">Cargá la cotización del día para ver el equivalente en pesos.</p>;
+                      return null;
+                    })()}
                   </Field>
                 </div>
               </div>

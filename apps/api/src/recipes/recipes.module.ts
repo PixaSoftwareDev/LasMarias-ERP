@@ -4,9 +4,14 @@ import { RecipeEntity, RecipeVersionEntity } from './recipe.entity';
 import { RecipesService } from './recipes.service';
 import { RecipesController } from './recipes.controller';
 import { ProductsModule } from '../products/products.module';
+import { ExchangeRatesModule } from '../exchange-rates/exchange-rates.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([RecipeEntity, RecipeVersionEntity]), ProductsModule],
+  imports: [
+    TypeOrmModule.forFeature([RecipeEntity, RecipeVersionEntity]),
+    ProductsModule,
+    ExchangeRatesModule,
+  ],
   providers: [RecipesService],
   controllers: [RecipesController],
   exports: [RecipesService, TypeOrmModule],

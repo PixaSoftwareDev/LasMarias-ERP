@@ -26,6 +26,8 @@ import { ProductEntity } from '../products/product.entity';
 import { ProductionOrderEntity } from '../production/production-order.entity';
 import { SalesOrderEntity } from '../sales/sales-order.entity';
 import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
+import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
+import type { Currency } from '@lasmarias/shared-schemas';
 import { resolveAlertLevel } from './stock-alert';
 import {
   buildBackwardTrace,
@@ -63,6 +65,7 @@ export class InventoryService {
     private readonly salesOrders: Repository<SalesOrderEntity>,
     @InjectRepository(MilkReceptionEntity)
     private readonly receptions: Repository<MilkReceptionEntity>,
+    private readonly exchangeRates: ExchangeRatesService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -223,6 +226,15 @@ export class InventoryService {
   // Ingreso directo de stock (insumos/envases): crea un lote de entrada. CLAUDE.md §4.4.
   // No es el módulo de compras completo (diferido); es una carga simple para tener stock real.
   async addStockEntry(input: StockEntryInput, userId: string): Promise<InventoryMovement> {
+    // Costo del insumo CONGELADO en pesos: si se cargó en USD/EUR se convierte con la
+    // cotización del día. La calculadora siempre trabaja en $ (CLAUDE.md §5).
+    const currency = (input.currency as Currency) ?? 'ARS';
+    const unitCostArs =
+      input.unitCost == null
+        ? null
+        : currency === 'ARS'
+          ? input.unitCost
+          : Number(await this.exchangeRates.toArs(input.unitCost, currency, new Date()));
     return this.dataSource.transaction(async (manager) => {
       const product = await manager.getRepository(ProductEntity).findOne({ where: { id: input.productId } });
       if (!product) throw new NotFoundException(`Producto ${input.productId} no encontrado`);
@@ -237,7 +249,7 @@ export class InventoryService {
           unit: product.unit,
           status: 'activo',
           warehouseId: input.warehouseId ?? null,
-          unitCost: input.unitCost != null ? String(input.unitCost) : null,
+          unitCost: unitCostArs != null ? String(unitCostArs) : null,
           notes: input.notes ?? 'Ingreso de stock',
         }),
       );

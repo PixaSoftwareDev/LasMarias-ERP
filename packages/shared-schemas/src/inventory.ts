@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isoDateTimeSchema, uuidSchema } from './common';
+import { currencySchema } from './money';
 
 // CLAUDE.md §4.4 — Inventario por lote, FEFO, alertas.
 
@@ -74,6 +75,9 @@ export const stockEntryInputSchema = z.object({
   productId: uuidSchema,
   quantity: z.number().positive('La cantidad tiene que ser mayor a 0'),
   unitCost: z.number().nonnegative().optional(),
+  // Moneda del costo cargado. Si es USD/EUR se convierte a $ con la cotización del día
+  // y se congela en el lote (la calculadora siempre trabaja en pesos). Default ARS.
+  currency: currencySchema.optional(),
   warehouseId: uuidSchema.optional(),
   notes: z.string().max(1000).optional(),
 });

@@ -31,11 +31,12 @@ import { RowActions } from '@/components/ui/row-actions';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge, type Status } from '@/components/ui/status-badge';
-import { inventoryApi, productsApi } from '@/features/api';
+import { inventoryApi, productsApi, exchangeRatesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
-import { formatDateTime } from '@/lib/utils';
+import { formatDateTime, formatMoney } from '@/lib/utils';
 import { labelOr, movementReasonLabel, movementTypeLabel } from '@/lib/labels';
-import type { StockSummary, DiscardReason } from '@lasmarias/shared-schemas';
+import { CURRENCY_OPTIONS, currencySymbol, equivalentArs } from '@/features/currency';
+import type { StockSummary, DiscardReason, Currency } from '@lasmarias/shared-schemas';
 
 type AdjustMode = 'discard' | 'count' | 'min';
 
@@ -179,10 +180,12 @@ function StockEntryForm({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const productsQuery = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
   const warehousesQuery = useQuery({ queryKey: ['warehouses'], queryFn: () => inventoryApi.listWarehouses() });
+  const latestRate = useQuery({ queryKey: ['exchange-rate-latest'], queryFn: () => exchangeRatesApi.latest() });
 
   const [productId, setProductId] = useState('');
   const [quantity, setQuantity] = useState('');
   const [unitCost, setUnitCost] = useState('');
+  const [currency, setCurrency] = useState<Currency>('ARS');
   const [warehouseId, setWarehouseId] = useState('');
 
   const entryProducts = useMemo(
@@ -196,6 +199,7 @@ function StockEntryForm({ onClose }: { onClose: () => void }) {
         productId,
         quantity: Number(quantity),
         unitCost: unitCost ? Number(unitCost) : undefined,
+        currency,
         warehouseId: warehouseId || undefined,
       }),
     onSuccess: () => {
@@ -230,8 +234,25 @@ function StockEntryForm({ onClose }: { onClose: () => void }) {
           <Field label="Cantidad" htmlFor="entry-qty" required>
             <Input id="entry-qty" type="number" inputMode="decimal" step="0.01" min={0} placeholder="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
           </Field>
-          <Field label="Costo unitario ($)" htmlFor="entry-cost" hint="Opcional.">
-            <Input id="entry-cost" type="number" inputMode="decimal" step="0.01" min={0} placeholder="0" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} />
+          <Field label="Costo unitario" htmlFor="entry-cost" hint="Opcional.">
+            <div className="flex gap-2">
+              <Input id="entry-cost" type="number" inputMode="decimal" step="0.01" min={0} prefix={currencySymbol(currency)} placeholder="0" className="flex-1" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} />
+              <select
+                aria-label="Moneda del costo"
+                className="min-h-touch w-24 flex-none rounded-md border border-border bg-surface-elevated px-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value as Currency)}
+              >
+                {CURRENCY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.value}</option>)}
+              </select>
+            </div>
+            {(() => {
+              const eq = equivalentArs(unitCost, currency, latestRate.data ?? undefined);
+              if (eq != null) return <p className="mt-1 text-xs text-foreground-muted">≈ {formatMoney(eq)} /unidad (cotización del día)</p>;
+              if (currency !== 'ARS' && Number(unitCost) > 0)
+                return <p className="mt-1 text-xs text-warning-700">Cargá la cotización del día para ver el equivalente en pesos.</p>;
+              return null;
+            })()}
           </Field>
           <Field label="Cámara / sector" htmlFor="entry-wh" hint="Opcional.">
             <select
