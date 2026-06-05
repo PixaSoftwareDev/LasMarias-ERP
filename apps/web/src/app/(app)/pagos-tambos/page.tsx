@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/data-table';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
+import { FinanceTabs } from '@/components/finance-tabs';
 import { producersApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useConfirm } from '@/hooks/use-confirm';
@@ -193,6 +194,7 @@ export default function PagosTambosPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="Pagos a tambos" description="Lo que le debés a cada tambo por la leche y los pagos que hacés." />
+      <FinanceTabs />
 
       {selected ? (
         <AccountDetail producerId={selected} onBack={() => setSelected(null)} />

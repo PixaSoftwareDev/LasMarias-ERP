@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { PageHeader } from '@/components/page-header';
+import { FinanceTabs } from '@/components/finance-tabs';
 import { financeApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useConfirm } from '@/hooks/use-confirm';
@@ -302,6 +303,8 @@ export default function CajaPage() {
           </Button>
         }
       />
+
+      <FinanceTabs />
 
       {/* Rango + granularidad. */}
       <Card>

@@ -12,6 +12,7 @@ import { DataTable } from '@/components/ui/data-table';
 import { EmptyState } from '@/components/ui/empty-state';
 import { StatusBadge, type Status } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/page-header';
+import { FinanceTabs } from '@/components/finance-tabs';
 import { TableSkeleton } from '@/components/ui/skeleton';
 import { suppliersApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
@@ -284,6 +285,7 @@ export default function CuentasPagarPage() {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader title="Cuentas por pagar" description="Comprobantes a pagar de tus proveedores de insumos." />
+        <FinanceTabs />
         <SupplierDetail
           supplierId={selected.supplierId}
           supplierName={selected.supplierName}
@@ -305,6 +307,7 @@ export default function CuentasPagarPage() {
           </Button>
         }
       />
+      <FinanceTabs />
 
       {showNewSupplier && <NewSupplierForm onDone={() => setShowNewSupplier(false)} />}
 

@@ -9,10 +9,6 @@ import {
   GitBranch,
   BarChart3,
   Wallet,
-  Banknote,
-  HandCoins,
-  Receipt,
-  ScrollText,
   Droplets,
   type LucideIcon,
 } from 'lucide-react';
@@ -59,16 +55,13 @@ export const NAV_GROUPS: NavGroup[] = [
     area: 'Ventas',
     items: [
       { href: '/ventas', label: 'Ventas', icon: ShoppingCart, roles: ['admin', 'gerente', 'vendedor'] },
-      { href: '/cuentas', label: 'Cuenta corriente', short: 'Cuentas', icon: Wallet, roles: ['admin', 'gerente', 'vendedor'] },
     ],
   },
   {
     area: 'Administración',
     items: [
-      { href: '/pagos-tambos', label: 'Pagos a tambos', short: 'Tambos', icon: HandCoins, roles: ['admin', 'gerente'] },
-      { href: '/cuentas-pagar', label: 'Cuentas por pagar', short: 'A pagar', icon: Receipt, roles: ['admin', 'gerente'] },
-      { href: '/caja', label: 'Flujo de caja', short: 'Caja', icon: Banknote, roles: ['admin', 'gerente'] },
-      { href: '/cheques', label: 'Cheques', icon: ScrollText, roles: ['admin', 'gerente'] },
+      // Finanzas unifica cobranzas, pagos, caja/bancos y cheques en un solo módulo.
+      { href: '/finanzas', label: 'Finanzas', icon: Wallet, roles: ['admin', 'gerente'] },
       { href: '/reportes', label: 'Reportes', icon: BarChart3, roles: ['admin', 'gerente'] },
     ],
   },
@@ -93,6 +86,7 @@ const PHASE1_HREFS = new Set<string>([
   '/silos',
   '/trazabilidad',
   '/ventas',
+  '/finanzas',
   '/cuentas',
   '/pagos-tambos',
   '/cuentas-pagar',

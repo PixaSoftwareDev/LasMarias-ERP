@@ -13,6 +13,7 @@ import { DataTable } from '@/components/ui/data-table';
 import { EmptyState } from '@/components/ui/empty-state';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/page-header';
+import { FinanceTabs } from '@/components/finance-tabs';
 import { salesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useConfirm } from '@/hooks/use-confirm';
@@ -291,6 +292,7 @@ export default function CuentasPage() {
           ) : undefined
         }
       />
+      <FinanceTabs />
 
       {selected ? (
         <AccountDetailView clientId={selected} onBack={() => setSelected(null)} />

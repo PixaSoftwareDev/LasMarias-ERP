@@ -12,6 +12,7 @@ import { DataTable } from '@/components/ui/data-table';
 import { EmptyState } from '@/components/ui/empty-state';
 import { StatusBadge, type Status } from '@/components/ui/status-badge';
 import { PageHeader } from '@/components/page-header';
+import { FinanceTabs } from '@/components/finance-tabs';
 import { TableSkeleton } from '@/components/ui/skeleton';
 import { financeApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
@@ -148,6 +149,8 @@ export default function ChequesPage() {
           </Button>
         }
       />
+
+      <FinanceTabs />
 
       {showForm && <NewChequeForm onDone={() => setShowForm(false)} />}
 
