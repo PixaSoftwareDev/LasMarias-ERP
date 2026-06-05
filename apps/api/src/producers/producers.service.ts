@@ -11,6 +11,7 @@ export interface ProducerDto {
   address?: string;
   city?: string;
   agreedPricePerLiter?: number;
+  priceCurrency: 'ARS' | 'USD' | 'EUR';
   notes?: string;
   isActive: boolean;
   createdAt: string;
@@ -24,6 +25,7 @@ export interface CreateProducerInput {
   address?: string;
   city?: string;
   agreedPricePerLiter?: number;
+  priceCurrency?: 'ARS' | 'USD' | 'EUR';
   notes?: string;
 }
 
@@ -34,6 +36,7 @@ export interface UpdateProducerInput {
   address?: string;
   city?: string;
   agreedPricePerLiter?: number;
+  priceCurrency?: 'ARS' | 'USD' | 'EUR';
   notes?: string;
   isActive?: boolean;
 }
@@ -64,6 +67,7 @@ export class ProducersService {
       address: input.address ?? null,
       city: input.city ?? null,
       agreedPricePerLiter: input.agreedPricePerLiter != null ? String(input.agreedPricePerLiter) : null,
+      priceCurrency: input.priceCurrency ?? 'ARS',
       notes: input.notes ?? null,
       isActive: true,
     });
@@ -81,6 +85,7 @@ export class ProducersService {
     if (input.city !== undefined) p.city = input.city;
     if (input.agreedPricePerLiter !== undefined)
       p.agreedPricePerLiter = String(input.agreedPricePerLiter);
+    if (input.priceCurrency !== undefined) p.priceCurrency = input.priceCurrency;
     if (input.notes !== undefined) p.notes = input.notes;
     if (input.isActive !== undefined) p.isActive = input.isActive;
     return this.toDto(await this.repo.save(p));
@@ -95,6 +100,7 @@ export class ProducersService {
       address: e.address ?? undefined,
       city: e.city ?? undefined,
       agreedPricePerLiter: e.agreedPricePerLiter ? Number(e.agreedPricePerLiter) : undefined,
+      priceCurrency: (e.priceCurrency as 'ARS' | 'USD' | 'EUR') ?? 'ARS',
       notes: e.notes ?? undefined,
       isActive: e.isActive,
       createdAt: e.createdAt.toISOString(),

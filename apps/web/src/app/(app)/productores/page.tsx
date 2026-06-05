@@ -15,9 +15,10 @@ import { TableSkeleton } from '@/components/ui/skeleton';
 import { RowActions } from '@/components/ui/row-actions';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/ui/status-badge';
-import { producersApi } from '@/features/api';
+import { producersApi, exchangeRatesApi } from '@/features/api';
 import type { ProducerDto } from '@/features/receptions/types';
 import { ApiError } from '@/lib/api-client';
+import { formatMoney } from '@/lib/utils';
 import { useConfirm } from '@/hooks/use-confirm';
 
 interface FormValues {
@@ -27,10 +28,11 @@ interface FormValues {
   city?: string;
   address?: string;
   agreedPricePerLiter?: number;
+  priceCurrency?: 'ARS' | 'USD' | 'EUR';
   notes?: string;
 }
 
-const emptyDefaults: FormValues = { name: '', taxId: '', phone: '', city: '', address: '', notes: '' };
+const emptyDefaults: FormValues = { name: '', taxId: '', phone: '', city: '', address: '', notes: '', priceCurrency: 'ARS' };
 
 export default function ProducersPage() {
   const queryClient = useQueryClient();
@@ -38,8 +40,17 @@ export default function ProducersPage() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<ProducerDto | null>(null);
   const { data = [], isLoading } = useQuery({ queryKey: ['producers'], queryFn: () => producersApi.list() });
+  const latestRate = useQuery({ queryKey: ['exchange-rate-latest'], queryFn: () => exchangeRatesApi.latest() });
 
   const form = useForm<FormValues>({ mode: 'onBlur', defaultValues: emptyDefaults });
+  const watchPrice = form.watch('agreedPricePerLiter');
+  const watchCurrency = form.watch('priceCurrency') ?? 'ARS';
+  // Equivalente en pesos del precio cargado (si es USD/EUR), con la última cotización.
+  const priceArsEquiv = (() => {
+    if (watchCurrency === 'ARS' || !watchPrice || !latestRate.data) return null;
+    const rate = watchCurrency === 'USD' ? latestRate.data.usd : latestRate.data.eur;
+    return Number(watchPrice) * rate;
+  })();
 
   useEffect(() => {
     if (editing) {
@@ -49,6 +60,7 @@ export default function ProducersPage() {
         phone: editing.phone ?? '',
         city: editing.city ?? '',
         agreedPricePerLiter: editing.agreedPricePerLiter,
+        priceCurrency: editing.priceCurrency ?? 'ARS',
       });
     }
   }, [editing, form]);
@@ -69,6 +81,7 @@ export default function ProducersPage() {
         address: i.address || undefined,
         notes: i.notes || undefined,
         agreedPricePerLiter: i.agreedPricePerLiter ? Number(i.agreedPricePerLiter) : undefined,
+        priceCurrency: i.priceCurrency ?? 'ARS',
       };
       return editing ? producersApi.update(editing.id, body) : producersApi.create(body);
     },
@@ -126,8 +139,27 @@ export default function ProducersPage() {
               <Field label="Teléfono" htmlFor="phone">
                 <Input {...form.register('phone')} />
               </Field>
-              <Field label="Precio acordado ($/litro)" htmlFor="agreedPricePerLiter" hint="Usado para liquidación mensual">
-                <Input type="number" step="0.0001" inputMode="decimal" prefix="$" suffix="/L" placeholder="Ej: 320" {...form.register('agreedPricePerLiter', { valueAsNumber: true })} />
+              <Field
+                label="Precio acordado por litro"
+                htmlFor="agreedPricePerLiter"
+                hint={
+                  priceArsEquiv != null
+                    ? `≈ ${formatMoney(priceArsEquiv)} /L (con la última cotización)`
+                    : 'Precio de la leche. Si es en USD/EUR, se convierte a $ al recibir.'
+                }
+              >
+                <div className="flex gap-2">
+                  <Input type="number" step="0.0001" inputMode="decimal" suffix="/L" placeholder="Ej: 320" className="flex-1" {...form.register('agreedPricePerLiter', { valueAsNumber: true })} />
+                  <select
+                    aria-label="Moneda del precio"
+                    className="min-h-touch w-24 rounded-md border border-border bg-surface-elevated px-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                    {...form.register('priceCurrency')}
+                  >
+                    <option value="ARS">ARS</option>
+                    <option value="USD">USD</option>
+                    <option value="EUR">EUR</option>
+                  </select>
+                </div>
               </Field>
               <Field label="Dirección" htmlFor="address" className="sm:col-span-2">
                 <Input {...form.register('address')} />

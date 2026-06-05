@@ -24,9 +24,13 @@ export class ProducerEntity extends BaseEntity {
   @Column({ type: 'varchar', length: 120, nullable: true })
   city!: string | null;
 
-  // Precio acordado de referencia, $/litro. La liquidación final puede ajustarse por calidad.
+  // Precio acordado de referencia, por litro, en la moneda `priceCurrency`.
   @Column({ type: 'numeric', precision: 12, scale: 4, name: 'agreed_price_per_liter', nullable: true })
   agreedPricePerLiter!: string | null;
+
+  // Moneda del precio acordado (ARS/USD/EUR). Default ARS. Se convierte a $ al recibir.
+  @Column({ type: 'varchar', length: 3, name: 'price_currency', default: 'ARS' })
+  priceCurrency!: string;
 
   @Column({ type: 'text', nullable: true })
   notes!: string | null;

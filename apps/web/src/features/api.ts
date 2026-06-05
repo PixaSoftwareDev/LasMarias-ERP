@@ -60,6 +60,8 @@ import type {
   QualityLimits,
   UpdateCompanySettingsInput,
   UpdateQualityLimitsInput,
+  ExchangeRate,
+  UpsertExchangeRateInput,
 } from '@lasmarias/shared-schemas';
 import type { ProducerDto } from './receptions/types';
 import { api, downloadFile } from '@/lib/api-client';
@@ -91,7 +93,7 @@ export interface UpdateProducerInput {
 
 export const producersApi = {
   list: () => api<ProducerDto[]>('/api/producers'),
-  create: (input: { name: string; agreedPricePerLiter?: number; phone?: string; city?: string }) =>
+  create: (input: { name: string; agreedPricePerLiter?: number; priceCurrency?: 'ARS' | 'USD' | 'EUR'; phone?: string; city?: string }) =>
     api<ProducerDto>('/api/producers', { method: 'POST', body: input }),
   update: (id: string, input: UpdateProducerInput) =>
     api<ProducerDto>(`/api/producers/${id}`, { method: 'PATCH', body: input }),
@@ -110,6 +112,14 @@ export const settingsApi = {
     api<CompanySettings>('/api/settings/company', { method: 'PATCH', body: input }),
   updateQualityLimits: (input: UpdateQualityLimitsInput) =>
     api<QualityLimits>('/api/settings/quality-limits', { method: 'PATCH', body: input }),
+};
+
+// Cotización del día (USD/EUR en pesos). Lectura: cualquiera; alta: admin/gerente.
+export const exchangeRatesApi = {
+  list: () => api<ExchangeRate[]>('/api/exchange-rates'),
+  latest: () => api<ExchangeRate | null>('/api/exchange-rates/latest'),
+  upsert: (input: UpsertExchangeRateInput) =>
+    api<ExchangeRate>('/api/exchange-rates', { method: 'PATCH', body: input }),
 };
 
 export const recipesApi = {

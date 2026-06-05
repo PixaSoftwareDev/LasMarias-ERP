@@ -14,3 +14,4 @@ export * from './home';
 export * from './report';
 export * from './producer-account';
 export * from './settings';
+export * from './money';

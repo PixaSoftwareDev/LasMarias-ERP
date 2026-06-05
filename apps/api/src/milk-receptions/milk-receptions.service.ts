@@ -12,6 +12,8 @@ import { ProducersService } from '../producers/producers.service';
 import { evaluateMilkQuality } from './milk-quality-limits';
 import { formatMilkBatchCode } from './batch-code';
 import { SettingsService } from '../settings/settings.service';
+import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
+import type { Currency } from '@lasmarias/shared-schemas';
 
 @Injectable()
 export class MilkReceptionsService {
@@ -20,6 +22,7 @@ export class MilkReceptionsService {
     private readonly repo: Repository<MilkReceptionEntity>,
     private readonly producers: ProducersService,
     private readonly settings: SettingsService,
+    private readonly exchangeRates: ExchangeRatesService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -74,6 +77,19 @@ export class MilkReceptionsService {
 
     const receivedAt = new Date(input.receivedAt);
 
+    // Costo de la leche en PESOS (convertido desde la moneda del tambo con la cotización
+    // vigente a la fecha de recepción) y CONGELADO en el lote. La calculadora trabaja en $.
+    const milkUnitCostArs =
+      producer.agreedPricePerLiter != null
+        ? String(
+            await this.exchangeRates.toArs(
+              producer.agreedPricePerLiter,
+              (producer.priceCurrency as Currency) ?? 'ARS',
+              receivedAt,
+            ),
+          )
+        : null;
+
     return this.dataSource.transaction(async (manager) => {
       const code = await this.nextBatchCode(manager, receivedAt);
 
@@ -91,8 +107,8 @@ export class MilkReceptionsService {
           status: 'activo' as const,
           parentBatchId: null,
           warehouseId: input.warehouseId ?? null,
-          // Costo de la leche = precio acordado con el tambo ($/litro). Habilita el costeo.
-          unitCost: producer.agreedPricePerLiter,
+          // Costo de la leche en $/litro (ya convertido desde la moneda del tambo). Habilita el costeo.
+          unitCost: milkUnitCostArs,
           notes: `Leche cruda — productor ${producer.name}`,
         });
         const savedBatch = await batchRepo.save(batch);

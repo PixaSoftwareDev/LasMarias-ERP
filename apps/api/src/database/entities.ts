@@ -17,6 +17,7 @@ import { AccountMovementEntity } from '../sales/account-movement.entity';
 import { CreditNoteEntity } from '../sales/credit-note.entity';
 import { CashMovementEntity } from '../finance/cash-movement.entity';
 import { AppSettingEntity } from '../settings/app-setting.entity';
+import { ExchangeRateEntity } from '../exchange-rates/exchange-rate.entity';
 
 export const entities = [
   UserEntity,
@@ -37,4 +38,5 @@ export const entities = [
   CreditNoteEntity,
   CashMovementEntity,
   AppSettingEntity,
+  ExchangeRateEntity,
 ];

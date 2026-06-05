@@ -5,6 +5,7 @@ export interface ProducerDto {
   phone?: string;
   city?: string;
   agreedPricePerLiter?: number;
+  priceCurrency?: 'ARS' | 'USD' | 'EUR';
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
