@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Banknote, Download, Plus, TrendingDown, TrendingUp } from 'lucide-react';
+import { Banknote, Download, Landmark, Plus, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -18,7 +18,10 @@ import { ApiError } from '@/lib/api-client';
 import { useConfirm } from '@/hooks/use-confirm';
 import { formatMoney as money, formatSignedMoney as signedMoney, formatDate as dateFmt } from '@/lib/utils';
 import { TableSkeleton, ChipsSkeleton } from '@/components/ui/skeleton';
-import type { CashMovement, ReportGranularity } from '@lasmarias/shared-schemas';
+import type { CashMovement, ReportGranularity, AccountKind } from '@lasmarias/shared-schemas';
+
+const SELECT_CLASS =
+  'min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600';
 
 // CLAUDE.md §4.7 — Flujo de caja simple. Los cobros de clientes entran como
 // ingresos (los genera el backend); acá se cargan gastos a mano. Roles admin/gerente.
@@ -74,27 +77,44 @@ function KpiChip({
   );
 }
 
-// Form para cargar un gasto (kind=expense). Categoría + monto + fecha + notas.
+const OTHER_CATEGORY = '__otra__';
+
+// Form para cargar un gasto (kind=expense). Cuenta + categoría (catálogo) + monto + fecha.
 function ExpenseForm({ onDone }: { onDone: () => void }) {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
+  const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: () => financeApi.accounts() });
+  const categoriesQuery = useQuery({ queryKey: ['expense-categories'], queryFn: () => financeApi.categories() });
+
   const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState('');
+  const [categoryId, setCategoryId] = useState(''); // value del select: nombre o OTHER_CATEGORY
+  const [otherCategory, setOtherCategory] = useState('');
+  const [accountId, setAccountId] = useState('');
   const [occurredAt, setOccurredAt] = useState(() => new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState('');
 
+  const category = categoryId === OTHER_CATEGORY ? otherCategory.trim() : categoryId;
+
   const create = useMutation({
-    mutationFn: () =>
-      financeApi.createCashMovement({
+    mutationFn: async () => {
+      // Si es una categoría nueva, la agregamos al catálogo antes de usarla.
+      if (categoryId === OTHER_CATEGORY && otherCategory.trim()) {
+        await financeApi.createCategory({ name: otherCategory.trim() }).catch(() => undefined);
+      }
+      return financeApi.createCashMovement({
         kind: 'expense',
         amount: Number(amount),
-        category: category.trim(),
+        category: category,
+        accountId: accountId || undefined,
         occurredAt: occurredAt ? new Date(occurredAt).toISOString() : undefined,
         notes: notes.trim() || undefined,
-      }),
+      });
+    },
     onSuccess: (m) => {
       queryClient.invalidateQueries({ queryKey: ['cash-movements'] });
       queryClient.invalidateQueries({ queryKey: ['cash-flow'] });
+      queryClient.invalidateQueries({ queryKey: ['expense-categories'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
       queryClient.invalidateQueries({ queryKey: ['home'] });
       toast.success(`Gasto de ${money(m.amount)} cargado.`);
       onDone();
@@ -102,12 +122,12 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo cargar el gasto. Probá de nuevo.'),
   });
 
-  const canSave = Number(amount) > 0 && category.trim().length > 0 && !create.isPending;
+  const canSave = Number(amount) > 0 && category.length > 0 && !create.isPending;
 
   async function handleCreate() {
     const ok = await confirm({
       title: 'Confirmar gasto',
-      message: `Vas a cargar un gasto de ${money(Number(amount))} en "${category.trim()}". Va a figurar como egreso en el flujo de caja.`,
+      message: `Vas a cargar un gasto de ${money(Number(amount))} en "${category}". Va a figurar como egreso en el flujo de caja.`,
       confirmLabel: 'Cargar gasto',
     });
     if (ok) create.mutate();
@@ -120,14 +140,21 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Field label="Categoría" htmlFor="exp-category" required hint="Insumos, sueldos, servicios…">
-            <Input
-              id="exp-category"
-              autoFocus
-              placeholder="Insumos"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-            />
+          <Field label="Categoría" htmlFor="exp-category" required hint="Del catálogo, o agregá una nueva.">
+            <select id="exp-category" className={SELECT_CLASS} value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+              <option value="">Elegí una categoría</option>
+              {(categoriesQuery.data ?? []).map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+              <option value={OTHER_CATEGORY}>+ Otra categoría…</option>
+            </select>
+            {categoryId === OTHER_CATEGORY && (
+              <Input className="mt-2" autoFocus placeholder="Nombre de la categoría" value={otherCategory} onChange={(e) => setOtherCategory(e.target.value)} />
+            )}
+          </Field>
+          <Field label="Cuenta" htmlFor="exp-account" hint="De qué caja/banco sale.">
+            <select id="exp-account" className={SELECT_CLASS} value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+              <option value="">Caja (por defecto)</option>
+              {(accountsQuery.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
           </Field>
           <Field label="Monto" htmlFor="exp-amount" required>
             <Input
@@ -146,10 +173,10 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
           <Field label="Fecha" htmlFor="exp-date">
             <Input id="exp-date" type="date" value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} />
           </Field>
+          <Field label="Notas" htmlFor="exp-notes" hint="Opcional." className="sm:col-span-2">
+            <Input id="exp-notes" placeholder="Detalle del gasto" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </Field>
         </div>
-        <Field label="Notas" htmlFor="exp-notes" hint="Opcional.">
-          <Input id="exp-notes" placeholder="Detalle del gasto" value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </Field>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onDone} disabled={create.isPending}>
             Cancelar
@@ -158,6 +185,80 @@ function ExpenseForm({ onDone }: { onDone: () => void }) {
             <Plus className="h-4 w-4" /> Cargar gasto
           </Button>
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Panel de cuentas con su saldo calculado + alta rápida de cuenta.
+function AccountsPanel() {
+  const queryClient = useQueryClient();
+  const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: () => financeApi.accounts() });
+  const [showNew, setShowNew] = useState(false);
+  const [name, setName] = useState('');
+  const [kind, setKind] = useState<AccountKind>('banco');
+  const [opening, setOpening] = useState('');
+
+  const create = useMutation({
+    mutationFn: () => financeApi.createAccount({ name: name.trim(), kind, openingBalance: opening ? Number(opening) : 0 }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      toast.success('Cuenta creada.');
+      setName(''); setOpening(''); setKind('banco'); setShowNew(false);
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo crear la cuenta.'),
+  });
+
+  const accounts = accountsQuery.data ?? [];
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between">
+        <CardTitle className="flex items-center gap-2"><Landmark className="h-5 w-5 text-secondary-700" aria-hidden="true" /> Cuentas</CardTitle>
+        <Button variant="secondary" size="sm" onClick={() => setShowNew((s) => !s)}>
+          <Plus className="h-4 w-4" /> {showNew ? 'Cerrar' : 'Nueva cuenta'}
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {accountsQuery.isLoading ? (
+          <ChipsSkeleton count={2} />
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            {accounts.map((a) => (
+              <div key={a.id} className="flex flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
+                <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-secondary-50 text-secondary-700">
+                  {a.kind === 'banco' ? <Landmark className="h-4 w-4" aria-hidden="true" /> : <Wallet className="h-4 w-4" aria-hidden="true" />}
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-[11px] uppercase tracking-wide text-foreground-muted">{a.name}</span>
+                  <span className={`block font-display text-xl font-bold tracking-tight ${a.balance < 0 ? 'text-danger' : 'text-foreground'}`}>{money(a.balance)}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {showNew && (
+          <div className="grid grid-cols-1 gap-4 rounded-lg border border-border-subtle bg-surface-subtle/40 p-4 sm:grid-cols-4">
+            <Field label="Nombre" htmlFor="acc-name" required>
+              <Input id="acc-name" autoFocus placeholder="Banco Nación" value={name} onChange={(e) => setName(e.target.value)} />
+            </Field>
+            <Field label="Tipo" htmlFor="acc-kind">
+              <select id="acc-kind" className={SELECT_CLASS} value={kind} onChange={(e) => setKind(e.target.value as AccountKind)}>
+                <option value="banco">Banco</option>
+                <option value="caja">Caja</option>
+              </select>
+            </Field>
+            <Field label="Saldo inicial" htmlFor="acc-open" hint="Lo que hay hoy.">
+              <Input id="acc-open" type="number" inputMode="decimal" step="0.01" prefix="$" placeholder="0" value={opening} onChange={(e) => setOpening(e.target.value)} />
+            </Field>
+            <div className="flex items-end">
+              <Button onClick={() => create.mutate()} loading={create.isPending} loadingText="Creando..." disabled={name.trim().length === 0 || create.isPending} className="w-full">
+                Crear cuenta
+              </Button>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -233,6 +334,8 @@ export default function CajaPage() {
         </CardContent>
       </Card>
 
+      <AccountsPanel />
+
       {showForm && <ExpenseForm onDone={() => setShowForm(false)} />}
 
       {!validRange ? (
@@ -297,6 +400,7 @@ export default function CajaPage() {
                   },
                   { key: 'date', header: 'Fecha', secondary: true, render: (m: CashMovement) => dateFmt(m.occurredAt) },
                   { key: 'category', header: 'Categoría', render: (m: CashMovement) => m.category },
+                  { key: 'account', header: 'Cuenta', render: (m: CashMovement) => m.accountName ?? '—' },
                   { key: 'notes', header: 'Notas', render: (m: CashMovement) => m.notes ?? '—' },
                   {
                     key: 'amount',

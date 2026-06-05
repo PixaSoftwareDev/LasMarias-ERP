@@ -7,6 +7,8 @@ import type {
   CreateCashMovementInput,
 } from '@lasmarias/shared-schemas';
 import { CashMovementEntity } from './cash-movement.entity';
+import { AccountEntity } from './account.entity';
+import { AccountsService } from './accounts.service';
 import { computeCashFlow, type CashFlowMovement } from './cash-flow.helpers';
 import { toXlsx } from '../common/xlsx';
 
@@ -15,24 +17,31 @@ export class FinanceService {
   constructor(
     @InjectRepository(CashMovementEntity)
     private readonly repo: Repository<CashMovementEntity>,
+    @InjectRepository(AccountEntity)
+    private readonly accountRepo: Repository<AccountEntity>,
+    private readonly accounts: AccountsService,
   ) {}
 
-  // Carga manual de un movimiento de caja (típicamente un gasto).
+  // Carga manual de un movimiento de caja (típicamente un gasto). Si no se indica
+  // cuenta, va a la cuenta "Caja" por defecto (CLAUDE.md §6, punto 5).
   async createCashMovement(
     input: CreateCashMovementInput,
     userId: string,
   ): Promise<CashMovement> {
+    const accountId = input.accountId ?? (await this.accounts.defaultAccountId());
     const entity = this.repo.create({
       kind: input.kind,
       amount: String(input.amount),
       category: input.category,
+      accountId,
       occurredAt: input.occurredAt ? new Date(input.occurredAt) : new Date(),
       referenceType: null,
       referenceId: null,
       notes: input.notes ?? null,
       createdById: userId,
     });
-    return this.toDto(await this.repo.save(entity));
+    const saved = await this.repo.save(entity);
+    return this.toDto(saved, await this.accountNames());
   }
 
   async listCashMovements(from: Date, to: Date): Promise<CashMovement[]> {
@@ -40,7 +49,14 @@ export class FinanceService {
       where: { occurredAt: Between(from, to) },
       order: { occurredAt: 'DESC' },
     });
-    return rows.map((r) => this.toDto(r));
+    const names = await this.accountNames();
+    return rows.map((r) => this.toDto(r, names));
+  }
+
+  // Mapa id→nombre de cuenta, para no consultar de a una.
+  private async accountNames(): Promise<Map<string, string>> {
+    const accounts = await this.accountRepo.find();
+    return new Map(accounts.map((a) => [a.id, a.name]));
   }
 
   // Flujo de caja agregado (función pura). Bordes de fecha inclusivos.
@@ -68,12 +84,14 @@ export class FinanceService {
     );
   }
 
-  private toDto(e: CashMovementEntity): CashMovement {
+  private toDto(e: CashMovementEntity, names?: Map<string, string>): CashMovement {
     return {
       id: e.id,
       kind: e.kind,
       amount: Number(e.amount),
       category: e.category,
+      accountId: e.accountId,
+      accountName: e.accountId ? names?.get(e.accountId) : undefined,
       occurredAt: e.occurredAt.toISOString(),
       referenceType: e.referenceType,
       referenceId: e.referenceId,

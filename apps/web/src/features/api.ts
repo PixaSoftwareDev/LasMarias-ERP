@@ -48,6 +48,14 @@ import type {
   CashMovement,
   CreateCashMovementInput,
   CashFlowReport,
+  Account,
+  CreateAccountInput,
+  UpdateAccountInput,
+  ExpenseCategory,
+  CreateExpenseCategoryInput,
+  Cheque,
+  CreateChequeInput,
+  UpdateChequeStatusInput,
   ProfitabilityRow,
   HomeSummary,
   HomeCalendar,
@@ -258,6 +266,22 @@ export const financeApi = {
     api<CashFlowReport>(`/api/finance/cash-flow?${reportQs({ from, to, granularity })}`),
   exportCashFlowXlsx: (from: string, to: string, granularity: ReportGranularity) =>
     downloadFile(`/api/finance/export/cash-flow.xlsx?${reportQs({ from, to, granularity })}`, 'flujo-de-caja.xlsx'),
+  // Cuentas (caja/banco) con saldo calculado.
+  accounts: () => api<Account[]>('/api/finance/accounts'),
+  createAccount: (input: CreateAccountInput) =>
+    api<Account>('/api/finance/accounts', { method: 'POST', body: input }),
+  updateAccount: (id: string, input: UpdateAccountInput) =>
+    api<Account>(`/api/finance/accounts/${id}`, { method: 'PATCH', body: input }),
+  // Catálogo de categorías de gasto.
+  categories: () => api<ExpenseCategory[]>('/api/finance/categories'),
+  createCategory: (input: CreateExpenseCategoryInput) =>
+    api<ExpenseCategory>('/api/finance/categories', { method: 'POST', body: input }),
+  // Cheques.
+  cheques: () => api<Cheque[]>('/api/finance/cheques'),
+  createCheque: (input: CreateChequeInput) =>
+    api<Cheque>('/api/finance/cheques', { method: 'POST', body: input }),
+  updateChequeStatus: (id: string, input: UpdateChequeStatusInput) =>
+    api<Cheque>(`/api/finance/cheques/${id}/status`, { method: 'PATCH', body: input }),
 };
 
 // Fase comercial — Home: resumen de KPIs + calendario mensual de eventos.

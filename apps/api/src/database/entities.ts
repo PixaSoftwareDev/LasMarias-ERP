@@ -16,6 +16,9 @@ import { PriceListItemEntity } from '../sales/price-list-item.entity';
 import { AccountMovementEntity } from '../sales/account-movement.entity';
 import { CreditNoteEntity } from '../sales/credit-note.entity';
 import { CashMovementEntity } from '../finance/cash-movement.entity';
+import { AccountEntity } from '../finance/account.entity';
+import { ExpenseCategoryEntity } from '../finance/expense-category.entity';
+import { ChequeEntity } from '../finance/cheque.entity';
 import { AppSettingEntity } from '../settings/app-setting.entity';
 import { ExchangeRateEntity } from '../exchange-rates/exchange-rate.entity';
 import { SupplierEntity } from '../suppliers/supplier.entity';
@@ -40,6 +43,9 @@ export const entities = [
   AccountMovementEntity,
   CreditNoteEntity,
   CashMovementEntity,
+  AccountEntity,
+  ExpenseCategoryEntity,
+  ChequeEntity,
   AppSettingEntity,
   ExchangeRateEntity,
   SupplierEntity,

@@ -18,6 +18,10 @@ export class CashMovementEntity {
   @Column({ type: 'varchar', length: 40 })
   category!: string;
 
+  // Cuenta (caja/banco) a la que impacta. Nullable para datos previos al punto 5.
+  @Column({ type: 'uuid', name: 'account_id', nullable: true })
+  accountId!: string | null;
+
   @Column({ type: 'timestamptz', name: 'occurred_at' })
   occurredAt!: Date;
 

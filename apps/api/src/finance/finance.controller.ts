@@ -3,14 +3,28 @@ import type { Response } from 'express';
 import { z } from 'zod';
 import {
   createCashMovementInputSchema,
+  createAccountInputSchema,
+  updateAccountInputSchema,
+  createExpenseCategoryInputSchema,
+  createChequeInputSchema,
+  updateChequeStatusInputSchema,
   type CreateCashMovementInput,
+  type CreateAccountInput,
+  type UpdateAccountInput,
+  type CreateExpenseCategoryInput,
+  type CreateChequeInput,
+  type UpdateChequeStatusInput,
 } from '@lasmarias/shared-schemas';
+import { Param, ParseUUIDPipe, Patch } from '@nestjs/common';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, type JwtUserPayload } from '../common/decorators/current-user.decorator';
 import { FinanceService } from './finance.service';
+import { AccountsService } from './accounts.service';
+import { ExpenseCategoriesService } from './expense-categories.service';
+import { ChequesService } from './cheques.service';
 
 const cashFlowQuerySchema = z.object({
   from: z.coerce.date(),
@@ -26,7 +40,73 @@ const dateRangeSchema = z.object({
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('finance')
 export class FinanceController {
-  constructor(private readonly finance: FinanceService) {}
+  constructor(
+    private readonly finance: FinanceService,
+    private readonly accounts: AccountsService,
+    private readonly categories: ExpenseCategoriesService,
+    private readonly cheques: ChequesService,
+  ) {}
+
+  // --- Cuentas (caja / banco) ---
+  @Get('accounts')
+  @Roles('admin', 'gerente')
+  listAccounts() {
+    return this.accounts.list();
+  }
+
+  @Post('accounts')
+  @Roles('admin', 'gerente')
+  createAccount(@Body(new ZodValidationPipe(createAccountInputSchema)) body: CreateAccountInput) {
+    return this.accounts.create(body);
+  }
+
+  @Patch('accounts/:id')
+  @Roles('admin', 'gerente')
+  updateAccount(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(updateAccountInputSchema)) body: UpdateAccountInput,
+  ) {
+    return this.accounts.update(id, body);
+  }
+
+  // --- Categorías de gasto ---
+  @Get('categories')
+  @Roles('admin', 'gerente')
+  listCategories() {
+    return this.categories.list();
+  }
+
+  @Post('categories')
+  @Roles('admin', 'gerente')
+  createCategory(@Body(new ZodValidationPipe(createExpenseCategoryInputSchema)) body: CreateExpenseCategoryInput) {
+    return this.categories.create(body);
+  }
+
+  // --- Cheques ---
+  @Get('cheques')
+  @Roles('admin', 'gerente')
+  listCheques() {
+    return this.cheques.list();
+  }
+
+  @Post('cheques')
+  @Roles('admin', 'gerente')
+  createCheque(
+    @Body(new ZodValidationPipe(createChequeInputSchema)) body: CreateChequeInput,
+    @CurrentUser() user: JwtUserPayload,
+  ) {
+    return this.cheques.create(body, user.sub);
+  }
+
+  @Patch('cheques/:id/status')
+  @Roles('admin', 'gerente')
+  updateChequeStatus(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(updateChequeStatusInputSchema)) body: UpdateChequeStatusInput,
+    @CurrentUser() user: JwtUserPayload,
+  ) {
+    return this.cheques.updateStatus(id, body, user.sub);
+  }
 
   @Post('cash-movements')
   @Roles('admin', 'gerente')
