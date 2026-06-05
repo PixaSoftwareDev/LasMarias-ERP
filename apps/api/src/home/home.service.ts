@@ -9,6 +9,8 @@ import { CashMovementEntity } from '../finance/cash-movement.entity';
 import { BatchEntity } from '../batches/batch.entity';
 import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
 import { ProductionOrderEntity } from '../production/production-order.entity';
+import { PayableEntity } from '../suppliers/payable.entity';
+import { SupplierPaymentEntity } from '../suppliers/supplier-payment.entity';
 
 @Injectable()
 export class HomeService {
@@ -25,6 +27,10 @@ export class HomeService {
     private readonly receptions: Repository<MilkReceptionEntity>,
     @InjectRepository(ProductionOrderEntity)
     private readonly production: Repository<ProductionOrderEntity>,
+    @InjectRepository(PayableEntity)
+    private readonly payables: Repository<PayableEntity>,
+    @InjectRepository(SupplierPaymentEntity)
+    private readonly supplierPayments: Repository<SupplierPaymentEntity>,
   ) {}
 
   // Resumen de KPIs comerciales/financieros. Fechas en hora local del servidor.
@@ -153,8 +159,32 @@ export class HomeService {
       });
     }
 
-    // El calendario muestra solo lo que VIENE y hay que atender (cobros por vencer y
-    // vencimientos de lote). Los despachos ya hechos se ven en Ventas, no acá.
+    // Vencimientos de comprobantes a pagar a proveedores (solo los que aún deben saldo).
+    const payables = await this.payables.find({
+      where: { dueDate: Between(start, end) },
+      relations: { supplier: true },
+    });
+    if (payables.length > 0) {
+      const allPayments = await this.supplierPayments.find();
+      const paidByPayable = new Map<string, number>();
+      for (const p of allPayments) {
+        paidByPayable.set(p.payableId, (paidByPayable.get(p.payableId) ?? 0) + Number(p.amount));
+      }
+      for (const pa of payables) {
+        const balance = Number(pa.amount) - (paidByPayable.get(pa.id) ?? 0);
+        if (balance <= 1e-9) continue;
+        events.push({
+          date: this.dateKey(pa.dueDate!),
+          type: 'pago_proveedor',
+          label: `Pagar a ${pa.supplier?.name ?? 'proveedor'} — ${pa.description}`,
+          amount: Math.round(balance * 100) / 100,
+          refId: pa.id,
+        });
+      }
+    }
+
+    // El calendario muestra solo lo que VIENE y hay que atender (cobros por vencer,
+    // vencimientos de lote y pagos a proveedores). Los despachos ya hechos se ven en Ventas.
 
     events.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return { month, events };

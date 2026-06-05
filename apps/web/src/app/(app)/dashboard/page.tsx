@@ -173,6 +173,7 @@ const EVENT_DOT: Record<HomeCalendarEvent['type'], string> = {
   cobro: 'bg-amber-500',
   vencimiento_lote: 'bg-red-500',
   despacho: 'bg-secondary-500',
+  pago_proveedor: 'bg-orange-500',
 };
 
 function nextEvents(events: HomeCalendarEvent[] | undefined): HomeCalendarEvent[] {

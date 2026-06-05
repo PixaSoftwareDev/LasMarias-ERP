@@ -62,6 +62,14 @@ import type {
   UpdateQualityLimitsInput,
   ExchangeRate,
   UpsertExchangeRateInput,
+  Supplier,
+  CreateSupplierInput,
+  UpdateSupplierInput,
+  Payable,
+  CreatePayableInput,
+  SupplierPayment,
+  RegisterSupplierPaymentInput,
+  SupplierBalance,
 } from '@lasmarias/shared-schemas';
 import type { ProducerDto } from './receptions/types';
 import { api, downloadFile } from '@/lib/api-client';
@@ -103,6 +111,23 @@ export const producersApi = {
     api<ProducerAccountDetail>(`/api/producers/${id}/account${month ? `?month=${encodeURIComponent(month)}` : ''}`),
   registerPayment: (input: RegisterProducerPaymentInput) =>
     api<ProducerPayment>('/api/producers/payments', { method: 'POST', body: input }),
+};
+
+// Proveedores de insumos + cuentas por pagar (módulo separado de los tambos).
+export const suppliersApi = {
+  list: (includeInactive = false) =>
+    api<Supplier[]>(`/api/suppliers${includeInactive ? '?includeInactive=true' : ''}`),
+  create: (input: CreateSupplierInput) =>
+    api<Supplier>('/api/suppliers', { method: 'POST', body: input }),
+  update: (id: string, input: UpdateSupplierInput) =>
+    api<Supplier>(`/api/suppliers/${id}`, { method: 'PATCH', body: input }),
+  accounts: () => api<SupplierBalance[]>('/api/suppliers/accounts'),
+  payables: (supplierId?: string) =>
+    api<Payable[]>(`/api/suppliers/payables${supplierId ? `?supplierId=${supplierId}` : ''}`),
+  createPayable: (input: CreatePayableInput) =>
+    api<Payable>('/api/suppliers/payables', { method: 'POST', body: input }),
+  registerPayment: (input: RegisterSupplierPaymentInput) =>
+    api<SupplierPayment>('/api/suppliers/payments', { method: 'POST', body: input }),
 };
 
 // Configuración editable por el admin: datos de la empresa (remito) + límites de calidad.

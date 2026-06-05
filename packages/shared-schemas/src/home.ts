@@ -17,7 +17,7 @@ export const homeSummarySchema = z.object({
 });
 export type HomeSummary = z.infer<typeof homeSummarySchema>;
 
-export const homeEventTypeSchema = z.enum(['cobro', 'vencimiento_lote', 'despacho']);
+export const homeEventTypeSchema = z.enum(['cobro', 'vencimiento_lote', 'despacho', 'pago_proveedor']);
 export type HomeEventType = z.infer<typeof homeEventTypeSchema>;
 
 export const homeCalendarEventSchema = z.object({

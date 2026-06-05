@@ -18,6 +18,9 @@ import { CreditNoteEntity } from '../sales/credit-note.entity';
 import { CashMovementEntity } from '../finance/cash-movement.entity';
 import { AppSettingEntity } from '../settings/app-setting.entity';
 import { ExchangeRateEntity } from '../exchange-rates/exchange-rate.entity';
+import { SupplierEntity } from '../suppliers/supplier.entity';
+import { PayableEntity } from '../suppliers/payable.entity';
+import { SupplierPaymentEntity } from '../suppliers/supplier-payment.entity';
 
 export const entities = [
   UserEntity,
@@ -39,4 +42,7 @@ export const entities = [
   CashMovementEntity,
   AppSettingEntity,
   ExchangeRateEntity,
+  SupplierEntity,
+  PayableEntity,
+  SupplierPaymentEntity,
 ];
