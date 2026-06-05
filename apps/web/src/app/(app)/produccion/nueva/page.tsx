@@ -102,8 +102,10 @@ export default function NewProductionPage() {
       }),
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ['production-orders'] });
-      toast.success(`Orden ${r.code} abierta`);
-      router.push('/produccion');
+      // Continuidad del pipeline: la orden recién abierta hay que CERRARLA cargando la
+      // producción real. Llevamos directo a ese paso en vez de a la lista (CLAUDE.md §7).
+      toast.success(`Orden ${r.code} abierta — ahora cargá la producción`);
+      router.push(`/produccion/${r.id}/cerrar`);
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo abrir la orden. Probá de nuevo.'),
   });

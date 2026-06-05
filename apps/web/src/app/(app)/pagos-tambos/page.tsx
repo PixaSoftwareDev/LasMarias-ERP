@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, HandCoins, Milk } from 'lucide-react';
@@ -43,6 +44,7 @@ const SELECT_CLASS =
 function PaymentForm({ producerId, producerName, onDone }: { producerId: string; producerName: string; onDone: () => void }) {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
+  const router = useRouter();
   const [amount, setAmount] = useState('');
   const [occurredAt, setOccurredAt] = useState(() => new Date().toISOString().slice(0, 10));
   const [method, setMethod] = useState('');
@@ -60,7 +62,9 @@ function PaymentForm({ producerId, producerName, onDone }: { producerId: string;
       queryClient.invalidateQueries({ queryKey: ['producer-account', producerId] });
       queryClient.invalidateQueries({ queryKey: ['cash-flow'] });
       queryClient.invalidateQueries({ queryKey: ['cash-movements'] });
-      toast.success(`Pago de ${money(p.amount)} registrado.`);
+      toast.success(`Pago de ${money(p.amount)} registrado.`, {
+        action: { label: 'Ver en caja', onClick: () => router.push('/caja') },
+      });
       onDone();
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo registrar el pago.'),

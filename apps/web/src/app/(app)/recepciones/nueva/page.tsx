@@ -84,9 +84,9 @@ export default function NewReceptionPage() {
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ['receptions'] });
       if (r.status === 'aceptada') {
-        // Confirmación visual fuerte para planta (CLAUDE.md §5.4): check verde a pantalla completa.
+        // Confirmación visual fuerte para planta (CLAUDE.md §5.4): check verde a pantalla
+        // completa con el SIGUIENTE PASO a mano (no se vuelve solo a la lista muda).
         setSavedCode(r.code);
-        setTimeout(() => router.push('/recepciones'), 1300);
       } else {
         toast.warning(`Recepción ${r.code} quedó bloqueada: ${r.blockedReason}`);
         router.push('/recepciones');
@@ -131,6 +131,14 @@ export default function NewReceptionPage() {
           <CheckCircle2 className="h-24 w-24" aria-hidden="true" />
           <p className="font-display text-3xl font-semibold">¡Recepción guardada!</p>
           <p className="text-lg text-primary-100">Lote {savedCode}</p>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <Button variant="secondary" onClick={() => router.push('/produccion/nueva')}>
+              Abrir producción con esta leche
+            </Button>
+            <Button variant="ghost" className="text-white hover:bg-white/10" onClick={() => router.push('/recepciones')}>
+              Ver recepciones
+            </Button>
+          </div>
         </div>
       )}
       <PageHeader

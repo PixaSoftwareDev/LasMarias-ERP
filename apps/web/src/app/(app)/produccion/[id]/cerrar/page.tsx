@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, CheckCircle2, GitBranch, Lock } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, GitBranch, Lock, Package, ShoppingCart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -143,6 +143,23 @@ export default function CloseProductionPage({ params }: { params: { id: string }
             </CardContent>
           </Card>
         )}
+
+        {/* Siguiente paso del pipeline: el producto ya está en stock, listo para vender. */}
+        <Card className="border-primary-200 bg-primary-50/40">
+          <CardContent className="flex flex-col gap-3 pt-6 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-foreground">
+              <span className="font-medium">¿Qué sigue?</span> El producto ya entró al stock. Podés despacharlo cuando quieras.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant="secondary">
+                <Link href="/inventario"><Package className="h-4 w-4" /> Ver en stock</Link>
+              </Button>
+              <Button asChild>
+                <Link href="/ventas"><ShoppingCart className="h-4 w-4" /> Vender</Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ShoppingCart, Plus, Trash2, Truck, FileText, Undo2, TriangleAlert, PackageCheck } from 'lucide-react';
@@ -96,6 +97,7 @@ function FefoPreview({ productId, quantity }: { productId: string; quantity: num
 
 export default function SalesPage() {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const confirm = useConfirm();
   const ordersQuery = useQuery({ queryKey: ['sales-orders'], queryFn: () => salesApi.listOrders() });
   const clientsQuery = useQuery({ queryKey: ['clients'], queryFn: () => clientsApi.list() });
@@ -198,7 +200,12 @@ export default function SalesPage() {
       queryClient.invalidateQueries({ queryKey: ['stock'] });
       queryClient.invalidateQueries({ queryKey: ['accounts'] });
       const cobro = paymentMode === 'contado' ? 'Cobrado al contado.' : 'Quedó en cuenta corriente.';
-      toast.success(`Venta ${o.code} registrada · ${money(o.total)}. Se descontó el stock. ${cobro}`);
+      // Si quedó en cuenta corriente, ofrecemos saltar a la cuenta del cliente (siguiente paso).
+      toast.success(`Venta ${o.code} registrada · ${money(o.total)}. Se descontó el stock. ${cobro}`,
+        paymentMode === 'cuenta_corriente'
+          ? { action: { label: 'Ver cuenta', onClick: () => router.push('/cuentas') } }
+          : undefined,
+      );
       resetForm();
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo registrar la venta. Probá de nuevo.'),
@@ -286,6 +293,19 @@ export default function SalesPage() {
 
       {showForm && (
         <>
+          {/* Avisos con link cuando falta un dato base (no dejamos al usuario varado). */}
+          {!clientsQuery.isLoading && (clientsQuery.data?.filter((c) => c.isActive).length ?? 0) === 0 && (
+            <div className="rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-foreground">
+              No tenés clientes cargados.{' '}
+              <Link href="/clientes" className="font-medium underline">Cargá un cliente</Link> para poder vender.
+            </div>
+          )}
+          {!productsQuery.isLoading && sellableProducts.length === 0 && (
+            <div className="rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-foreground">
+              No hay productos para vender (quesos o subproductos).{' '}
+              <Link href="/productos" className="font-medium underline">Cargá un producto</Link> primero.
+            </div>
+          )}
           <Card>
             <CardHeader><CardTitle>Cliente</CardTitle></CardHeader>
             <CardContent className="space-y-4">
