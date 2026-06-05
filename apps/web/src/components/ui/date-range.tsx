@@ -1,11 +1,10 @@
 'use client';
 
-import { CalendarDays, X } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
-// Filtro de rango de fechas (Desde → Hasta) en UNA sola pastilla, en vez de dos cajas
-// sueltas con un "a" en el medio (se veían cramped). Ícono de calendario + dos fechas
-// borderless adentro + botón limpiar. Consistente en toda la app (CLAUDE.md §7).
+// Filtro de rango de fechas: dos campos "Desde" / "Hasta" con label arriba (CLAUDE.md §7).
+// Simple y consistente: sin íconos extra (el date input ya trae el suyo) ni separadores.
 interface Props {
   from: string;
   to: string;
@@ -15,44 +14,36 @@ interface Props {
   className?: string;
 }
 
-const dateInput =
-  'min-w-0 bg-transparent text-sm text-foreground [color-scheme:light] focus:outline-none';
-
 export function DateRangeFilter({ from, to, onFromChange, onToChange, onClear, className }: Props) {
   return (
-    <div
-      className={cn(
-        'inline-flex min-h-touch items-center gap-1.5 rounded-lg border border-border bg-surface-elevated px-3 py-1.5',
-        'focus-within:ring-2 focus-within:ring-primary-600 focus-within:ring-offset-1',
-        className,
-      )}
-    >
-      <CalendarDays className="h-4 w-4 flex-shrink-0 text-foreground-muted" aria-hidden="true" />
-      <input
-        type="date"
-        aria-label="Desde"
-        value={from}
-        max={to || undefined}
-        onChange={(e) => onFromChange(e.target.value)}
-        className={cn(dateInput, 'w-[7.25rem]')}
-      />
-      <span className="flex-shrink-0 text-foreground-subtle" aria-hidden="true">→</span>
-      <input
-        type="date"
-        aria-label="Hasta"
-        value={to}
-        min={from || undefined}
-        onChange={(e) => onToChange(e.target.value)}
-        className={cn(dateInput, 'w-[7.25rem]')}
-      />
+    <div className={cn('flex flex-wrap items-end gap-3', className)}>
+      <label className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-foreground-muted">Desde</span>
+        <Input
+          type="date"
+          value={from}
+          max={to || undefined}
+          onChange={(e) => onFromChange(e.target.value)}
+          className="w-[9.5rem]"
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-foreground-muted">Hasta</span>
+        <Input
+          type="date"
+          value={to}
+          min={from || undefined}
+          onChange={(e) => onToChange(e.target.value)}
+          className="w-[9.5rem]"
+        />
+      </label>
       {onClear && (from || to) && (
         <button
           type="button"
           onClick={onClear}
-          aria-label="Limpiar fechas"
-          className="ml-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-foreground-muted transition-colors hover:bg-surface-subtle hover:text-foreground"
+          className="min-h-touch text-sm font-medium text-foreground-muted underline-offset-2 transition-colors hover:text-foreground hover:underline"
         >
-          <X className="h-3.5 w-3.5" aria-hidden="true" />
+          Limpiar
         </button>
       )}
     </div>
