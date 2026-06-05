@@ -63,12 +63,21 @@ async function main() {
   await login();
   console.log(`[seed:demo] Sesión iniciada como admin (operatorId=${operatorId || 's/d'}).`);
 
+  // 0) COTIZACIÓN DEL DÍA (para precios en USD/EUR) ----------------------------
+  console.log('→ Cotización del día');
+  const todayKey = new Date().toISOString().slice(0, 10);
+  await req('PATCH', '/api/exchange-rates', { date: todayKey, usd: 1000, eur: 1100 });
+
   // 1) CÁMARAS ----------------------------------------------------------------
   console.log('→ Cámaras');
   const warehouseSeeds = [
     { code: 'CF-01', name: 'Cámara de frío 1', kind: 'cold_chamber', targetTemperatureCelsius: 4 },
     { code: 'CF-02', name: 'Cámara de frío 2', kind: 'cold_chamber', targetTemperatureCelsius: 3 },
     { code: 'MAD-01', name: 'Sala de maduración', kind: 'maturation', targetTemperatureCelsius: 12 },
+    // Silos de leche con capacidad (CLAUDE.md §9): la leche recibida se reparte acá.
+    { code: 'SILO-A', name: 'Silo A', kind: 'silo', capacityLiters: 15000 },
+    { code: 'SILO-B', name: 'Silo B', kind: 'silo', capacityLiters: 15000 },
+    { code: 'SILO-C', name: 'Silo C', kind: 'silo', capacityLiters: 10000 },
   ];
   const existingWh = (await get<any[]>('/api/inventory/warehouses?all=true')) ?? [];
   for (const w of warehouseSeeds) {
@@ -77,6 +86,10 @@ async function main() {
   const warehouses = (await get<any[]>('/api/inventory/warehouses?all=true')) ?? [];
   const camaraFrio = warehouses.find((w) => w.code === 'CF-01')?.id;
   const camaraMad = warehouses.find((w) => w.code === 'MAD-01')?.id;
+  // Ids de los silos sembrados, para repartir las recepciones entre ellos.
+  const siloIds = ['SILO-A', 'SILO-B', 'SILO-C']
+    .map((c) => warehouses.find((w) => w.code === c)?.id)
+    .filter((x): x is string => !!x);
 
   // 2) PRODUCTOS --------------------------------------------------------------
   console.log('→ Productos');
@@ -272,7 +285,8 @@ async function main() {
       declaredLiters: declared,
       liters,
       quality: goodQuality(),
-      warehouseId: camaraFrio,
+      // La leche entra a un silo (rota entre los silos sembrados); si no hubiera, a la cámara.
+      warehouseId: siloIds.length ? pick(siloIds, i) : camaraFrio,
     });
     if (rec?.batchId) milkBatches.push({ batchId: rec.batchId, liters: rec.liters ?? liters });
   }
@@ -405,7 +419,71 @@ async function main() {
   }
   console.log(`   ${tamboPayments} pagos a tambos.`);
 
-  console.log('[seed:demo] ✓ Listo. Entrá a la app: producción, costos, stock, cuentas, caja y reportes poblados.');
+  // 13) PROVEEDORES DE INSUMOS + CUENTAS POR PAGAR (punto 4) -------------------
+  console.log('→ Proveedores y cuentas por pagar');
+  const supplierSeeds = [
+    { name: 'Insumos del Sur', paymentTermDays: 30, city: 'Pergamino' },
+    { name: 'Envases Pampa', paymentTermDays: 15, city: 'Junín' },
+  ];
+  const existingSuppliers = (await get<any[]>('/api/suppliers')) ?? [];
+  for (const s of supplierSeeds) {
+    if (!existingSuppliers.some((x) => x.name === s.name)) await post('/api/suppliers', s);
+  }
+  const suppliers = (await get<any[]>('/api/suppliers')) ?? [];
+  const payableSeeds = [
+    { name: 'Insumos del Sur', description: 'Factura A-0001 — fermentos y cuajo', amount: 185000, pay: 0.5 },
+    { name: 'Insumos del Sur', description: 'Factura A-0002 — sal entrefina', amount: 92000, pay: 0 },
+    { name: 'Envases Pampa', description: 'Factura B-0145 — bolsas y film', amount: 240000, pay: 0 },
+  ];
+  let payablesCreated = 0;
+  for (const ps of payableSeeds) {
+    const sup = suppliers.find((s) => s.name === ps.name);
+    if (!sup) continue;
+    const created = await post<any>('/api/suppliers/payables', {
+      supplierId: sup.id,
+      description: ps.description,
+      amount: ps.amount,
+    });
+    if (!created) continue;
+    payablesCreated++;
+    if (ps.pay > 0) {
+      await post('/api/suppliers/payments', {
+        payableId: created.id,
+        amount: Math.round(ps.amount * ps.pay),
+        method: 'Transferencia',
+      });
+    }
+  }
+  console.log(`   ${payablesCreated} comprobantes a pagar.`);
+
+  // 14) CUENTAS (banco) + CHEQUES (punto 5) -----------------------------------
+  console.log('→ Cuentas y cheques');
+  const existingAccounts = (await get<any[]>('/api/finance/accounts')) ?? [];
+  if (!existingAccounts.some((a) => a.name === 'Banco Nación')) {
+    await post('/api/finance/accounts', { name: 'Banco Nación', kind: 'banco', openingBalance: 500000 });
+  }
+  const chequeSeeds = [
+    { kind: 'recibido', number: '00012345', amount: 120000, counterparty: 'Supermercado El Ahorro', cobrar: true },
+    { kind: 'recibido', number: '00012346', amount: 85000, counterparty: 'Mayorista Sur SA', cobrar: false },
+    { kind: 'propio', number: '00098001', amount: 150000, counterparty: 'Insumos del Sur', cobrar: false },
+  ];
+  const existingCheques = (await get<any[]>('/api/finance/cheques')) ?? [];
+  let chequesCreated = 0;
+  for (const ch of chequeSeeds) {
+    if (existingCheques.some((x) => x.number === ch.number)) continue;
+    const created = await post<any>('/api/finance/cheques', {
+      kind: ch.kind,
+      number: ch.number,
+      amount: ch.amount,
+      counterparty: ch.counterparty,
+    });
+    if (!created) continue;
+    chequesCreated++;
+    if (ch.cobrar) await req('PATCH', `/api/finance/cheques/${created.id}/status`, { status: 'cobrado' });
+  }
+  console.log(`   ${chequesCreated} cheques.`);
+
+  console.log('[seed:demo] ✓ Listo. Entrá a la app: silos, producción, costos, stock, cuentas, caja, cheques y reportes poblados.');
 }
 
 main().catch((e) => {
