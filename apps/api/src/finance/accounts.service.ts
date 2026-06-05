@@ -27,11 +27,16 @@ export class AccountsService {
   async list(): Promise<Account[]> {
     const accounts = await this.accounts.find({ order: { name: 'ASC' } });
     const movements = await this.movements.find();
+    // Cuenta por defecto: los movimientos sin cuenta (los que generan otros módulos —
+    // pagos a tambos/proveedores, cobros contado — y los previos al punto 5) se imputan
+    // a "Caja", para que ninguna plata quede sin reflejarse en un saldo.
+    const caja = accounts.find((a) => a.name === 'Caja') ?? accounts[0];
     const deltaByAccount = new Map<string, number>();
     for (const m of movements) {
-      if (!m.accountId) continue;
+      const accountId = m.accountId ?? caja?.id;
+      if (!accountId) continue;
       const delta = (m.kind === 'income' ? 1 : -1) * Number(m.amount);
-      deltaByAccount.set(m.accountId, (deltaByAccount.get(m.accountId) ?? 0) + delta);
+      deltaByAccount.set(accountId, (deltaByAccount.get(accountId) ?? 0) + delta);
     }
     return accounts.map((a) => this.toDto(a, deltaByAccount.get(a.id) ?? 0));
   }
