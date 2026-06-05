@@ -24,7 +24,7 @@ export function DateRangeFilter({ from, to, onFromChange, onToChange, onClear, c
           value={from}
           max={to || undefined}
           onChange={(e) => onFromChange(e.target.value)}
-          className="w-[9.5rem]"
+          className="w-44"
         />
       </label>
       <label className="flex flex-col gap-1">
@@ -34,7 +34,7 @@ export function DateRangeFilter({ from, to, onFromChange, onToChange, onClear, c
           value={to}
           min={from || undefined}
           onChange={(e) => onToChange(e.target.value)}
-          className="w-[9.5rem]"
+          className="w-44"
         />
       </label>
       {onClear && (from || to) && (

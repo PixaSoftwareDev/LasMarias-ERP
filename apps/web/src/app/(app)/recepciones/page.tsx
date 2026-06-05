@@ -190,23 +190,20 @@ export default function ReceptionsPage() {
               />
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              {/* Chips de estado */}
-              <div className="flex gap-1 rounded-lg border border-border-subtle bg-surface-subtle/40 p-1">
-                {STATUS_CHIPS.map((c) => (
-                  <button
-                    key={c.value}
-                    type="button"
-                    onClick={() => setStatus(c.value)}
-                    className={cn(
-                      'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-                      status === c.value ? 'bg-primary-600 text-white shadow-sm' : 'text-foreground-muted hover:text-foreground',
-                    )}
-                  >
-                    {c.label}
-                  </button>
-                ))}
-              </div>
+            <div className="flex flex-wrap items-end gap-4">
+              {/* Estado: un solo desplegable (en vez de tres botones al lado). */}
+              <label className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-foreground-muted">Estado</span>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as StatusFilter)}
+                  className="min-h-touch w-44 rounded-md border border-border bg-surface-elevated px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                >
+                  {STATUS_CHIPS.map((c) => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+              </label>
 
               {/* Rango de fechas */}
               <DateRangeFilter
