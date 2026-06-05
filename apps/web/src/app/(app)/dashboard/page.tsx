@@ -22,6 +22,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { MonthCalendar } from '@/components/month-calendar';
+import { SetupChecklist } from '@/components/setup-checklist';
 import { useAuth } from '@/hooks/use-auth';
 import { homeApi, inventoryApi, salesApi } from '@/features/api';
 import { formatMoney as money } from '@/lib/utils';
@@ -247,6 +248,9 @@ export default function DashboardPage() {
         title={firstName ? `Hola, ${firstName}` : 'Inicio'}
         description="Tu centro de comando: todo lo de hoy y lo que hay que resolver, a la vista."
       />
+
+      {/* Puesta en marcha: guía el primer uso. Se autooculta cuando ya está todo cargado. */}
+      {(user?.role === 'admin' || user?.role === 'gerente') && <SetupChecklist />}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* ── Columna principal ── */}
