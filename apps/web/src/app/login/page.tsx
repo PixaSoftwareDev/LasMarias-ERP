@@ -48,10 +48,10 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen flex-col lg:flex-row">
       {/* Panel de marca — arriba en mobile, a la izquierda en desktop.
-          Verde bosque profundo (desaturado) con el verde vivo sólo como acento. */}
+          Verde emerald de marca con un degradé sutil para dar profundidad. */}
       <div
         className="relative flex flex-col items-center justify-center overflow-hidden px-6 py-16 lg:w-1/2 lg:px-16 lg:py-0"
-        style={{ background: 'linear-gradient(155deg, #0C3D2D 0%, #08291E 58%, #041E17 100%)' }}
+        style={{ background: 'linear-gradient(150deg, #10B981 0%, #059669 45%, #065F46 100%)' }}
       >
         {/* Textura sutil: grilla de puntos tenue que se desvanece hacia los bordes,
             para dar profundidad al panel sin recargarlo. */}
@@ -59,22 +59,22 @@ export default function LoginPage() {
           className="pointer-events-none absolute inset-0"
           aria-hidden="true"
           style={{
-            backgroundImage: 'radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px)',
+            backgroundImage: 'radial-gradient(rgba(255,255,255,0.10) 1px, transparent 1px)',
             backgroundSize: '22px 22px',
             maskImage: 'radial-gradient(ellipse at center, #000 35%, transparent 78%)',
             WebkitMaskImage: 'radial-gradient(ellipse at center, #000 35%, transparent 78%)',
           }}
         />
 
-        {/* Halos suaves de acento */}
-        <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-emerald-400/10 blur-3xl lg:h-96 lg:w-96" aria-hidden="true" />
-        <div className="pointer-events-none absolute -bottom-20 -left-20 h-60 w-60 rounded-full bg-emerald-500/10 blur-3xl lg:h-80 lg:w-80" aria-hidden="true" />
+        {/* Halos suaves: un brillo arriba y una sombra cálida abajo para dimensión. */}
+        <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-white/10 blur-3xl lg:h-96 lg:w-96" aria-hidden="true" />
+        <div className="pointer-events-none absolute -bottom-20 -left-20 h-60 w-60 rounded-full bg-emerald-900/20 blur-3xl lg:h-80 lg:w-80" aria-hidden="true" />
 
         <div className="relative z-10 flex max-w-xs flex-col items-center text-center">
-          {/* Logo de fondo transparente: se apoya directo sobre el panel oscuro (la vaca es un
-              recorte que deja ver el verde de fondo, así el logo se integra sin recuadro). */}
+          {/* Logo en blanco sobre el verde de marca: la vaca es un recorte que deja ver
+              el verde del fondo, así el logo se integra sin recuadro. */}
           <Image
-            src="/logo-las-marias.png"
+            src="/logo-las-marias-white.png"
             alt="Lácteos Las Marías"
             width={548}
             height={484}
