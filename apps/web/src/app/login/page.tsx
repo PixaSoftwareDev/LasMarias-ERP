@@ -71,17 +71,16 @@ export default function LoginPage() {
         <div className="pointer-events-none absolute -bottom-20 -left-20 h-60 w-60 rounded-full bg-emerald-500/10 blur-3xl lg:h-80 lg:w-80" aria-hidden="true" />
 
         <div className="relative z-10 flex max-w-xs flex-col items-center text-center">
-          {/* Logo sobre tarjeta blanca: el isologo es verde, así contrasta sobre el panel oscuro. */}
-          <div className="rounded-2xl bg-white p-5 shadow-xl shadow-black/20 lg:p-6">
-            <Image
-              src="/logo-las-marias.png"
-              alt="Lácteos Las Marías"
-              width={220}
-              height={195}
-              priority
-              className="h-auto w-40 lg:w-48"
-            />
-          </div>
+          {/* Logo de fondo transparente: se apoya directo sobre el panel oscuro (la vaca es un
+              recorte que deja ver el verde de fondo, así el logo se integra sin recuadro). */}
+          <Image
+            src="/logo-las-marias.png"
+            alt="Lácteos Las Marías"
+            width={548}
+            height={484}
+            priority
+            className="h-auto w-52 lg:w-60"
+          />
           <div className="mx-auto mt-7 h-px w-12 bg-emerald-400/60" aria-hidden="true" />
           <p className="mt-6 text-sm text-emerald-100/70">Industria Láctea Especializada</p>
         </div>
