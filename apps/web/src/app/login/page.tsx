@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -69,12 +70,19 @@ export default function LoginPage() {
         <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-emerald-400/10 blur-3xl lg:h-96 lg:w-96" aria-hidden="true" />
         <div className="pointer-events-none absolute -bottom-20 -left-20 h-60 w-60 rounded-full bg-emerald-500/10 blur-3xl lg:h-80 lg:w-80" aria-hidden="true" />
 
-        <div className="relative z-10 max-w-xs text-center">
-          <p className="text-xs font-medium uppercase tracking-[0.3em] text-emerald-300/80">Lácteos</p>
-          <h1 className="mt-2 font-display text-4xl font-semibold leading-none tracking-tight text-white lg:text-5xl">
-            Las Marías
-          </h1>
-          <div className="mx-auto mt-6 h-px w-12 bg-emerald-400/60" aria-hidden="true" />
+        <div className="relative z-10 flex max-w-xs flex-col items-center text-center">
+          {/* Logo sobre tarjeta blanca: el isologo es verde, así contrasta sobre el panel oscuro. */}
+          <div className="rounded-2xl bg-white p-5 shadow-xl shadow-black/20 lg:p-6">
+            <Image
+              src="/logo-las-marias.png"
+              alt="Lácteos Las Marías"
+              width={220}
+              height={195}
+              priority
+              className="h-auto w-40 lg:w-48"
+            />
+          </div>
+          <div className="mx-auto mt-7 h-px w-12 bg-emerald-400/60" aria-hidden="true" />
           <p className="mt-6 text-sm text-emerald-100/70">Industria Láctea Especializada</p>
         </div>
       </div>
