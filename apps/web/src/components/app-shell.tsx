@@ -195,8 +195,7 @@ export function AppShell({ user, onLogout, children }: Props) {
           así ninguna pantalla se estira de más en monitores anchos y todas quedan
           consistentes. Las páginas internas ya no definen su propio max-w/padding. */}
       <main className="flex-1 overflow-x-hidden pb-20 md:pb-0">
-        {/* key=pathname: el contenido reanima la entrada (fade-up) en cada navegación. */}
-        <div key={pathname} className="lm-page mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 sm:py-6">{children}</div>
+        <div className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 sm:py-6">{children}</div>
       </main>
 
       {/* Bottom navigation — solo mobile */}
