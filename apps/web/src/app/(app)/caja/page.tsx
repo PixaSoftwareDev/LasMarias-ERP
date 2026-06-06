@@ -307,12 +307,7 @@ export default function CajaPage() {
 
       <FinanceTabs />
 
-      {/* Cuentas/bancos: el encabezado de esta pestaña (igual que las otras muestran su contenido directo). */}
-      <AccountsPanel />
-
-      {showForm && <ExpenseForm onDone={() => setShowForm(false)} />}
-
-      {/* Filtro liviano del período (controla los KPIs y movimientos de abajo). Sin card pesada. */}
+      {/* Filtro liviano del período (controla los KPIs y movimientos). Sin card pesada. */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
         <div className="space-y-1">
@@ -331,6 +326,11 @@ export default function CajaPage() {
       {!validRange && (
         <p className="text-xs text-danger">Revisá las fechas: &quot;desde&quot; no puede ser mayor que &quot;hasta&quot;.</p>
       )}
+
+      {/* Cuentas/bancos: saldos actuales (no dependen del período). */}
+      <AccountsPanel />
+
+      {showForm && <ExpenseForm onDone={() => setShowForm(false)} />}
 
       {!validRange ? (
         <EmptyState icon={Banknote} title="Elegí un rango de fechas válido" description='La fecha "desde" debe ser anterior o igual a "hasta".' />
