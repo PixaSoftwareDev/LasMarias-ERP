@@ -4,7 +4,6 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
-import { LogIn } from 'lucide-react';
 import { loginInputSchema, type LoginInput } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -84,9 +83,6 @@ export default function LoginPage() {
       <div className="flex flex-1 items-center justify-center bg-background px-6 py-12">
         <div className="w-full max-w-sm">
           <div className="mb-8">
-            <span className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary-50 text-primary-700">
-              <LogIn className="h-5 w-5" aria-hidden="true" />
-            </span>
             <h2 className="font-display text-3xl font-semibold tracking-tight text-foreground">Bienvenido</h2>
             <p className="mt-1.5 text-sm text-foreground-muted">Ingresá tus credenciales para continuar</p>
           </div>
