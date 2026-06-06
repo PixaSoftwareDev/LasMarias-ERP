@@ -8,10 +8,13 @@ import {
   CalendarClock,
   CheckCircle2,
   ChevronRight,
+  Droplets,
   Factory,
   Milk,
   Package,
   PackageX,
+  Receipt,
+  ScrollText,
   ShoppingCart,
   TrendingUp,
   TriangleAlert,
@@ -24,9 +27,9 @@ import { PageHeader } from '@/components/page-header';
 import { MonthCalendar } from '@/components/month-calendar';
 import { SetupChecklist } from '@/components/setup-checklist';
 import { useAuth } from '@/hooks/use-auth';
-import { homeApi, inventoryApi, salesApi } from '@/features/api';
+import { homeApi, inventoryApi, salesApi, financeApi, suppliersApi } from '@/features/api';
 import { formatMoney as money } from '@/lib/utils';
-import type { HomeCalendarEvent, StockSummary, AccountBalance } from '@lasmarias/shared-schemas';
+import type { HomeCalendarEvent, StockSummary, AccountBalance, SilosOverview, Cheque, SupplierBalance } from '@lasmarias/shared-schemas';
 
 // Home "Centro de comando" (CLAUDE.md §5.3 / §5.4): panel administrativo denso
 // y ordenado. Izquierda (2/3): saludo + KPIs en chips + "Para resolver" (lo
@@ -110,7 +113,21 @@ const PENDING_ICON_STYLE: Record<Severity, string> = {
   warning: 'bg-amber-50 text-amber-700',
 };
 
-function buildPending(stock: StockSummary[] | undefined, accounts: AccountBalance[] | undefined): Pending[] {
+// Días entre hoy y una fecha ISO (negativo = ya pasó).
+function daysUntil(iso: string): number {
+  const t = new Date(`${iso.slice(0, 10)}T00:00:00`).getTime();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((t - today.getTime()) / 86_400_000);
+}
+
+function buildPending(
+  stock: StockSummary[] | undefined,
+  accounts: AccountBalance[] | undefined,
+  silos: SilosOverview | undefined,
+  cheques: Cheque[] | undefined,
+  suppliers: SupplierBalance[] | undefined,
+): Pending[] {
   const items: Pending[] = [];
 
   for (const it of stock ?? []) {
@@ -142,6 +159,47 @@ function buildPending(stock: StockSummary[] | undefined, accounts: AccountBalanc
         icon: Banknote,
         text: `${acc.clientName} debe ${money(acc.overdue)} vencido`,
         href: '/cuentas',
+      });
+    }
+  }
+
+  // Silos casi vacíos (menos del 15% y con capacidad cargada): hay que reponer leche.
+  for (const s of silos?.silos ?? []) {
+    if (s.capacityLiters > 0 && s.fillPercent < 15) {
+      items.push({
+        key: `silo-${s.id}`,
+        severity: 'warning',
+        icon: Droplets,
+        text: `${s.name} casi vacío (${s.fillPercent}%)`,
+        href: '/silos',
+      });
+    }
+  }
+
+  // Cheques en cartera por vencer (en los próximos 7 días o ya vencidos).
+  for (const c of cheques ?? []) {
+    if (c.status !== 'en_cartera' || !c.dueDate) continue;
+    const d = daysUntil(c.dueDate);
+    if (d <= 7) {
+      items.push({
+        key: `cheque-${c.id}`,
+        severity: d < 0 ? 'danger' : 'warning',
+        icon: ScrollText,
+        text: d < 0 ? `Cheque ${c.number} vencido (${money(c.amount)})` : `Cheque ${c.number} vence en ${d} día${d === 1 ? '' : 's'}`,
+        href: '/cheques',
+      });
+    }
+  }
+
+  // Comprobantes a pagar VENCIDOS (lo que ya deberías haber pagado a proveedores).
+  for (const sup of suppliers ?? []) {
+    if (sup.overdue > 0) {
+      items.push({
+        key: `pagar-${sup.supplierId}`,
+        severity: 'danger',
+        icon: Receipt,
+        text: `Le debés ${money(sup.overdue)} vencido a ${sup.supplierName}`,
+        href: '/cuentas-pagar',
       });
     }
   }
@@ -211,6 +269,9 @@ export default function DashboardPage() {
   });
   const stockQuery = useQuery({ queryKey: ['inventory', 'stock'], queryFn: () => inventoryApi.stock(), enabled: !!user });
   const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: () => salesApi.accounts(), enabled: !!user });
+  const silosQuery = useQuery({ queryKey: ['silos'], queryFn: () => inventoryApi.silos(), enabled: !!user });
+  const chequesQuery = useQuery({ queryKey: ['cheques'], queryFn: () => financeApi.cheques(), enabled: !!user });
+  const suppliersAccQuery = useQuery({ queryKey: ['supplier-accounts'], queryFn: () => suppliersApi.accounts(), enabled: !!user });
 
   const s = summaryQuery.data;
   // Bloque PLATA: todo en $ (finanzas y comercial).
@@ -232,8 +293,8 @@ export default function DashboardPage() {
     : [];
 
   const pending = useMemo(
-    () => buildPending(stockQuery.data, accountsQuery.data),
-    [stockQuery.data, accountsQuery.data],
+    () => buildPending(stockQuery.data, accountsQuery.data, silosQuery.data, chequesQuery.data, suppliersAccQuery.data),
+    [stockQuery.data, accountsQuery.data, silosQuery.data, chequesQuery.data, suppliersAccQuery.data],
   );
   const pendingLoading = stockQuery.isLoading || accountsQuery.isLoading;
   const pendingError = stockQuery.isError && accountsQuery.isError;
@@ -241,12 +302,15 @@ export default function DashboardPage() {
   const upcoming = useMemo(() => nextEvents(calendarQuery.data?.events), [calendarQuery.data]);
 
   const firstName = user?.fullName?.trim().split(' ')[0] ?? '';
+  // Fecha de hoy en español, con la primera letra en mayúscula (ej: "Sábado 6 de junio de 2026").
+  const hoy = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const hoyCap = hoy.charAt(0).toUpperCase() + hoy.slice(1);
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title={firstName ? `Hola, ${firstName}` : 'Inicio'}
-        description="Tu centro de comando: todo lo de hoy y lo que hay que resolver, a la vista."
+        description={hoyCap}
       />
 
       {/* Puesta en marcha: guía el primer uso. Se autooculta cuando ya está todo cargado. */}
