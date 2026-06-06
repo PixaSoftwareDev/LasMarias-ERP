@@ -19,6 +19,7 @@ import {
   PackageX,
   Plus,
   Trash2,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -478,7 +479,7 @@ export default function InventoryPage() {
               <span className="inline-flex items-center gap-2 rounded-full bg-surface-subtle px-3 py-1 font-medium text-foreground">
                 {movFilter}
                 <button type="button" onClick={() => setMovFilter(null)} aria-label="Quitar filtro" className="text-foreground-muted hover:text-foreground">
-                  ✕
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
               </span>
             </div>

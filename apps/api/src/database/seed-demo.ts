@@ -462,6 +462,9 @@ async function main() {
   if (!existingAccounts.some((a) => a.name === 'Banco Nación')) {
     await post('/api/finance/accounts', { name: 'Banco Nación', kind: 'banco', openingBalance: 500000 });
   }
+  // Saldo inicial realista para la Caja (sino queda en negativo por los gastos/pagos del demo).
+  const caja = ((await get<any[]>('/api/finance/accounts')) ?? []).find((a) => a.name === 'Caja');
+  if (caja) await req('PATCH', `/api/finance/accounts/${caja.id}`, { openingBalance: 8000000 });
   const chequeSeeds = [
     { kind: 'recibido', number: '00012345', amount: 120000, counterparty: 'Supermercado El Ahorro', cobrar: true },
     { kind: 'recibido', number: '00012346', amount: 85000, counterparty: 'Mayorista Sur SA', cobrar: false },

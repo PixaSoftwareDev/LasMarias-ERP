@@ -19,18 +19,19 @@ const TABS: { href: string; label: string }[] = [
 export function FinanceTabs() {
   const pathname = usePathname();
   return (
-    <nav aria-label="Secciones de Finanzas" className="-mx-1 flex gap-1 overflow-x-auto pb-1">
+    <nav aria-label="Secciones de Finanzas" className="flex flex-wrap gap-2 overflow-x-auto border-b border-border-subtle">
       {TABS.map((t) => {
         const active = pathname === t.href;
         return (
           <Link
             key={t.href}
             href={t.href}
+            aria-current={active ? 'page' : undefined}
             className={cn(
-              'whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+              'flex min-h-touch items-center whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors',
               active
-                ? 'bg-primary-600 text-white shadow-sm'
-                : 'text-foreground-muted hover:bg-surface-subtle hover:text-foreground',
+                ? 'border-primary-600 text-primary-700'
+                : 'border-transparent text-foreground-muted hover:text-foreground',
             )}
           >
             {t.label}

@@ -150,7 +150,7 @@ export default function NewProductionPage() {
           </Field>
 
           <Field
-            label="¿De qué se parte?"
+            label="¿Con qué se elabora?"
             htmlFor="source"
             required
             hint="Elaboración en dos pasos: primero leche → masa, después masa → mozzarella o queso. La masa es un producto intermedio que queda en stock con su propio costo."

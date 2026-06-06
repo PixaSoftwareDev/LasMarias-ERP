@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, Banknote, HandCoins, Landmark, Receipt, ScrollText, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
+import { ArrowRight, Landmark, Receipt, ScrollText, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageHeader } from '@/components/page-header';
@@ -90,11 +90,24 @@ export default function FinanzasPage() {
           value={money(meDeben)} cta="Ver cobranzas"
           sub={meDebenVencido > 0 ? <span className="font-medium text-danger">{money(meDebenVencido)} vencido</span> : 'Al día'}
         />
-        <StatCard
-          href="/cuentas-pagar" icon={Receipt} label="Le debo (total)" tone={totalDebo > 0 ? 'bad' : 'neutral'}
-          value={money(totalDebo)} cta="Ver pagos"
-          sub={<>Tambos {money(deboTambos)} · Insumos {money(deboProv)}{provVencido > 0 ? <> · <span className="font-medium text-danger">{money(provVencido)} vencido</span></> : null}</>}
-        />
+        {/* "Le debo" abre a DOS lugares (tambos e insumos), así el número no es un clic muerto. */}
+        <Card className="h-full">
+          <CardContent className="flex h-full flex-col gap-2 pt-6">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-50 text-primary-700">
+              <Receipt className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <p className="text-[11px] uppercase tracking-wide text-foreground-muted">Le debo (total)</p>
+            <p className={`font-display text-2xl font-bold tracking-tight ${totalDebo > 0 ? 'text-danger' : 'text-foreground'}`}>{money(totalDebo)}</p>
+            <div className="text-xs text-foreground-muted">
+              Tambos {money(deboTambos)} · Insumos {money(deboProv)}
+              {provVencido > 0 ? <> · <span className="font-medium text-danger">{money(provVencido)} vencido</span></> : null}
+            </div>
+            <div className="mt-auto flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs font-medium text-primary-700">
+              <Link href="/pagos-tambos" className="inline-flex items-center gap-1 hover:underline">Pagar tambos <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" /></Link>
+              <Link href="/cuentas-pagar" className="inline-flex items-center gap-1 hover:underline">Pagar insumos <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" /></Link>
+            </div>
+          </CardContent>
+        </Card>
         <StatCard
           href="/cheques" icon={ScrollText} label="Cheques en cartera"
           value={money(chequesTotal)} cta="Ver cheques"
@@ -128,19 +141,6 @@ export default function FinanzasPage() {
               </span>
             </CardContent>
           </Card>
-        </Link>
-      </div>
-
-      {/* Accesos rápidos secundarios */}
-      <div className="flex flex-wrap gap-2">
-        <Link href="/pagos-tambos" className="inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-surface-elevated px-3 py-2 text-sm text-foreground hover:border-primary-300">
-          <HandCoins className="h-4 w-4 text-primary-700" aria-hidden="true" /> Pagar a un tambo
-        </Link>
-        <Link href="/cuentas-pagar" className="inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-surface-elevated px-3 py-2 text-sm text-foreground hover:border-primary-300">
-          <Receipt className="h-4 w-4 text-primary-700" aria-hidden="true" /> Pagar a un proveedor
-        </Link>
-        <Link href="/caja" className="inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-surface-elevated px-3 py-2 text-sm text-foreground hover:border-primary-300">
-          <Banknote className="h-4 w-4 text-primary-700" aria-hidden="true" /> Cargar un gasto
         </Link>
       </div>
     </div>
