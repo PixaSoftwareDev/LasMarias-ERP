@@ -79,10 +79,8 @@ export default function LoginPage() {
             width={548}
             height={484}
             priority
-            className="h-auto w-52 lg:w-60"
+            className="h-auto w-52 lg:w-64"
           />
-          <div className="mx-auto mt-7 h-px w-12 bg-emerald-400/60" aria-hidden="true" />
-          <p className="mt-6 text-sm text-emerald-100/70">Industria Láctea Especializada</p>
         </div>
       </div>
 
