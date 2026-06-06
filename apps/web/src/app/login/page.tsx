@@ -74,7 +74,7 @@ export default function LoginPage() {
             width={548}
             height={484}
             priority
-            className="h-auto w-52 lg:w-64"
+            className="h-auto w-44 lg:w-52"
           />
         </div>
       </div>
