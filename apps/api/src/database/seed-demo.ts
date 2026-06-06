@@ -71,23 +71,27 @@ async function main() {
   // 1) CÁMARAS ----------------------------------------------------------------
   console.log('→ Cámaras');
   const warehouseSeeds = [
-    { code: 'CF-01', name: 'Cámara de frío 1', kind: 'cold_chamber', targetTemperatureCelsius: 4 },
-    { code: 'CF-02', name: 'Cámara de frío 2', kind: 'cold_chamber', targetTemperatureCelsius: 3 },
+    { code: 'CF-1', name: 'Cámara fría 1', kind: 'cold_chamber', targetTemperatureCelsius: 4 },
+    { code: 'CF-2', name: 'Cámara fría 2', kind: 'cold_chamber', targetTemperatureCelsius: 3 },
+    { code: 'CF-3', name: 'Cámara fría 3', kind: 'cold_chamber', targetTemperatureCelsius: 4 },
+    { code: 'CF-4', name: 'Cámara fría 4', kind: 'cold_chamber', targetTemperatureCelsius: 4 },
     { code: 'MAD-01', name: 'Sala de maduración', kind: 'maturation', targetTemperatureCelsius: 12 },
-    // Silos de leche con capacidad (CLAUDE.md §9): la leche recibida se reparte acá.
-    { code: 'SILO-A', name: 'Silo A', kind: 'silo', capacityLiters: 15000 },
-    { code: 'SILO-B', name: 'Silo B', kind: 'silo', capacityLiters: 15000 },
-    { code: 'SILO-C', name: 'Silo C', kind: 'silo', capacityLiters: 10000 },
+    // Silos de leche reales con su capacidad (CLAUDE.md §9): la leche recibida se reparte acá.
+    { code: 'SILO-1', name: 'Silo 1', kind: 'silo', capacityLiters: 4500 },
+    { code: 'SILO-2', name: 'Silo 2', kind: 'silo', capacityLiters: 20500 },
+    { code: 'SILO-3', name: 'Silo 3', kind: 'silo', capacityLiters: 21300 },
+    { code: 'SILO-4', name: 'Silo 4', kind: 'silo', capacityLiters: 100000 },
   ];
   const existingWh = (await get<any[]>('/api/inventory/warehouses?all=true')) ?? [];
   for (const w of warehouseSeeds) {
     if (!existingWh.some((x) => x.code === w.code)) await post('/api/inventory/warehouses', w);
   }
   const warehouses = (await get<any[]>('/api/inventory/warehouses?all=true')) ?? [];
-  const camaraFrio = warehouses.find((w) => w.code === 'CF-01')?.id;
+  const camaraFrio = warehouses.find((w) => w.code === 'CF-1')?.id;
   const camaraMad = warehouses.find((w) => w.code === 'MAD-01')?.id;
-  // Ids de los silos sembrados, para repartir las recepciones entre ellos.
-  const siloIds = ['SILO-A', 'SILO-B', 'SILO-C']
+  // Ids de los silos sembrados, para repartir las recepciones entre ellos (los grandes
+  // primero para no desbordar el Silo 1, que es chico).
+  const siloIds = ['SILO-2', 'SILO-3', 'SILO-4', 'SILO-1']
     .map((c) => warehouses.find((w) => w.code === c)?.id)
     .filter((x): x is string => !!x);
 
