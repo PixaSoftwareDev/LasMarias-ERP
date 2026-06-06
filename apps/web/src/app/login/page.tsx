@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'sonner';
+import { LogIn } from 'lucide-react';
 import { loginInputSchema, type LoginInput } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -52,6 +53,19 @@ export default function LoginPage() {
         className="relative flex flex-col items-center justify-center overflow-hidden px-6 py-16 lg:w-1/2 lg:px-16 lg:py-0"
         style={{ background: 'linear-gradient(155deg, #0C3D2D 0%, #08291E 58%, #041E17 100%)' }}
       >
+        {/* Textura sutil: grilla de puntos tenue que se desvanece hacia los bordes,
+            para dar profundidad al panel sin recargarlo. */}
+        <div
+          className="pointer-events-none absolute inset-0"
+          aria-hidden="true"
+          style={{
+            backgroundImage: 'radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px)',
+            backgroundSize: '22px 22px',
+            maskImage: 'radial-gradient(ellipse at center, #000 35%, transparent 78%)',
+            WebkitMaskImage: 'radial-gradient(ellipse at center, #000 35%, transparent 78%)',
+          }}
+        />
+
         {/* Halos suaves de acento */}
         <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-emerald-400/10 blur-3xl lg:h-96 lg:w-96" aria-hidden="true" />
         <div className="pointer-events-none absolute -bottom-20 -left-20 h-60 w-60 rounded-full bg-emerald-500/10 blur-3xl lg:h-80 lg:w-80" aria-hidden="true" />
@@ -70,8 +84,11 @@ export default function LoginPage() {
       <div className="flex flex-1 items-center justify-center bg-background px-6 py-12">
         <div className="w-full max-w-sm">
           <div className="mb-8">
-            <h2 className="font-display text-2xl font-semibold tracking-tight text-foreground">Bienvenido</h2>
-            <p className="mt-1 text-sm text-foreground-muted">Ingresá tus credenciales para continuar</p>
+            <span className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary-50 text-primary-700">
+              <LogIn className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <h2 className="font-display text-3xl font-semibold tracking-tight text-foreground">Bienvenido</h2>
+            <p className="mt-1.5 text-sm text-foreground-muted">Ingresá tus credenciales para continuar</p>
           </div>
 
           <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
