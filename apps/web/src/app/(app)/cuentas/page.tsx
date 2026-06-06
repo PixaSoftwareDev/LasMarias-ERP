@@ -278,8 +278,8 @@ export default function CuentasPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Cuenta corriente"
-        description="Saldo de cada cliente, antigüedad de la deuda y registro de cobros."        action={
+        title="Cobranzas"
+        description="Cuenta corriente: saldo de cada cliente, antigüedad de la deuda y registro de cobros."        action={
           !selected ? (
             <Button
               variant="secondary"

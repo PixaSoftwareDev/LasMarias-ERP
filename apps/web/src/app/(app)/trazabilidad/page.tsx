@@ -302,7 +302,7 @@ function TraceabilityInner() {
   const [subFilter, setSubFilter] = useState('');
   const [query, setQuery] = useState('');
 
-  const receptionsQuery = useQuery({ queryKey: ['milk-receptions'], queryFn: () => receptionsApi.list() });
+  const receptionsQuery = useQuery({ queryKey: ['receptions'], queryFn: () => receptionsApi.list() });
   const productionQuery = useQuery({ queryKey: ['production-orders'], queryFn: () => productionApi.list() });
 
   const batchOptions = useMemo<BatchOption[]>(() => {

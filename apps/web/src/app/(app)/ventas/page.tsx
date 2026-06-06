@@ -200,6 +200,7 @@ export default function SalesPage() {
       queryClient.invalidateQueries({ queryKey: ['sales-orders'] });
       queryClient.invalidateQueries({ queryKey: ['stock'] });
       queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['home'] });
       const cobro = paymentMode === 'contado' ? 'Cobrado al contado.' : 'Quedó en cuenta corriente.';
       // Si quedó en cuenta corriente, ofrecemos saltar a la cuenta del cliente (siguiente paso).
       toast.success(`Venta ${o.code} registrada · ${money(o.total)}. Se descontó el stock. ${cobro}`,
@@ -282,7 +283,7 @@ export default function SalesPage() {
   );
 
   return (
-    <div className="flex flex-col gap-6 pb-32">
+    <div className="flex flex-col gap-6">
       <PageHeader
         title="Ventas"
         description="Vender mercadería a un cliente. Al confirmar se descuenta el stock."        action={
@@ -452,7 +453,7 @@ export default function SalesPage() {
           </Card>
 
           {/* Barra de total sticky — siempre visible cuánto suma el despacho. CLAUDE.md §5.4 */}
-          <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border-subtle bg-surface-elevated/95 backdrop-blur md:left-64">
+          <div className="sticky bottom-0 z-20 -mx-4 border-t border-border-subtle bg-surface-elevated/95 backdrop-blur sm:-mx-6">
             <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <div className="flex items-center gap-3">
                 <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-700">

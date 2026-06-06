@@ -29,6 +29,10 @@ interface MilkInputRow {
 
 type SourceKind = 'leche' | 'masa';
 
+// Mismo lenguaje visual que el resto de los selects de la app (fondo elevado + foco).
+const SELECT_CLASS =
+  'min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-1';
+
 export default function NewProductionPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -139,7 +143,7 @@ export default function NewProductionPage() {
         <CardHeader><CardTitle>Datos</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-1 gap-4">
           <Field label="Receta" htmlFor="recipe" required>
-            <select className="min-h-touch w-full rounded-md border border-border px-3" value={recipeId} onChange={(e) => setRecipeId(e.target.value)}>
+            <select className={SELECT_CLASS} value={recipeId} onChange={(e) => setRecipeId(e.target.value)}>
               <option value="">Elegí una receta</option>
               {recipes.data?.filter((r) => r.activeVersion).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
@@ -151,7 +155,7 @@ export default function NewProductionPage() {
             required
             hint="Elaboración en dos pasos: primero leche → masa, después masa → mozzarella o queso. La masa es un producto intermedio que queda en stock con su propio costo."
           >
-            <select className="min-h-touch w-full rounded-md border border-border px-3" value={source} onChange={(e) => changeSource(e.target.value as SourceKind)}>
+            <select className={SELECT_CLASS} value={source} onChange={(e) => changeSource(e.target.value as SourceKind)}>
               <option value="leche">Leche cruda (paso 1: hacer masa)</option>
               <option value="masa">Masa en stock (paso 2: hacer mozzarella o queso)</option>
             </select>
@@ -159,7 +163,7 @@ export default function NewProductionPage() {
 
           {source === 'leche' && silos.length > 0 && (
             <Field label="Silo de origen" htmlFor="silo" hint="Filtrá los lotes de leche por silo. Vacío = todos los silos.">
-              <select id="silo" className="min-h-touch w-full rounded-md border border-border px-3" value={siloId} onChange={(e) => { setSiloId(e.target.value); setInputs([{ batchId: '', liters: 0 }]); }}>
+              <select id="silo" className={SELECT_CLASS} value={siloId} onChange={(e) => { setSiloId(e.target.value); setInputs([{ batchId: '', liters: 0 }]); }}>
                 <option value="">Todos los silos</option>
                 {silos.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
@@ -212,7 +216,7 @@ export default function NewProductionPage() {
           <Field label="Notas" htmlFor="notes">
             <textarea
               id="notes"
-              className="w-full rounded-md border border-border px-3 py-2"
+              className="w-full rounded-md border border-border bg-surface-elevated px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-1"
               rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}

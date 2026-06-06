@@ -297,8 +297,8 @@ export default function CajaPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Flujo de caja"
-        description="Ingresos (cobros) y egresos (gastos) del período elegido."        action={
+        title="Caja y bancos"
+        description="Saldos de tus cuentas e ingresos/egresos del período elegido."        action={
           <Button onClick={() => setShowForm((s) => !s)}>
             <Plus className="h-4 w-4" /> {showForm ? 'Cerrar' : 'Cargar gasto'}
           </Button>

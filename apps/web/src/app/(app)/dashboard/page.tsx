@@ -210,7 +210,7 @@ export default function DashboardPage() {
     enabled: !!user,
   });
   const stockQuery = useQuery({ queryKey: ['inventory', 'stock'], queryFn: () => inventoryApi.stock(), enabled: !!user });
-  const accountsQuery = useQuery({ queryKey: ['sales', 'accounts'], queryFn: () => salesApi.accounts(), enabled: !!user });
+  const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: () => salesApi.accounts(), enabled: !!user });
 
   const s = summaryQuery.data;
   // Bloque PLATA: todo en $ (finanzas y comercial).

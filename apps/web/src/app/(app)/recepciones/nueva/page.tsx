@@ -125,7 +125,7 @@ export default function NewReceptionPage() {
       : null;
 
   return (
-    <div className="flex flex-col gap-6 pb-32">
+    <div className="flex flex-col gap-6">
       {savedCode && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-primary-600 px-6 text-center text-white">
           <CheckCircle2 className="h-24 w-24" aria-hidden="true" />
@@ -300,7 +300,7 @@ export default function NewReceptionPage() {
                 inputMode="decimal"
                 step="0.1"
                 placeholder="≤ 6"
-                {...register('quality.temperatureCelsius', { valueAsNumber: true, setValueAs: (v) => (v === '' || Number.isNaN(v) ? undefined : Number(v)) })}
+                {...register('quality.temperatureCelsius', { setValueAs: (v) => (v === '' || Number.isNaN(Number(v)) ? undefined : Number(v)) })}
               />
             </Field>
 
@@ -413,7 +413,7 @@ export default function NewReceptionPage() {
       </form>
 
       {/* Sticky save bar — CLAUDE.md §5.3 */}
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border-subtle bg-surface-elevated/95 backdrop-blur md:left-64">
+      <div className="sticky bottom-0 z-20 -mx-4 border-t border-border-subtle bg-surface-elevated/95 backdrop-blur sm:-mx-6">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <p className="hidden text-sm text-foreground-muted sm:block">
             {isValid ? (

@@ -80,7 +80,7 @@ export default function PreciosPage() {
   const loading = productsQuery.isLoading || priceListQuery.isLoading;
 
   return (
-    <div className="flex flex-col gap-6 pb-28">
+    <div className="flex flex-col gap-6">
       <Button asChild variant="ghost" size="sm" className="self-start">
         <Link href="/admin"><ArrowLeft className="h-4 w-4" /> Datos maestros</Link>
       </Button>
@@ -185,7 +185,7 @@ export default function PreciosPage() {
       </Card>
 
       {/* Barra de guardado sticky. CLAUDE.md §5.3 */}
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border-subtle bg-surface-elevated/95 backdrop-blur md:left-64">
+      <div className="sticky bottom-0 z-20 -mx-4 border-t border-border-subtle bg-surface-elevated/95 backdrop-blur sm:-mx-6">
         <div className="mx-auto flex w-full max-w-7xl justify-end gap-2 px-4 py-3 sm:px-6">
           <Button
             onClick={() => save.mutate()}
