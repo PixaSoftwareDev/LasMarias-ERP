@@ -46,6 +46,29 @@
   }
 }
 
+/* Microanimación de entrada (pulido controlado): el contenido aparece con un fade
+   suave + leve subida al cargar/cambiar de pantalla. Respeta prefers-reduced-motion. */
+@layer utilities {
+  @keyframes lm-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .lm-page {
+    animation: lm-fade-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .lm-page {
+      animation: none;
+    }
+  }
+}
+
 /* Impresión de comprobantes (remito A4). Ocultamos el chrome de la app
    (sidebar, header mobile, bottom-nav y todo lo marcado .no-print) y dejamos
    solo el documento. CLAUDE.md §4.6 — remito imprimible. */
