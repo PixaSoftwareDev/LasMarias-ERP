@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { LogOut, UserCog, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
@@ -81,9 +82,19 @@ export function AppShell({ user, onLogout, children }: Props) {
           )}
         >
           {!collapsed && (
-            <div className="flex flex-col leading-none">
-              <span className="text-[10px] font-medium uppercase tracking-[0.25em] text-primary-300">Lácteos</span>
-              <span className="mt-1 font-display text-lg font-semibold tracking-tight text-white">Las Marías</span>
+            <div className="flex items-center gap-2.5">
+              <Image
+                src="/logo-iso-white.png"
+                alt=""
+                width={500}
+                height={290}
+                className="h-8 w-auto"
+                aria-hidden="true"
+              />
+              <div className="flex flex-col leading-none">
+                <span className="text-[10px] font-medium uppercase tracking-[0.25em] text-primary-300">Lácteos</span>
+                <span className="mt-1 font-display text-lg font-semibold tracking-tight text-white">Las Marías</span>
+              </div>
             </div>
           )}
           <button
@@ -167,9 +178,19 @@ export function AppShell({ user, onLogout, children }: Props) {
 
       {/* Header mobile */}
       <header className="no-print flex h-14 items-center justify-between border-b border-border-subtle bg-surface-elevated px-4 md:hidden">
-        <div className="flex flex-col leading-none">
-          <span className="text-[9px] font-medium uppercase tracking-[0.25em] text-primary-700">Lácteos</span>
-          <span className="mt-0.5 font-display text-base font-semibold tracking-tight text-foreground">Las Marías</span>
+        <div className="flex items-center gap-2">
+          <Image
+            src="/logo-iso-emerald.png"
+            alt=""
+            width={500}
+            height={290}
+            className="h-7 w-auto"
+            aria-hidden="true"
+          />
+          <div className="flex flex-col leading-none">
+            <span className="text-[9px] font-medium uppercase tracking-[0.25em] text-primary-700">Lácteos</span>
+            <span className="mt-0.5 font-display text-base font-semibold tracking-tight text-foreground">Las Marías</span>
+          </div>
         </div>
         <div className="flex items-center">
           <Link
