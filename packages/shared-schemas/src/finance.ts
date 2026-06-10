@@ -13,27 +13,31 @@ export const cashMovementSchema = z.object({
   amount: z.number().nonnegative(),
   category: z.string(),
   occurredAt: isoDateTimeSchema,
-  // Cuenta (caja o banco) a la que impacta el movimiento. Nullable en datos viejos.
   accountId: uuidSchema.nullable().optional(),
   accountName: z.string().optional(),
   referenceType: z.string().nullable(),
   referenceId: uuidSchema.nullable(),
   notes: z.string().nullable(),
   createdById: uuidSchema.nullable(),
+  reconciled: z.boolean(),
 });
 export type CashMovement = z.infer<typeof cashMovementSchema>;
 
-// Carga manual de un movimiento de caja (típicamente un gasto).
 export const createCashMovementInputSchema = z.object({
   kind: cashMovementKindSchema,
   amount: z.number().positive('El importe tiene que ser mayor a 0'),
   category: z.string().min(1, 'Indicá una categoría').max(40),
   occurredAt: isoDateTimeSchema.optional(),
-  // Cuenta a la que impacta. Si se omite, va a la cuenta "Caja" por defecto.
   accountId: uuidSchema.optional(),
   notes: z.string().max(1000).optional(),
+  reconciled: z.boolean().optional(),
 });
 export type CreateCashMovementInput = z.infer<typeof createCashMovementInputSchema>;
+
+export const reconcileMovementInputSchema = z.object({
+  reconciled: z.boolean(),
+});
+export type ReconcileMovementInput = z.infer<typeof reconcileMovementInputSchema>;
 
 // --- Cuentas (caja / banco) con saldo calculado ---
 export const accountKindSchema = z.enum(['caja', 'banco']);
@@ -43,8 +47,8 @@ export const accountSchema = z.object({
   id: uuidSchema,
   name: z.string(),
   kind: accountKindSchema,
-  openingBalance: z.number(), // saldo inicial
-  balance: z.number(), // saldo inicial + Σ ingresos − Σ egresos
+  openingBalance: z.number(),
+  balance: z.number(),
   isActive: z.boolean(),
   createdAt: isoDateTimeSchema,
 });
@@ -81,9 +85,20 @@ export type CreateExpenseCategoryInput = z.infer<typeof createExpenseCategoryInp
 export const chequeKindSchema = z.enum(['recibido', 'propio']);
 export type ChequeKind = z.infer<typeof chequeKindSchema>;
 
-// en_cartera = pendiente; cobrado = acreditado (impacta saldo); rechazado = no se cobró.
 export const chequeStatusSchema = z.enum(['en_cartera', 'cobrado', 'rechazado']);
 export type ChequeStatus = z.infer<typeof chequeStatusSchema>;
+
+export const CHEQUE_REJECTION_REASONS = [
+  'Sin fondos suficientes',
+  'Sin firma / Firma disconforme',
+  'Cuenta cerrada',
+  'Cheque vencido',
+  'Endoso irregular',
+  'Orden de no pagar',
+  'Datos incorrectos',
+  'Otro',
+] as const;
+export type ChequeRejectionReason = typeof CHEQUE_REJECTION_REASONS[number];
 
 export const chequeSchema = z.object({
   id: uuidSchema,
@@ -92,10 +107,10 @@ export const chequeSchema = z.object({
   amount: z.number().nonnegative(),
   dueDate: isoDateTimeSchema.nullable(),
   status: chequeStatusSchema,
-  // Cuenta a la que impacta cuando se cobra/acredita.
   accountId: uuidSchema.nullable(),
   accountName: z.string().optional(),
-  counterparty: z.string().nullable(), // de quién es / a quién se le dio
+  counterparty: z.string().nullable(),
+  rejectionReason: z.string().nullable(),
   notes: z.string().nullable(),
   createdAt: isoDateTimeSchema,
 });
@@ -112,19 +127,20 @@ export const createChequeInputSchema = z.object({
 });
 export type CreateChequeInput = z.infer<typeof createChequeInputSchema>;
 
-// Cambio de estado del cheque. Al pasar a "cobrado" impacta el saldo de la cuenta.
 export const updateChequeStatusInputSchema = z.object({
   status: chequeStatusSchema,
-  accountId: uuidSchema.optional(), // cuenta donde se acredita al cobrar (si no, la del cheque)
+  accountId: uuidSchema.optional(),
+  rejectionReason: z.string().max(200).optional(),
+  notes: z.string().max(1000).optional(),
 });
 export type UpdateChequeStatusInput = z.infer<typeof updateChequeStatusInputSchema>;
 
 // Flujo de caja agregado por período.
 export const cashFlowRowSchema = z.object({
-  period: z.string(), // ISO del inicio del período (día o mes)
+  period: z.string(),
   income: z.number(),
   expense: z.number(),
-  net: z.number(), // income − expense
+  net: z.number(),
 });
 export type CashFlowRow = z.infer<typeof cashFlowRowSchema>;
 

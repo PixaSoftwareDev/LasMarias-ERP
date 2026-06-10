@@ -131,6 +131,11 @@ export class InventoryService {
       .addSelect('MIN(b.expiration_date)', 'nearestExpiration')
       // Cámaras distintas (no nulas) donde hay lotes del producto.
       .addSelect("ARRAY_AGG(DISTINCT w.name) FILTER (WHERE w.name IS NOT NULL)", 'warehouses')
+      // Último costo unitario conocido (cualquier lote del producto, no sólo los activos).
+      .addSelect(
+        `(SELECT b2.unit_cost FROM batches b2 WHERE b2.product_id = b.product_id AND b2.unit_cost IS NOT NULL ORDER BY b2.created_at DESC LIMIT 1)`,
+        'lastUnitCost',
+      )
       .where("b.status IN ('activo', 'en_proceso')")
       .andWhere('b.product_id IS NOT NULL')
       .andWhere('b.remaining_quantity > 0')
@@ -163,6 +168,7 @@ export class InventoryService {
         minStock: minStock ?? undefined,
         warehouses,
         alertLevel: resolveAlertLevel({ totalQuantity, minStock, daysToExpire }),
+        lastUnitCost: r.lastUnitCost != null ? Number(r.lastUnitCost) : null,
       };
     });
 

@@ -265,25 +265,26 @@ export const reportsApi = {
 // Fase comercial — Flujo de caja simple (ingresos = cobros, egresos = gastos).
 // Roles admin/gerente. from/to como fecha ISO (YYYY-MM-DD).
 export const financeApi = {
-  cashMovements: (from: string, to: string) =>
-    api<CashMovement[]>(`/api/finance/cash-movements?${reportQs({ from, to })}`),
+  cashMovements: (from: string, to: string, accountId?: string) =>
+    api<CashMovement[]>(`/api/finance/cash-movements?${reportQs({ from, to })}${accountId ? `&accountId=${accountId}` : ''}`),
   createCashMovement: (input: CreateCashMovementInput) =>
     api<CashMovement>('/api/finance/cash-movements', { method: 'POST', body: input }),
+  unreconciledMovements: (accountId: string) =>
+    api<CashMovement[]>(`/api/finance/cash-movements/unreconciled?accountId=${accountId}`),
+  reconcileMovement: (id: string, reconciled: boolean) =>
+    api<CashMovement>(`/api/finance/cash-movements/${id}/reconcile`, { method: 'PATCH', body: { reconciled } }),
   cashFlow: (from: string, to: string, granularity: ReportGranularity) =>
     api<CashFlowReport>(`/api/finance/cash-flow?${reportQs({ from, to, granularity })}`),
   exportCashFlowXlsx: (from: string, to: string, granularity: ReportGranularity) =>
     downloadFile(`/api/finance/export/cash-flow.xlsx?${reportQs({ from, to, granularity })}`, 'flujo-de-caja.xlsx'),
-  // Cuentas (caja/banco) con saldo calculado.
   accounts: () => api<Account[]>('/api/finance/accounts'),
   createAccount: (input: CreateAccountInput) =>
     api<Account>('/api/finance/accounts', { method: 'POST', body: input }),
   updateAccount: (id: string, input: UpdateAccountInput) =>
     api<Account>(`/api/finance/accounts/${id}`, { method: 'PATCH', body: input }),
-  // Catálogo de categorías de gasto.
   categories: () => api<ExpenseCategory[]>('/api/finance/categories'),
   createCategory: (input: CreateExpenseCategoryInput) =>
     api<ExpenseCategory>('/api/finance/categories', { method: 'POST', body: input }),
-  // Cheques.
   cheques: () => api<Cheque[]>('/api/finance/cheques'),
   createCheque: (input: CreateChequeInput) =>
     api<Cheque>('/api/finance/cheques', { method: 'POST', body: input }),

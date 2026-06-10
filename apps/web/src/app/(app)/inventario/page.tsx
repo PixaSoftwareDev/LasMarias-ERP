@@ -71,9 +71,33 @@ const CHIP_TONE = {
   danger: 'bg-red-50 text-red-700',
 } as const;
 
-function SummaryChip({ icon: Icon, label, value, tone }: { icon: LucideIcon; label: string; value: string; tone: keyof typeof CHIP_TONE }) {
+function SummaryChip({
+  icon: Icon, label, value, tone, onClick, active,
+}: {
+  icon: LucideIcon; label: string; value: string; tone: keyof typeof CHIP_TONE;
+  onClick?: () => void; active?: boolean;
+}) {
+  const base = 'flex min-w-[11rem] flex-1 items-center gap-3 rounded-lg border bg-surface-elevated px-4 py-3 shadow-sm text-left transition-colors';
+  const state = active
+    ? 'border-primary-500 ring-2 ring-primary-200'
+    : onClick
+      ? 'border-border-subtle hover:border-primary-300 hover:bg-surface-subtle/40 cursor-pointer'
+      : 'border-border-subtle';
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={`${base} ${state}`}>
+        <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${CHIP_TONE[tone]}`}>
+          <Icon className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-[11px] uppercase tracking-wide text-foreground-muted">{label}</span>
+          <span className="block font-display text-lg font-bold tracking-tight text-foreground">{value}</span>
+        </span>
+      </button>
+    );
+  }
   return (
-    <div className="flex min-w-[11rem] flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
+    <div className={`${base} ${state}`}>
       <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${CHIP_TONE[tone]}`}>
         <Icon className="h-4 w-4" aria-hidden="true" />
       </span>
@@ -177,7 +201,7 @@ function StockRow({
 }
 
 // --- Formulario de ingreso de stock (insumos/envases) ---
-function StockEntryForm({ onClose }: { onClose: () => void }) {
+function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHints: StockSummary[] }) {
   const queryClient = useQueryClient();
   const productsQuery = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
   const warehousesQuery = useQuery({ queryKey: ['warehouses'], queryFn: () => inventoryApi.listWarehouses() });
@@ -186,6 +210,7 @@ function StockEntryForm({ onClose }: { onClose: () => void }) {
   const [productId, setProductId] = useState('');
   const [quantity, setQuantity] = useState('');
   const [unitCost, setUnitCost] = useState('');
+  const [costPrefilled, setCostPrefilled] = useState(false);
   const [currency, setCurrency] = useState<Currency>('ARS');
   const [warehouseId, setWarehouseId] = useState('');
 
@@ -193,6 +218,19 @@ function StockEntryForm({ onClose }: { onClose: () => void }) {
     () => (productsQuery.data ?? []).filter((p) => p.isActive),
     [productsQuery.data],
   );
+
+  function handleProductChange(id: string) {
+    setProductId(id);
+    // Pre-rellenar con el último costo conocido del producto (en ARS).
+    const hint = stockHints.find((s) => s.productId === id);
+    if (hint?.lastUnitCost != null) {
+      setUnitCost(String(hint.lastUnitCost));
+      setCurrency('ARS');
+      setCostPrefilled(true);
+    } else {
+      setCostPrefilled(false);
+    }
+  }
 
   const save = useMutation({
     mutationFn: () =>
@@ -224,7 +262,7 @@ function StockEntryForm({ onClose }: { onClose: () => void }) {
               id="entry-product"
               className="min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
               value={productId}
-              onChange={(e) => setProductId(e.target.value)}
+              onChange={(e) => handleProductChange(e.target.value)}
             >
               <option value="">Elegí un producto</option>
               {entryProducts.map((p) => (
@@ -235,9 +273,24 @@ function StockEntryForm({ onClose }: { onClose: () => void }) {
           <Field label="Cantidad" htmlFor="entry-qty" required>
             <Input id="entry-qty" type="number" inputMode="decimal" step="0.01" min={0} placeholder="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
           </Field>
-          <Field label="Costo unitario" htmlFor="entry-cost" hint="Opcional.">
+          <Field
+            label="Costo unitario"
+            htmlFor="entry-cost"
+            hint={costPrefilled ? 'Pre-relleno con el último precio conocido. Modificalo si cambió.' : 'Opcional.'}
+          >
             <div className="flex gap-2">
-              <Input id="entry-cost" type="number" inputMode="decimal" step="0.01" min={0} prefix={currencySymbol(currency)} placeholder="0" className="flex-1" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} />
+              <Input
+                id="entry-cost"
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min={0}
+                prefix={currencySymbol(currency)}
+                placeholder="0"
+                className={`flex-1 ${costPrefilled ? 'border-amber-300 bg-amber-50' : ''}`}
+                value={unitCost}
+                onChange={(e) => { setUnitCost(e.target.value); setCostPrefilled(false); }}
+              />
               <select
                 aria-label="Moneda del costo"
                 className="min-h-touch w-24 flex-none rounded-md border border-border bg-surface-elevated px-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
@@ -396,12 +449,15 @@ function AdjustDialog({ s, mode, onClose }: { s: StockSummary; mode: AdjustMode;
   );
 }
 
+type QuickFilter = null | 'low' | 'expiring';
+
 export default function InventoryPage() {
   const [showEntry, setShowEntry] = useState(false);
   const [adjust, setAdjust] = useState<{ s: StockSummary; mode: AdjustMode } | null>(null);
   const [view, setView] = useState<'stock' | 'movimientos'>('stock');
   const [movFilter, setMovFilter] = useState<string | null>(null); // nombre de producto
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>(null);
 
   const stockQuery = useQuery({ queryKey: ['stock'], queryFn: () => inventoryApi.stock() });
   const movementsQuery = useQuery({ queryKey: ['inv-movements'], queryFn: () => inventoryApi.movements() });
@@ -428,6 +484,26 @@ export default function InventoryPage() {
       .map(([cat, items]) => ({ cat, meta: metaFor(cat), items }))
       .sort((a, b) => a.meta.order - b.meta.order);
   }, [stock]);
+
+  // Grupos filtrados por el chip activo (vacíos se descartan).
+  const displayGroups = useMemo(() => {
+    if (!quickFilter) return groups;
+    return groups
+      .map((g) => ({
+        ...g,
+        items: g.items.filter((s) =>
+          quickFilter === 'low'
+            ? s.alertLevel === 'low'
+            : s.alertLevel === 'expiring' || s.alertLevel === 'critical',
+        ),
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [groups, quickFilter]);
+
+  function toggleFilter(f: Exclude<QuickFilter, null>) {
+    setQuickFilter((prev) => (prev === f ? null : f));
+    setView('stock');
+  }
 
   const movements = movementsQuery.data ?? [];
   const filteredMovements = useMemo(
@@ -511,26 +587,87 @@ export default function InventoryPage() {
       ) : (
         /* --- Vista de stock --- */
         <>
-          {showEntry && <StockEntryForm onClose={() => setShowEntry(false)} />}
+          {showEntry && <StockEntryForm onClose={() => setShowEntry(false)} stockHints={stock ?? []} />}
 
           <section aria-label="Resumen de inventario" className="flex flex-wrap gap-3">
             {stockQuery.isLoading ? (
               Array.from({ length: 3 }, (_, i) => <ChipSkeleton key={i} />)
             ) : summary ? (
               <>
-                <SummaryChip icon={Boxes} label="Ítems con stock" value={num(summary.products)} tone="primary" />
-                <SummaryChip icon={Package} label="Con stock bajo" value={num(summary.low)} tone={summary.low > 0 ? 'amber' : 'primary'} />
-                <SummaryChip icon={PackageX} label="Por vencer o vencidos" value={num(summary.expiring)} tone={summary.expiring > 0 ? 'danger' : 'primary'} />
+                <SummaryChip
+                  icon={Boxes}
+                  label="Ítems con stock"
+                  value={num(summary.products)}
+                  tone="primary"
+                  onClick={() => setQuickFilter(null)}
+                  active={quickFilter === null}
+                />
+                <SummaryChip
+                  icon={Package}
+                  label="Con stock bajo"
+                  value={num(summary.low)}
+                  tone={summary.low > 0 ? 'amber' : 'primary'}
+                  onClick={() => toggleFilter('low')}
+                  active={quickFilter === 'low'}
+                />
+                <SummaryChip
+                  icon={PackageX}
+                  label="Por vencer o vencidos"
+                  value={num(summary.expiring)}
+                  tone={summary.expiring > 0 ? 'danger' : 'primary'}
+                  onClick={() => toggleFilter('expiring')}
+                  active={quickFilter === 'expiring'}
+                />
               </>
             ) : null}
           </section>
 
+          {/* Banner contextual cuando hay un filtro activo */}
+          {quickFilter === 'low' && summary && (
+            <div className="flex items-start justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+              <div>
+                <p className="font-medium text-amber-800">
+                  {summary.low === 0 ? 'Ningún ítem con stock bajo' : `${summary.low} ${summary.low === 1 ? 'ítem tiene' : 'ítems tienen'} stock bajo o por debajo del mínimo`}
+                </p>
+                <p className="mt-0.5 text-sm text-amber-700">Ingresá stock para normalizar. Hacé click en un ítem para ver sus movimientos.</p>
+              </div>
+              <Button size="sm" onClick={() => setShowEntry(true)} className="flex-none">
+                <Plus className="h-4 w-4" /> Ingresar stock
+              </Button>
+            </div>
+          )}
+          {quickFilter === 'expiring' && summary && (
+            <div className="flex items-start justify-between gap-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+              <div>
+                <p className="font-medium text-red-800">
+                  {summary.expiring === 0 ? 'Ningún ítem por vencer o vencido' : `${summary.expiring} ${summary.expiring === 1 ? 'ítem' : 'ítems'} por vencer o vencidos`}
+                </p>
+                <p className="mt-0.5 text-sm text-red-700">Revisá estos lotes. Podés darlos de baja o hacer un ajuste de inventario desde las acciones de cada fila.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQuickFilter(null)}
+                className="flex-none text-sm text-red-600 hover:text-red-800"
+                aria-label="Cerrar filtro"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
           {stockQuery.isLoading ? (
             <TableSkeleton />
+          ) : displayGroups.length === 0 && quickFilter ? (
+            <EmptyState
+              icon={quickFilter === 'low' ? Package : PackageX}
+              title={quickFilter === 'low' ? 'Ningún ítem con stock bajo' : 'Ningún ítem por vencer o vencido'}
+              description={quickFilter === 'low' ? '¡Todo el stock está en nivel normal!' : '¡Todos los lotes están dentro de fecha!'}
+              action={<Button variant="secondary" onClick={() => setQuickFilter(null)}>Ver todo el stock</Button>}
+            />
           ) : groups.length === 0 ? (
             <EmptyState icon={Package} title="Sin stock cargado" description="A medida que recibas leche, cierres producción o ingreses insumos, el stock aparece acá." />
           ) : (
-            groups.map(({ cat, meta, items }) => {
+            displayGroups.map(({ cat, meta, items }) => {
               const Icon = meta.icon;
               const isOpen = !collapsed.has(cat);
               return (
@@ -543,6 +680,7 @@ export default function InventoryPage() {
                     <ChevronDown className={`h-4 w-4 text-foreground-muted transition-transform ${isOpen ? '' : '-rotate-90'}`} aria-hidden="true" />
                     <Icon className="h-5 w-5 text-foreground-muted" aria-hidden="true" />
                     {meta.label}
+                    {quickFilter && <span className="ml-auto text-xs font-normal text-foreground-muted">{items.length} {items.length === 1 ? 'ítem' : 'ítems'}</span>}
                   </button>
                   {isOpen && (
                     <Card className="divide-y divide-border-subtle overflow-hidden p-0">

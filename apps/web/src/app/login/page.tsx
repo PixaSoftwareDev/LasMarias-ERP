@@ -113,16 +113,22 @@ export default function LoginPage() {
 
           {SHOW_QUICK_LOGIN && (
             <div className="mt-6 border-t border-border-subtle pt-5">
-              <p className="mb-2 text-xs text-foreground-subtle">Acceso rápido (demo)</p>
+              <p className="mb-2 text-xs text-foreground-muted">Acceso rápido</p>
               <button
                 type="button"
+                disabled={isSubmitting}
                 onClick={() => {
                   setValue('email', DEV_USER.email);
                   setValue('password', DEV_USER.password);
+                  handleSubmit(onSubmit)();
                 }}
-                className="rounded-md border border-border-subtle bg-surface-elevated px-3 py-1.5 text-xs text-foreground-muted transition-colors hover:border-primary-300 hover:text-primary-700"
+                className="flex w-full items-center justify-between rounded-lg border border-primary-200 bg-primary-50 px-4 py-3 text-left transition-colors hover:bg-primary-100 disabled:opacity-50"
               >
-                Administrador
+                <span>
+                  <span className="block text-sm font-semibold text-primary-700">Administrador</span>
+                  <span className="block text-xs text-primary-600/70">{DEV_USER.email}</span>
+                </span>
+                <span className="text-xs font-medium text-primary-600">Entrar →</span>
               </button>
             </div>
           )}

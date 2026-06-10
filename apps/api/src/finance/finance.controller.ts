@@ -3,12 +3,14 @@ import type { Response } from 'express';
 import { z } from 'zod';
 import {
   createCashMovementInputSchema,
+  reconcileMovementInputSchema,
   createAccountInputSchema,
   updateAccountInputSchema,
   createExpenseCategoryInputSchema,
   createChequeInputSchema,
   updateChequeStatusInputSchema,
   type CreateCashMovementInput,
+  type ReconcileMovementInput,
   type CreateAccountInput,
   type UpdateAccountInput,
   type CreateExpenseCategoryInput,
@@ -35,6 +37,7 @@ const cashFlowQuerySchema = z.object({
 const dateRangeSchema = z.object({
   from: z.coerce.date(),
   to: z.coerce.date(),
+  accountId: z.string().uuid().optional(),
 });
 
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -108,6 +111,7 @@ export class FinanceController {
     return this.cheques.updateStatus(id, body, user.sub);
   }
 
+  // --- Movimientos de caja ---
   @Post('cash-movements')
   @Roles('admin', 'gerente')
   createCashMovement(
@@ -120,9 +124,24 @@ export class FinanceController {
   @Get('cash-movements')
   @Roles('admin', 'gerente')
   listCashMovements(
-    @Query(new ZodValidationPipe(dateRangeSchema)) q: { from: Date; to: Date },
+    @Query(new ZodValidationPipe(dateRangeSchema)) q: { from: Date; to: Date; accountId?: string },
   ) {
-    return this.finance.listCashMovements(q.from, q.to);
+    return this.finance.listCashMovements(q.from, q.to, q.accountId);
+  }
+
+  @Get('cash-movements/unreconciled')
+  @Roles('admin', 'gerente')
+  listUnreconciled(@Query('accountId', new ParseUUIDPipe()) accountId: string) {
+    return this.finance.listUnreconciled(accountId);
+  }
+
+  @Patch('cash-movements/:id/reconcile')
+  @Roles('admin', 'gerente')
+  reconcileMovement(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(reconcileMovementInputSchema)) body: ReconcileMovementInput,
+  ) {
+    return this.finance.reconcileMovement(id, body);
   }
 
   @Get('cash-flow')

@@ -37,6 +37,9 @@ export class CashMovementEntity {
   @Column({ type: 'uuid', name: 'created_by', nullable: true })
   createdById!: string | null;
 
+  @Column({ type: 'boolean', default: false })
+  reconciled!: boolean;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 }

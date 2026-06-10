@@ -28,6 +28,9 @@ export class ChequeEntity extends BaseEntity {
   @Column({ type: 'varchar', length: 200, nullable: true })
   counterparty!: string | null;
 
+  @Column({ type: 'varchar', length: 200, name: 'rejection_reason', nullable: true })
+  rejectionReason!: string | null;
+
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
 

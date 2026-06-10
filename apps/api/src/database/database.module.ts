@@ -15,9 +15,8 @@ import { entities } from './entities';
         username: env.postgres.username,
         password: env.postgres.password,
         entities,
-        synchronize: false, // siempre migraciones, nunca synchronize en prod
-        migrationsRun: false,
-        logging: !env.isProduction ? ['error', 'warn', 'migration'] : ['error'],
+        synchronize: true,
+        logging: !env.isProduction ? ['error', 'warn'] : ['error'],
       }),
     }),
   ],

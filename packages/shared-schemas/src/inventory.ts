@@ -71,6 +71,9 @@ export const stockSummarySchema = z.object({
   // Nombres de las cámaras/sectores donde hay lotes de este producto.
   warehouses: z.array(z.string()).optional(),
   alertLevel: z.enum(['ok', 'low', 'critical', 'expiring']).optional(),
+  // Último costo unitario conocido (en ARS) de un lote de este producto. Para pre-rellenar
+  // el campo de costo al ingresar stock nuevo. null si nunca se cargó costo.
+  lastUnitCost: z.number().nullable().optional(),
 });
 export type StockSummary = z.infer<typeof stockSummarySchema>;
 

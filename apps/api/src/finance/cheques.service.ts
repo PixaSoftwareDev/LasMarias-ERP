@@ -66,6 +66,10 @@ export class ChequesService {
     return this.dataSource.transaction(async (manager) => {
       cheque.status = input.status;
       cheque.accountId = accountId;
+      if (input.status === 'rechazado' && input.rejectionReason) {
+        cheque.rejectionReason = input.rejectionReason;
+      }
+      if (input.notes) cheque.notes = input.notes;
       const saved = await manager.getRepository(ChequeEntity).save(cheque);
 
       // Solo "cobrado" mueve plata. recibido → ingreso; propio → egreso.
@@ -99,6 +103,7 @@ export class ChequesService {
       accountId: c.accountId,
       accountName,
       counterparty: c.counterparty,
+      rejectionReason: c.rejectionReason,
       notes: c.notes,
       createdAt: c.createdAt.toISOString(),
     };
