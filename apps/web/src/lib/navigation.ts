@@ -88,6 +88,7 @@ const PHASE1_HREFS = new Set<string>([
   '/ventas',
   '/finanzas',
   '/cuentas',
+  '/pagos',
   '/pagos-tambos',
   '/cuentas-pagar',
   '/caja',

@@ -31,7 +31,7 @@ function StatCard({
             <Icon className="h-4 w-4" aria-hidden="true" />
           </span>
           <p className="text-[11px] uppercase tracking-wide text-foreground-muted">{label}</p>
-          <p className={`font-display text-2xl font-bold tracking-tight ${valueColor}`}>{value}</p>
+          <p className={`font-display text-xl font-bold tabular-nums tracking-tight ${valueColor}`}>{value}</p>
           {sub && <div className="text-xs text-foreground-muted">{sub}</div>}
           <span className="mt-auto inline-flex items-center gap-1 pt-1 text-xs font-medium text-primary-700">
             {cta} <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
@@ -97,14 +97,14 @@ export default function FinanzasPage() {
               <Receipt className="h-4 w-4" aria-hidden="true" />
             </span>
             <p className="text-[11px] uppercase tracking-wide text-foreground-muted">Le debo (total)</p>
-            <p className={`font-display text-2xl font-bold tracking-tight ${totalDebo > 0 ? 'text-danger' : 'text-foreground'}`}>{money(totalDebo)}</p>
+            <p className={`font-display text-xl font-bold tabular-nums tracking-tight ${totalDebo > 0 ? 'text-danger' : 'text-foreground'}`}>{money(totalDebo)}</p>
             <div className="text-xs text-foreground-muted">
               Tambos {money(deboTambos)} · Insumos {money(deboProv)}
               {provVencido > 0 ? <> · <span className="font-medium text-danger">{money(provVencido)} vencido</span></> : null}
             </div>
             <div className="mt-auto flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs font-medium text-primary-700">
-              <Link href="/pagos-tambos" className="inline-flex items-center gap-1 hover:underline">Pagar tambos <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" /></Link>
-              <Link href="/cuentas-pagar" className="inline-flex items-center gap-1 hover:underline">Pagar insumos <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" /></Link>
+              <Link href="/pagos?seccion=tambos" className="inline-flex items-center gap-1 hover:underline">Pagar tambos <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" /></Link>
+              <Link href="/pagos?seccion=insumos" className="inline-flex items-center gap-1 hover:underline">Pagar insumos <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" /></Link>
             </div>
           </CardContent>
         </Card>
@@ -119,11 +119,28 @@ export default function FinanzasPage() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Card>
           <CardContent className="pt-6">
-            <p className="text-[11px] uppercase tracking-wide text-foreground-muted" title="Plata disponible + lo que te deben − lo que debés">
+            <p className="text-[11px] uppercase tracking-wide text-foreground-muted" title="Lo que tenés + lo que te deben − lo que debés">
               Posición neta
             </p>
-            <p className={`mt-1 font-display text-3xl font-bold tracking-tight ${neta < 0 ? 'text-danger' : 'text-foreground'}`}>{signedMoney(neta)}</p>
-            <p className="mt-1 text-xs text-foreground-muted">Disponible {money(disponible)} + por cobrar {money(meDeben)} − por pagar {money(totalDebo)}</p>
+            {/* Mini estado: lo que tenés + por cobrar − por pagar = en total. */}
+            <dl className="mt-3 space-y-2">
+              <div className="flex items-center justify-between gap-4">
+                <dt className="text-sm text-foreground-muted">Tenés (caja y bancos)</dt>
+                <dd className="font-display text-base font-semibold tabular-nums text-primary-700">+{money(disponible)}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <dt className="text-sm text-foreground-muted">Te deben</dt>
+                <dd className="font-display text-base font-semibold tabular-nums text-primary-700">+{money(meDeben)}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <dt className="text-sm text-foreground-muted">Debés</dt>
+                <dd className="font-display text-base font-semibold tabular-nums text-danger">−{money(totalDebo)}</dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-4 border-t border-border-subtle pt-2.5">
+                <dt className="text-sm font-medium text-foreground">En total</dt>
+                <dd className={`font-display text-2xl font-bold tabular-nums tracking-tight ${neta < 0 ? 'text-danger' : 'text-foreground'}`}>{signedMoney(neta)}</dd>
+              </div>
+            </dl>
           </CardContent>
         </Card>
 
@@ -131,12 +148,26 @@ export default function FinanzasPage() {
           <Card className="h-full transition-all hover:border-primary-300 hover:shadow-md">
             <CardContent className="pt-6">
               <p className="text-[11px] uppercase tracking-wide text-foreground-muted">Caja del mes</p>
-              <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-                <span className="inline-flex items-center gap-1 text-primary-700"><TrendingUp className="h-4 w-4" aria-hidden="true" /> {money(mes?.totalIncome ?? 0)}</span>
-                <span className="inline-flex items-center gap-1 text-danger"><TrendingDown className="h-4 w-4" aria-hidden="true" /> {money(mes?.totalExpense ?? 0)}</span>
-                <span className={`font-display text-xl font-bold tracking-tight ${(mes?.net ?? 0) < 0 ? 'text-danger' : 'text-foreground'}`}>Neto {signedMoney(mes?.net ?? 0)}</span>
-              </div>
-              <span className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary-700">
+              {/* Mini estado de cuenta: entró / salió / quedó. Lo que quedó domina. */}
+              <dl className="mt-3 space-y-2">
+                <div className="flex items-center justify-between gap-4">
+                  <dt className="inline-flex items-center gap-1.5 text-sm text-foreground-muted">
+                    <TrendingUp className="h-4 w-4 text-primary-600" aria-hidden="true" /> Entró
+                  </dt>
+                  <dd className="font-display text-base font-semibold tabular-nums text-primary-700">+{money(mes?.totalIncome ?? 0)}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <dt className="inline-flex items-center gap-1.5 text-sm text-foreground-muted">
+                    <TrendingDown className="h-4 w-4 text-danger" aria-hidden="true" /> Salió
+                  </dt>
+                  <dd className="font-display text-base font-semibold tabular-nums text-danger">−{money(mes?.totalExpense ?? 0)}</dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-4 border-t border-border-subtle pt-2.5">
+                  <dt className="text-sm font-medium text-foreground">Quedó</dt>
+                  <dd className={`font-display text-2xl font-bold tabular-nums tracking-tight ${(mes?.net ?? 0) < 0 ? 'text-danger' : 'text-foreground'}`}>{signedMoney(mes?.net ?? 0)}</dd>
+                </div>
+              </dl>
+              <span className="mt-4 inline-flex items-center gap-1 text-xs font-medium text-primary-700">
                 Ver flujo de caja <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
               </span>
             </CardContent>

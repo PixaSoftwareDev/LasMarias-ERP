@@ -134,7 +134,7 @@ function ChequeDetailDrawer({ cheque, onClose }: { cheque: Cheque; onClose: () =
             {cheque.accountName && (
               <Row
                 icon={<ArrowRight className="h-4 w-4" />}
-                label={isRecibido ? 'Se acredita en' : 'Débito en'}
+                label={isRecibido ? 'Se cobra en' : 'Se paga de'}
                 value={cheque.accountName}
               />
             )}
@@ -149,7 +149,7 @@ function ChequeDetailDrawer({ cheque, onClose }: { cheque: Cheque; onClose: () =
           {cheque.counterparty && (
             <div className="rounded-xl border border-border-subtle bg-secondary-50/50 p-4">
               <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
-                Trazabilidad
+                Recorrido del cheque
               </p>
               <div className="flex items-center gap-2 text-sm">
                 <span className="rounded bg-white px-2 py-1 font-medium shadow-sm">
@@ -378,13 +378,13 @@ function NewChequeForm({ onDone }: { onDone: () => void }) {
           <Field label="Vencimiento" htmlFor="ch-due" hint="Opcional.">
             <Input id="ch-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
           </Field>
-          <Field label="Cuenta al cobrar" htmlFor="ch-acc" hint="Dónde se acredita/debita.">
+          <Field label="Cuenta al cobrar" htmlFor="ch-acc" hint="Dónde entra o sale la plata.">
             <select id="ch-acc" className={SELECT_CLASS} value={accountId} onChange={(e) => setAccountId(e.target.value)}>
               <option value="">Caja (por defecto)</option>
               {(accountsQuery.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           </Field>
-          <Field label={kind === 'recibido' ? 'De quién' : 'A quién'} htmlFor="ch-cp" hint="Para trazabilidad.">
+          <Field label={kind === 'recibido' ? 'De quién' : 'A quién'} htmlFor="ch-cp" hint="Para el seguimiento.">
             <Input id="ch-cp" placeholder={kind === 'recibido' ? 'Nombre del cliente' : 'Nombre del proveedor'} value={counterparty} onChange={(e) => setCounterparty(e.target.value)} />
           </Field>
         </div>
@@ -488,7 +488,7 @@ export default function ChequesPage() {
                 <span className="block font-display text-xl font-bold text-danger">
                   {rechazados.length} cheque{rechazados.length !== 1 ? 's' : ''}
                 </span>
-                <span className="text-xs text-danger/70">Revisá la trazabilidad para reclamar</span>
+                <span className="text-xs text-danger/70">Abrí el detalle para ver a quién reclamar</span>
               </span>
             </div>
           )}
@@ -600,11 +600,7 @@ export default function ChequesPage() {
                       <XCircle className="h-3.5 w-3.5" /> Rechazado
                     </Button>
                   </div>
-                ) : (
-                  <span className="text-xs text-foreground-muted">
-                    {STATUS_BADGE[c.status].label}
-                  </span>
-                ),
+                ) : null,
             },
           ]}
         />

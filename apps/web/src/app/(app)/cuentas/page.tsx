@@ -315,9 +315,17 @@ export default function CuentasPage() {
             { key: 'client', header: 'Cliente', primary: true, render: (a: AccountBalance) => a.clientName, sortValue: (a: AccountBalance) => a.clientName },
             {
               key: 'warnings',
-              header: 'Avisos',
+              header: 'Atención',
               render: (a: AccountBalance) =>
-                a.warnings.length > 0 ? <StatusBadge status="warning">{a.warnings.length} aviso(s)</StatusBadge> : '—',
+                a.warnings.length > 0 ? (
+                  <span title={a.warnings.join(' · ')}>
+                    <StatusBadge status="warning">
+                      {a.warnings.length === 1 ? '1 aviso' : `${a.warnings.length} avisos`}
+                    </StatusBadge>
+                  </span>
+                ) : (
+                  <span className="text-foreground-muted">Al día</span>
+                ),
             },
             {
               key: 'balance',

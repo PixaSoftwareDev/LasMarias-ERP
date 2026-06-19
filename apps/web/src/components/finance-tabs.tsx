@@ -10,8 +10,7 @@ import { cn } from '@/lib/utils';
 const TABS: { href: string; label: string }[] = [
   { href: '/finanzas', label: 'Resumen' },
   { href: '/cuentas', label: 'Cobranzas' },
-  { href: '/pagos-tambos', label: 'Pagos a tambos' },
-  { href: '/cuentas-pagar', label: 'Cuentas por pagar' },
+  { href: '/pagos', label: 'Pagos' },
   { href: '/caja', label: 'Caja y bancos' },
   { href: '/cheques', label: 'Cheques' },
 ];

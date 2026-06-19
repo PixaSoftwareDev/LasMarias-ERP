@@ -48,7 +48,7 @@ export default function RecipesPage() {
           columns={[
             { key: 'name', header: 'Receta', render: (r) => r.name, primary: true },
             { key: 'product', header: 'Producto', render: (r) => r.productName, secondary: true },
-            { key: 'yield', header: 'Rendimiento (kg/L)', render: (r) => r.activeVersion?.baseYieldKgPerLiter.toFixed(4) ?? '—', align: 'right' },
+            { key: 'yield', header: 'Rendimiento (kg/L)', render: (r) => r.activeVersion != null ? r.activeVersion.baseYieldKgPerLiter.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '—', align: 'right' },
             { key: 'version', header: 'Versión', render: (r) => r.activeVersion ? `v${r.activeVersion.versionNumber}` : '—' },
             { key: 'ingredients', header: 'Insumos', render: (r) => r.activeVersion?.ingredients.length ?? 0, align: 'right' },
             {

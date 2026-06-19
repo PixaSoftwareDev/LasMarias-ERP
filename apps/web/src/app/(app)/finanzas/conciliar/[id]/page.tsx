@@ -23,6 +23,7 @@ import { TableSkeleton } from '@/components/ui/skeleton';
 import { financeApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { formatMoney as money, formatDate as dateFmt } from '@/lib/utils';
+import { categoryLabel } from '@/lib/finance-labels';
 import type { CashMovement } from '@lasmarias/shared-schemas';
 
 const SELECT_CLASS =
@@ -143,7 +144,7 @@ export default function ConciliarPage({ params }: { params: { id: string } }) {
             Conciliando: {account?.name ?? '…'}
           </h1>
           <p className="text-sm text-foreground-muted">
-            Abrí el homebanking en otra pestaña y comparalo con el sistema
+            Abrí el banco por internet en otra pestaña y comparalo con lo que tenés cargado
           </p>
         </div>
       </div>
@@ -174,7 +175,7 @@ export default function ConciliarPage({ params }: { params: { id: string } }) {
               onChange={(e) => setBankBalanceStr(e.target.value)}
             />
           </div>
-          <p className="text-xs text-foreground-muted">Copialo del homebanking</p>
+          <p className="text-xs text-foreground-muted">Copialo del banco por internet</p>
         </div>
 
         {/* Saldo sistema */}
@@ -228,13 +229,13 @@ export default function ConciliarPage({ params }: { params: { id: string } }) {
         <p className="mb-3 text-sm font-semibold text-foreground">
           Agregar movimiento que ves en el banco y no está en el sistema
         </p>
-        <div className="flex flex-wrap items-end gap-3">
-          {/* Toggle ingreso/gasto */}
-          <div className="flex overflow-hidden rounded-lg border border-border bg-secondary-50">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+          {/* Toggle ingreso/gasto — full-width en mobile (50/50), ancho natural en desktop */}
+          <div className="flex w-full overflow-hidden rounded-lg border border-border bg-secondary-50 sm:w-auto">
             <button
               type="button"
               onClick={() => setQuickKind('income')}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors ${
+              className={`flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors sm:flex-none ${
                 quickKind === 'income'
                   ? 'bg-primary-600 text-white'
                   : 'text-foreground-muted hover:text-foreground'
@@ -245,7 +246,7 @@ export default function ConciliarPage({ params }: { params: { id: string } }) {
             <button
               type="button"
               onClick={() => setQuickKind('expense')}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors ${
+              className={`flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors sm:flex-none ${
                 quickKind === 'expense'
                   ? 'bg-danger text-white'
                   : 'text-foreground-muted hover:text-foreground'
@@ -255,7 +256,7 @@ export default function ConciliarPage({ params }: { params: { id: string } }) {
             </button>
           </div>
 
-          <div className="flex-1 min-w-[160px]">
+          <div className="w-full sm:flex-1 sm:min-w-[160px]">
             <Input
               placeholder="Descripción (ej: comisión bancaria)"
               value={quickDesc}
@@ -263,7 +264,7 @@ export default function ConciliarPage({ params }: { params: { id: string } }) {
             />
           </div>
 
-          <div className="w-36">
+          <div className="w-full sm:w-36">
             <Input
               type="number"
               inputMode="decimal"
@@ -284,6 +285,7 @@ export default function ConciliarPage({ params }: { params: { id: string } }) {
             loading={addMovement.isPending}
             loadingText="Agregando..."
             disabled={!canAdd}
+            className="w-full sm:w-auto"
           >
             <Plus className="h-4 w-4" /> Agregar y conciliar
           </Button>
@@ -415,16 +417,16 @@ function MovementRow({
           <StatusBadge status={isIncome ? 'success' : 'danger'}>
             {isIncome ? 'Ingreso' : 'Gasto'}
           </StatusBadge>
-          <span className="text-sm font-medium text-foreground truncate">{movement.category}</span>
+          <span className="text-sm font-medium text-foreground truncate">{categoryLabel(movement.category)}</span>
         </div>
-        <div className="mt-0.5 flex items-center gap-2 text-xs text-foreground-muted">
-          <span>{dateFmt(movement.occurredAt)}</span>
-          {movement.notes && <span>· {movement.notes}</span>}
+        <div className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-foreground-muted">
+          <span className="flex-shrink-0">{dateFmt(movement.occurredAt)}</span>
+          {movement.notes && <span className="truncate">· {movement.notes}</span>}
         </div>
       </div>
 
       <span
-        className={`flex-shrink-0 font-display text-lg font-bold ${
+        className={`flex-shrink-0 whitespace-nowrap font-display text-base font-bold sm:text-lg ${
           isIncome ? 'text-primary-700' : 'text-danger'
         }`}
       >

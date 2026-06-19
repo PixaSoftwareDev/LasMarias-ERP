@@ -21,7 +21,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable } from '@/components/ui/data-table';
 import { EmptyState } from '@/components/ui/empty-state';
 import { StatusBadge } from '@/components/ui/status-badge';
-import { SegmentedControl } from '@/components/ui/segmented-control';
 import { PageHeader } from '@/components/page-header';
 import { FinanceTabs } from '@/components/finance-tabs';
 import { DateRangeFilter } from '@/components/ui/date-range';
@@ -29,6 +28,7 @@ import { financeApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useConfirm } from '@/hooks/use-confirm';
 import { formatMoney as money, formatDate as dateFmt } from '@/lib/utils';
+import { categoryLabel } from '@/lib/finance-labels';
 import { TableSkeleton, ChipsSkeleton } from '@/components/ui/skeleton';
 import type { Account, CashMovement, ReportGranularity, AccountKind } from '@lasmarias/shared-schemas';
 
@@ -99,11 +99,9 @@ function AccountCard({
       >
         {money(account.balance)}
       </span>
-      {isBank && (
-        <span className={`text-[10px] font-medium ${active ? 'text-primary-600' : 'text-foreground-muted'}`}>
-          Banco · {active ? 'Mostrando movimientos' : 'Clic para ver'}
-        </span>
-      )}
+      <span className={`text-[10px] font-medium ${active ? 'text-primary-600' : 'text-foreground-muted'}`}>
+        {active ? 'Viendo movimientos' : 'Ver movimientos'}
+      </span>
     </button>
   );
 }
@@ -431,7 +429,8 @@ export default function CajaPage() {
   const defaults = useMemo(monthDefaults, []);
   const [from, setFrom] = useState(defaults.from);
   const [to, setTo] = useState(defaults.to);
-  const [granularity, setGranularity] = useState<ReportGranularity>('day');
+  // El export agrupa el flujo de caja por día; no exponemos el control al usuario.
+  const granularity: ReportGranularity = 'day';
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null); // null = "Todas"
   const [showMovementModal, setShowMovementModal] = useState(false);
   const [showNewAccount, setShowNewAccount] = useState(false);
@@ -441,12 +440,6 @@ export default function CajaPage() {
   const accountsQuery = useQuery({
     queryKey: ['finance-accounts'],
     queryFn: () => financeApi.accounts(),
-  });
-
-  const flowQuery = useQuery({
-    queryKey: ['cash-flow', from, to, granularity],
-    queryFn: () => financeApi.cashFlow(from, toEndOfDay(to), granularity),
-    enabled: validRange,
   });
 
   const movementsQuery = useQuery({
@@ -464,7 +457,6 @@ export default function CajaPage() {
   const accounts = accountsQuery.data ?? [];
   const totalBalance = accounts.reduce((s, a) => s + a.balance, 0);
   const movements = movementsQuery.data ?? [];
-  const flow = flowQuery.data;
 
   const selectedAccount = selectedAccountId
     ? accounts.find((a) => a.id === selectedAccountId)
@@ -502,6 +494,9 @@ export default function CajaPage() {
         <ChipsSkeleton count={3} />
       ) : (
         <div className="space-y-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">
+            Tus cuentas — tocá una para ver solo sus movimientos
+          </p>
           <div className="flex flex-wrap gap-3 overflow-x-auto pb-1">
             <AllAccountsCard
               active={selectedAccountId === null}
@@ -544,20 +539,8 @@ export default function CajaPage() {
       )}
 
       {/* Filtro de período */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
+      <div className="flex flex-wrap items-end gap-4">
         <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        <div className="space-y-1">
-          <span className="block text-xs font-medium text-foreground-muted">Agrupar</span>
-          <SegmentedControl
-            label="Agrupar caja"
-            value={granularity}
-            onChange={setGranularity}
-            options={[
-              { value: 'day', label: 'Por día' },
-              { value: 'month', label: 'Por mes' },
-            ]}
-          />
-        </div>
       </div>
 
       {!validRange && (
@@ -582,7 +565,7 @@ export default function CajaPage() {
             icon={TrendingDown}
           />
           <KpiChip
-            label="Neto del período"
+            label="Resultado del período"
             value={periodNet >= 0 ? `+${money(periodNet)}` : `−${money(Math.abs(periodNet))}`}
             tone={periodNet >= 0 ? 'neutral' : 'danger'}
             icon={Banknote}
@@ -657,7 +640,7 @@ export default function CajaPage() {
                   secondary: true,
                   render: (m: CashMovement) => dateFmt(m.occurredAt),
                 },
-                { key: 'category', header: 'Categoría', render: (m: CashMovement) => m.category },
+                { key: 'category', header: 'Categoría', render: (m: CashMovement) => categoryLabel(m.category) },
                 {
                   key: 'account',
                   header: 'Cuenta',
