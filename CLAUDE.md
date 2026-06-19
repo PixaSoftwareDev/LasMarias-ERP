@@ -1,6 +1,8 @@
 # Sistema de Gestión para Quesería — Las Marías
 
-> **Para Claude (Code):** Este documento es la especificación maestra y la fuente de verdad del proyecto. Define **cómo trabaja el equipo**, **qué se construye y en qué orden**, y **el corazón del sistema: la calculadora de costo**. Si una decisión técnica no está acá, priorizá la **exactitud de los cálculos** y la **simplicidad para el usuario final** por encima de cualquier elegancia técnica. Ante la duda entre simple y completo, elegí simple.
+> **Para Claude (Code):** Este documento es la especificación maestra y la fuente de verdad del proyecto. Define **cómo trabaja el equipo**, **el alcance del producto (cerrado)** y **el corazón del sistema: la calculadora de costo**. Si una decisión técnica no está acá, priorizá la **exactitud de los cálculos** y la **simplicidad para el usuario final** por encima de cualquier elegancia técnica. Ante la duda entre simple y completo, elegí simple.
+>
+> **Estado: producto CERRADO con el alcance actual. No hay Fase 2 ni fases futuras planificadas.** Cualquier ampliación es una decisión nueva del dueño, por fuera de este documento.
 
 ---
 
@@ -21,13 +23,13 @@ Claude actúa como **Tech Lead / Orquestador** de un equipo de desarrollo de un 
 
 Nada se da por **hecho** hasta que pasó por: **Backend o Frontend → QA → Revisor → integración por el Tech Lead.**
 
-### Flujo de trabajo
+### Flujo de trabajo (mantenimiento del producto cerrado)
 
-1. Analista de dominio + Arquitecto revisan la app actual y la mapean contra las fases.
-2. Entregan un **diagnóstico**: qué queda en Fase 1, qué se difiere, qué se **elimina** por sobre-ingeniería, qué **falta** para completar la Fase 1.
-3. Proponen el **reordenamiento** (pantallas + modelo de datos) y el **diseño detallado de la calculadora de costo**.
-4. QA define los **casos de prueba de la calculadora ANTES** de implementarla.
-5. **El Tech Lead frena, entrega diagnóstico + plan + diseño + casos de prueba, y espera aprobación del dueño antes de escribir código de la app.**
+El producto está cerrado. Para cualquier cambio o corrección:
+
+1. El equipo revisa lo existente y evalúa el impacto, **sobre todo en la calculadora de costo** (nada la rompe).
+2. Entregan el **diseño** (pantallas + datos afectados) y los **casos de prueba**.
+3. **El Tech Lead frena, entrega el plan y espera aprobación del dueño antes de escribir código.**
 
 ---
 
@@ -43,53 +45,30 @@ La app **reemplaza ese Excel**. El usuario final es un **operario de planta** y 
 
 ## 3. Principios rectores (no negociables)
 
-1. **Simplicidad ante todo.** Una pantalla por hoja del Excel. Si algo no sale de una columna del Excel, va a una fase posterior.
+1. **Simplicidad ante todo.** Una pantalla por hoja del Excel. Si algo no sale de una columna del Excel, queda fuera del alcance.
 2. **La calculadora de costo es el corazón** y tiene que funcionar impecable: **cero errores, resultados verificables a mano.**
 3. **Cero sobre-ingeniería.** Si lo simple resuelve el 90%, se usa lo simple.
 4. **El stock nunca se carga a mano:** sube con producción, baja con despacho.
 
 ---
 
-## 4. Alcance por fases
+## 4. Alcance del producto (cerrado)
 
-> Las fases se respetan. **No se mezclan.** No se construye nada de una fase posterior sin aprobación explícita.
+> El producto está **cerrado con el alcance actual**. **No hay Fase 2 ni fases futuras planificadas.** Cualquier ampliación es una decisión nueva del dueño, por fuera de este documento, y nunca debe romper la calculadora de costo.
 
-### FASE 1 — MVP (5 pantallas, refleja el Excel)
+El sistema cubre el **ciclo completo** de la quesería: leche → producción con costo → stock → despacho → cobranza → finanzas. Pantallas y módulos que tiene:
 
-1. **Ingreso de leche:** fecha, tambo (lista), transporte, remito, litros, T°, acidez, pH, observaciones. Diferencia de litros automática.
-2. **Elaboración:** litros elaborados, kg de masa → rendimiento automático. **Acá vive la calculadora de costo** (ver sección 5).
-3. **Stock:** vista única de masa, mozzarella y envases. **Solo lectura.**
-4. **Despacho:** cliente (lista) + líneas (producto, kg, **precio a mano**) → importe automático. **Baja el stock al instante por FEFO.** (Sin estados, sin calendario, sin listas de precio — eso es de fases siguientes.)
-5. **Datos / maestros:** alta y edición de tambos, clientes y productos.
-
-> **Estado: FASE 1 ✅ COMPLETA y validada.** Las 5 pantallas y la calculadora funcionan. El código se acotó a Fase 1 (se quitaron los módulos de fases siguientes, recuperables desde git). Se avanza a la Fase 2 solo con aprobación.
-
-### Regla de oro del flujo (fases 2 en adelante)
-
-Una fase por vez. Antes de escribir código de una fase: (1) el equipo revisa lo existente y dice qué falta, (2) entrega diseño (pantallas + datos) + casos de prueba, (3) **el Tech Lead PARA y espera aprobación del dueño**. No se empieza la fase siguiente sin cerrar la anterior. Todo lo nuevo **alimenta o consulta la calculadora de costo, nunca la rompe.**
-
-### FASE 2 — extensiones SIMPLES sobre lo que ya se carga
-
-- **Trazabilidad por lote bidireccional y navegable:** de un lote de leche al cliente, y del cliente a la leche, pasando por masa y producto final (los datos ya están encadenados; falta poder recorrerlos).
-- **FEFO en despacho** (sugerir el lote que vence primero) + **ubicación en cámara**.
-- **Stock mínimo con alerta** para insumos (leche, fermentos, sal, envases).
-- **Análisis de calidad ampliado** en el ingreso ✅ (ya cargado).
-- **Liquidación al tambo: ⏸️ DIFERIDA — NO construir todavía.** Se frenó porque no está confirmado **cómo compra Las Marías la leche** (precio fijo vs. ajustado por calidad vs. tambo propio/usina). No tiene sentido construirla hasta saberlo. Si se reactiva, la fórmula de referencia aprobada es: `precio_ajustado/litro = precio_base × (1 + ajuste)`, con `ajuste` = suma de rangos — grasa (`≥3.6`→+0.03 / `<3.2`→−0.03), proteína (`≥3.3`→+0.02 / `<2.9`→−0.02), RCS (`≤200k`→+0.02 / `>400k`→−0.05); rango intermedio = 0; dato faltante = 0; `importe = litros × precio_ajustado`. **No reescribiría costos de lotes ya cerrados** (sólo ajustaría `agreedPricePerLiter` a futuro).
-- **Recetas con versionado** (los lotes viejos conservan su versión) + **simulador** de costo sin abrir orden real.
-- **Reportes básicos:** producción día/mes, ventas por cliente y producto, rendimiento real vs esperado. **Sin BI.**
-
-### FASE 3 — administración y contable, versión SIMPLE
-
-- **Ventas:** listas de precios (mayorista/minorista), cuentas por cobrar (saldo + antigüedad), devoluciones con nota de crédito, comprobantes.
-- **Compras y proveedores:** órdenes de compra, recepción de mercadería, cuentas por pagar. Los tambos entran como proveedor con liquidación.
-- **Costos y finanzas:** costo estándar vs real con desglose simple del desvío, rentabilidad por cliente, flujo de caja simple, export para el contador.
-
-### FASE 4 — minimalista (lo más simple posible, ampliable después)
-
-- **Pedidos con calendario de reparto básico:** zonas y días por zona. Sin reagendamiento automático ni notificaciones.
-- **Asistencia y mano de obra:** carga **manual** de horas (sin biometría); imputación simple de esas horas al costo de las órdenes.
-- **Dashboard simple:** 3-4 números clave (leche del día, kg producidos, stock crítico). Sin BI.
-- **Móvil / QR:** para lo último, solo si se necesita.
+- **Recepción de leche:** fecha, tambo, transporte, remito, litros declarados/recibidos (diferencia automática), T°, acidez, pH, observaciones; asignación a silo.
+- **Silos de leche:** nivel de cada silo y de toda la planta; sube con la recepción, baja con la elaboración (automático).
+- **Producción / Elaboración:** órdenes con la **calculadora de costo** (ver sección 5); costeo encadenado `leche → masa → producto`, real vs estándar.
+- **Recetas:** versionadas por producto (los lotes viejos conservan su versión), insumos con costo + subproductos, y **simulador** de costo sin abrir una orden real.
+- **Stock / Inventario:** vista única por categoría (materia prima, intermedios, productos, subproductos, insumos, envases) con stock mínimo y alertas. **Solo lectura:** sube con producción, baja con despacho.
+- **Trazabilidad:** recorrido bidireccional de un lote (de la leche al cliente y del cliente a la leche, pasando por masa y producto).
+- **Ventas / Despacho:** cliente + líneas (producto, kg, precio) → importe automático; baja de stock por **FEFO**; remito imprimible; devoluciones con nota de crédito.
+- **Finanzas:** cobranzas (cuenta corriente con saldo + antigüedad), pagos (tambos + proveedores de insumos), caja y bancos, cheques, conciliación bancaria, flujo de caja + gastos, rentabilidad por cliente.
+- **Reportes:** producción, ventas y rendimiento por período. **Sin BI.**
+- **Datos maestros:** productos, clientes, tambos, proveedores, cámaras, listas de precio, cotización del dólar/euro y datos de la empresa.
+- **Inicio:** panel accionable (accesos rápidos + KPIs + "para resolver") con calendario.
 
 ---
 
@@ -167,7 +146,7 @@ desvio_rendimiento  = rendimiento_real − rendimiento_esperado
 
 ### 🚫 Guardarraíles — NADA de esto en esta etapa
 
-Sin **microservicios**, **GraphQL**, **colas** (Redis/BullMQ), **biometría**, **Raspberry Pi**, **React Native / móvil**, **QR**, **Sentry/Grafana/S3/pgBackRest**, **conciliación bancaria**, **constructor de reportes ad-hoc**. Si algo de esto reaparece, es Fase 4 o más, y solo con aprobación explícita.
+Sin **microservicios**, **GraphQL**, **colas** (Redis/BullMQ), **biometría**, **Raspberry Pi**, **React Native / móvil**, **QR**, **Sentry/Grafana/S3/pgBackRest**, **constructor de reportes ad-hoc**. No son parte del producto cerrado; si alguna vez se necesitan, es una decisión nueva del dueño.
 
 ---
 
@@ -220,24 +199,16 @@ Sidebars de 20 ítems planos · tablas de 12 columnas en mobile · modales sobre
 
 ---
 
-## 9. Estado real del proyecto (actualizado 31/05/2026)
+## 9. Estado del proyecto — CERRADO (actualizado 19/06/2026)
 
-**Fases 1, 2 y la comercial (recorte de Fase 3) están construidas, andando y verificadas E2E.** La app cubre el ciclo completo: leche → producción con costo → stock → despacho → cobranza/cuenta corriente → finanzas, más trazabilidad, reportes y un Home con calendario.
+**El producto está cerrado y entregable.** Cubre el ciclo completo (leche → producción con costo → stock → despacho → cobranza/cuenta corriente → finanzas), más trazabilidad, reportes y un Home con calendario. Todo verificado E2E y validado **responsive** (desktop + móvil).
 
-- **Fase 1:** recepción, elaboración con calculadora de costo, inventario, despacho, maestros.
-- **Fase 2:** versionado de recetas (UI), cámara + stock mínimo, trazabilidad bidireccional + FEFO, reportes (producción/ventas/rendimiento).
-- **Comercial (Fase 3 recorte):** listas de precio por tipo de cliente, cuenta corriente (saldo + antigüedad) + cobros, devoluciones con nota de crédito, remito imprimible, flujo de caja + gastos, rentabilidad por cliente, export CSV, Home con panel + calendario (cobros/vencimientos/despachos).
-- **Diferido a propósito:** compras/proveedores y liquidación al tambo (hasta definir cómo se compra la leche); Fase 4 (asistencia manual, móvil/QR).
+- **Arquitectura:** solo web (NestJS `apps/api` + Next.js `apps/web`), PostgreSQL única base, monorepo pnpm + Turbo. Sin colas/Redis. Esquema sincronizado desde las entidades (sin migraciones versionadas).
+- **Lo que vive en el código:** auth/usuarios, recepción de leche, silos, recetas versionadas + simulador, producción con la **calculadora de costo** (real vs estándar, decimal exacto, costeo encadenado leche→masa→producto), inventario + FEFO, trazabilidad bidireccional, ventas/despacho (precio a mano, baja stock, remito, notas de crédito), finanzas (cobranzas, pagos a tambos y proveedores, caja y bancos, cheques, conciliación, flujo de caja, rentabilidad), reportes, datos maestros e Inicio.
+- **Calidad:** tests de dominio verdes (calculadora de costo + producción + FEFO), typecheck API + web limpios, build de producción OK.
 
-Se mantuvo el criterio original: el código se acotó a lo que se usa, reconstruyendo cada fase de forma simple y ordenada, una por vez.
-
-- **Arquitectura:** solo web (NestJS `apps/api` + Next.js `apps/web`), PostgreSQL única base, monorepo pnpm + Turbo. Sin colas/Redis.
-- **Fase 1 (lo que vive en el código):** auth/usuarios, recepción de leche (con remito, acidez, diferencia de litros), recetas (insumos con costo + subproductos), producción con la **calculadora de costo** (real vs estándar, decimal exacto, costeo encadenado leche→masa→producto), inventario + FEFO, **despacho directo** (precio a mano, baja stock), maestros (productos/clientes/tambos con alta y edición).
-- **Eliminado en la limpieza** (recuperable desde git; vuelve simple en su fase): calendario de reparto, comprobantes, listas de precios, compras/proveedores, liquidación al tambo, RRHH/asistencia, notificaciones, y BullMQ/Redis. Sus tablas se dropearon (migración `Phase1Cleanup`). *(Los **reportes** se reconstruyeron en Fase 2: producción, ventas y rendimiento.)*
-- **Calidad:** tests de dominio verdes (calculadora 12 casos + producción + FEFO), typecheck API + web limpios, build de producción OK.
-
-> A partir de acá se avanza **fase por fase** (sección 4, "Regla de oro"): el equipo revisa, diseña y define casos de prueba, y se **espera aprobación del dueño antes de construir**. Lo nuevo siempre alimenta o consulta la calculadora de costo, nunca la rompe.
+**Lo único que falta no es de producto sino de puesta en producción:** limpiar la base de datos demo y cargar datos reales, backups, hosting/modo producción. **No hay fases siguientes planificadas.**
 
 ---
 
-*Documento maestro — Quesería Las Marías, Argentina. MVP por fases, mayo 2026.*
+*Documento maestro — Quesería Las Marías, Argentina. Producto cerrado, junio 2026.*
