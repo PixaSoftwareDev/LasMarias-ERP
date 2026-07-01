@@ -46,6 +46,11 @@ export class BatchEntity extends BaseEntity {
   @Column({ type: 'uuid', name: 'parent_batch_id', nullable: true })
   parentBatchId!: string | null;
 
+  // N° de lote del proveedor para insumos trazables (fermento, calcio, cuajo). Lo exige
+  // bromatología. Null en lotes que no lo requieren (leche, producto terminado, etc.).
+  @Column({ type: 'varchar', length: 80, name: 'supplier_lot_number', nullable: true })
+  supplierLotNumber!: string | null;
+
   // Ubicación física del lote: cámara/sector donde está almacenado (CLAUDE.md §4.4).
   @Column({ type: 'uuid', name: 'warehouse_id', nullable: true })
   warehouseId!: string | null;

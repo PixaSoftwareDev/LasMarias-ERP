@@ -176,7 +176,10 @@
       "Bash(curl -s http://localhost:3000/login)",
       "Bash(grep -v \"^$\")",
       "Bash(PGPASSWORD=postgres psql -h localhost -p 5434 -U postgres -d lasmarias -c \"\\\\d cash_movements\")",
-      "Bash(pnpm --filter @lasmarias/web exec next build)"
+      "Bash(pnpm --filter @lasmarias/web exec next build)",
+      "Bash(pnpm --filter @lasmarias/api test -- --testPathPattern \"accounts.helpers|elaboration-cost\")",
+      "Bash(curl -s --retry 30 --retry-delay 2 --retry-all-errors -o /dev/null -w \"API :4000/health → %{http_code}\\\\n\" http://localhost:4000/health)",
+      "Bash(curl -s -X POST http://localhost:3010/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"admin@lasmarias.local\",\"password\":\"Admin123!Cambiar\"}' -o /dev/null -w \"POST http://localhost:3010/api/auth/login → %{http_code}\\\\n\")"
     ]
   }
 }

@@ -31,6 +31,10 @@ export class ProductsService {
       unit: input.unit,
       trackBatches: input.trackBatches,
       minStockLevel: input.minStockLevel != null ? String(input.minStockLevel) : null,
+      defaultCost: input.defaultCost != null ? String(input.defaultCost) : null,
+      defaultCostCurrency: input.defaultCostCurrency ?? 'ARS',
+      costIvaMode: input.costIvaMode ?? 'sin_iva',
+      requiresLotNumber: input.requiresLotNumber ?? false,
       isActive: true,
     });
     return this.toDto(await this.repo.save(entity));
@@ -49,6 +53,12 @@ export class ProductsService {
       ...(input.minStockLevel !== undefined && {
         minStockLevel: input.minStockLevel != null ? String(input.minStockLevel) : null,
       }),
+      ...(input.defaultCost !== undefined && {
+        defaultCost: input.defaultCost != null ? String(input.defaultCost) : null,
+      }),
+      ...(input.defaultCostCurrency !== undefined && { defaultCostCurrency: input.defaultCostCurrency }),
+      ...(input.costIvaMode !== undefined && { costIvaMode: input.costIvaMode }),
+      ...(input.requiresLotNumber !== undefined && { requiresLotNumber: input.requiresLotNumber }),
       ...(input.isActive !== undefined && { isActive: input.isActive }),
     });
     return this.toDto(await this.repo.save(p));
@@ -64,6 +74,10 @@ export class ProductsService {
       unit: e.unit,
       trackBatches: e.trackBatches,
       minStockLevel: e.minStockLevel != null ? Number(e.minStockLevel) : undefined,
+      defaultCost: e.defaultCost != null ? Number(e.defaultCost) : undefined,
+      defaultCostCurrency: (e.defaultCostCurrency as Product['defaultCostCurrency']) ?? 'ARS',
+      costIvaMode: (e.costIvaMode as Product['costIvaMode']) ?? 'sin_iva',
+      requiresLotNumber: e.requiresLotNumber,
       isActive: e.isActive,
       createdAt: e.createdAt.toISOString(),
       updatedAt: e.updatedAt.toISOString(),

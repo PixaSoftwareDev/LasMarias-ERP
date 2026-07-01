@@ -35,6 +35,7 @@ export class ClientsService {
       address: input.address ?? null,
       city: input.city ?? null,
       paymentTermDays: input.paymentTermDays ?? null,
+      ivaMode: input.ivaMode ?? 'sin_iva',
       notes: input.notes ?? null,
       isActive: true,
     });
@@ -53,6 +54,7 @@ export class ClientsService {
       ...(input.address !== undefined && { address: input.address }),
       ...(input.city !== undefined && { city: input.city }),
       ...(input.paymentTermDays !== undefined && { paymentTermDays: input.paymentTermDays }),
+      ...(input.ivaMode !== undefined && { ivaMode: input.ivaMode }),
       ...(input.notes !== undefined && { notes: input.notes }),
       ...(input.isActive !== undefined && { isActive: input.isActive }),
     });
@@ -70,6 +72,7 @@ export class ClientsService {
       address: e.address ?? undefined,
       city: e.city ?? undefined,
       paymentTermDays: e.paymentTermDays ?? null,
+      ivaMode: (e.ivaMode as Client['ivaMode']) ?? 'sin_iva',
       notes: e.notes ?? undefined,
       isActive: e.isActive,
       createdAt: e.createdAt.toISOString(),

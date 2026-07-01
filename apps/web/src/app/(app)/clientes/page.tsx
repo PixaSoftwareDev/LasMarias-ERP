@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import Link from 'next/link';
-import { ArrowLeft, Pencil, Plus, Power, Users } from 'lucide-react';
+import { ArrowLeft, Pencil, Plus, Power, Tags, Users } from 'lucide-react';
 import { createClientInputSchema, type CreateClientInput, type Client } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,6 +24,7 @@ import { useConfirm } from '@/hooks/use-confirm';
 
 export default function ClientsPage() {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const confirm = useConfirm();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
@@ -31,7 +33,7 @@ export default function ClientsPage() {
   const form = useForm<CreateClientInput>({
     resolver: zodResolver(createClientInputSchema),
     mode: 'onBlur',
-    defaultValues: { type: 'minorista' },
+    defaultValues: { type: 'minorista', ivaMode: 'sin_iva' },
   });
 
   useEffect(() => {
@@ -40,6 +42,7 @@ export default function ClientsPage() {
         businessName: editing.businessName,
         taxId: editing.taxId,
         type: editing.type,
+        ivaMode: editing.ivaMode ?? 'sin_iva',
         email: editing.email,
         phone: editing.phone,
         address: editing.address,
@@ -109,7 +112,12 @@ export default function ClientsPage() {
                 <select className="min-h-touch w-full rounded-md border border-border px-3" {...form.register('type')}>
                   <option value="minorista">Minorista</option>
                   <option value="mayorista">Mayorista</option>
-                  <option value="distribuidor">Distribuidor</option>
+                </select>
+              </Field>
+              <Field label="IVA al vender" htmlFor="ivaMode" hint="Si es “con IVA”, se le suma la alícuota al precio de venta.">
+                <select className="min-h-touch w-full rounded-md border border-border px-3" {...form.register('ivaMode')}>
+                  <option value="sin_iva">Sin IVA</option>
+                  <option value="con_iva">Con IVA</option>
                 </select>
               </Field>
               <Field label="Email" htmlFor="email" error={form.formState.errors.email?.message}>
@@ -153,6 +161,7 @@ export default function ClientsPage() {
                 label={`Acciones de ${c.businessName}`}
                 actions={[
                   { label: 'Editar', icon: Pencil, onClick: () => { setEditing(c); setShowForm(true); } },
+                  { label: 'Precios particulares', icon: Tags, onClick: () => router.push(`/clientes/${c.id}/precios`) },
                   c.isActive
                     ? { label: 'Desactivar', icon: Power, onClick: () => onDeactivate(c), destructive: true }
                     : { label: 'Activar', icon: Power, onClick: () => toggleActive.mutate({ id: c.id, isActive: true }) },

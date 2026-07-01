@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import type {
-  AppSettings,
-  CompanySettings,
-  QualityLimits,
-  UpdateCompanySettingsInput,
-  UpdateQualityLimitsInput,
+import {
+  DEFAULT_IVA_RATE,
+  type AppSettings,
+  type CompanySettings,
+  type QualityLimits,
+  type UpdateCompanySettingsInput,
+  type UpdateQualityLimitsInput,
 } from '@lasmarias/shared-schemas';
 import { AppSettingEntity } from './app-setting.entity';
 import { DEFAULT_QUALITY_LIMITS } from '../milk-receptions/milk-quality-limits';
@@ -21,6 +22,7 @@ const DEFAULT_COMPANY: CompanySettings = {
   city: 'Pergamino, Buenos Aires',
   taxId: undefined,
   phone: undefined,
+  ivaRate: DEFAULT_IVA_RATE,
 };
 
 @Injectable()
@@ -47,6 +49,12 @@ export class SettingsService {
 
   getQualityLimits(): Promise<QualityLimits> {
     return this.read<QualityLimits>(QUALITY_KEY, DEFAULT_QUALITY_LIMITS);
+  }
+
+  // Alícuota de IVA (%) configurada para la empresa, con fallback al default.
+  async getIvaRate(): Promise<number> {
+    const company = await this.getCompany();
+    return company.ivaRate ?? DEFAULT_IVA_RATE;
   }
 
   async getAll(): Promise<AppSettings> {

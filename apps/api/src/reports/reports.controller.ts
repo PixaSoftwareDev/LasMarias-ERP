@@ -30,6 +30,10 @@ const dateRangeSchema = z.object({
   to: z.coerce.date(),
 });
 
+const dailyMovementsQuerySchema = z.object({
+  date: z.coerce.date(),
+});
+
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('reports')
 @Roles('admin', 'gerente')
@@ -81,6 +85,18 @@ export class ReportsController {
     @Res() res: Response,
   ) {
     const buffer = await this.reports.exportSalesXlsx(q.from, q.to);
+    res.send(buffer);
+  }
+
+  // Todos los movimientos de un día (#6): ingresos de leche, producción, ventas y caja.
+  @Get('export/daily-movements.xlsx')
+  @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  @Header('Content-Disposition', 'attachment; filename="movimientos-del-dia.xlsx"')
+  async exportDailyMovements(
+    @Query(new ZodValidationPipe(dailyMovementsQuerySchema)) q: { date: Date },
+    @Res() res: Response,
+  ) {
+    const buffer = await this.reports.exportDailyMovementsXlsx(q.date);
     res.send(buffer);
   }
 }

@@ -59,6 +59,8 @@ export class ProductionService {
       // Validar lotes de leche y litros disponibles
       const milkInputs: ProductionMilkInput[] = [];
       let totalLiters = 0;
+      // Una orden puede consumir leche de VARIOS silos para llegar a los litros que necesita:
+      // cada lote entra con su propio costo/litro y la calculadora los suma (elaboration-cost.ts).
       for (const mi of input.milkInputs) {
         const batch = await manager.getRepository(BatchEntity).findOne({ where: { id: mi.batchId } });
         if (!batch) throw new BadRequestException(`Lote de leche ${mi.batchId} no encontrado`);
@@ -77,9 +79,10 @@ export class ProductionService {
 
       // Calcular salidas esperadas con la versión activa (ya validamos arriba que existe)
       const version = recipe.activeVersion!;
+      // Sin rendimiento esperado, la salida esperada queda en 0 (se conoce al cerrar).
       const yieldResult = computeYield({
         liters: totalLiters,
-        baseYieldKgPerLiter: version.baseYieldKgPerLiter,
+        baseYieldKgPerLiter: version.baseYieldKgPerLiter ?? 0,
         yieldSensitivityFat: version.yieldSensitivityFat,
         yieldSensitivityProtein: version.yieldSensitivityProtein,
         baselineFatPercent: version.baselineFatPercent,
@@ -160,10 +163,23 @@ export class ProductionService {
       const primaryInputs: PrimaryInput[] = [];
       for (const mi of order.milkInputs) {
         const batch = await manager.getRepository(BatchEntity).findOneByOrFail({ id: mi.batchId });
+        // Por defecto, el costo del input es el congelado en el lote ($/litro de leche o
+        // $/kg de masa producida). EXCEPCIÓN (pedidos #14/#15): si el input es MASA
+        // (producto intermedio) con un "precio de masa" cargado a mano, se usa ese precio
+        // —valga la masa propia o comprada—, no el costo calculado del lote.
+        let unitCost = batch.unitCost ?? '0';
+        if (batch.productId) {
+          const inputProduct = await manager
+            .getRepository(ProductEntity)
+            .findOne({ where: { id: batch.productId } });
+          if (inputProduct?.category === 'intermedio' && inputProduct.defaultCost != null) {
+            unitCost = inputProduct.defaultCost;
+          }
+        }
         primaryInputs.push({
           name: batch.code,
           quantity: String(mi.liters),
-          unitCost: batch.unitCost ?? '0',
+          unitCost,
         });
         const remaining = Math.max(0, Number(batch.remainingQuantity) - mi.liters);
         batch.remainingQuantity = String(remaining);
@@ -223,33 +239,41 @@ export class ProductionService {
         })),
       });
 
-      // Estándar: mismas entradas, pero con rendimiento y subproductos ESPERADOS de la receta.
-      const expectedYieldKg = computeYield({
-        liters: totalLiters,
-        baseYieldKgPerLiter: Number(version.baseYieldKgPerLiter),
-        yieldSensitivityFat: Number(version.yieldSensitivityFat),
-        yieldSensitivityProtein: Number(version.yieldSensitivityProtein),
-        baselineFatPercent: Number(version.baselineFatPercent),
-        baselineProteinPercent: Number(version.baselineProteinPercent),
-        standardWastePercent: Number(version.standardWastePercent),
-      }).expectedYieldKg;
-      const expectedByproducts = computeByproducts(totalLiters, expectedYieldKg, version.byproducts);
-      const estandarCost = computeElaborationCost({
-        mode: 'estandar',
-        litros: String(totalLiters),
-        productKg: String(expectedYieldKg),
-        primaryInputs,
-        ingredients,
-        byproducts: version.byproducts.map((bp) => {
-          const exp = expectedByproducts.find((e) => e.name === bp.name);
-          return {
-            name: bp.name,
-            quantity: String(exp?.expectedQuantity ?? 0),
-            valorRecupero: bp.referenceValuePerUnit != null ? String(bp.referenceValuePerUnit) : null,
-          };
-        }),
-      });
-      const variance = computeElaborationVariance(estandarCost, realCost);
+      // Estándar: solo si hay rendimiento esperado. Se carga a mano AL CERRAR (pedido #12);
+      // si la receta vieja todavía traía uno, se usa como fallback. Sin esperado → solo real.
+      const expectedYield =
+        input.expectedYieldKgPerLiter ??
+        (version.baseYieldKgPerLiter != null ? Number(version.baseYieldKgPerLiter) : null);
+      let estandarCost: ReturnType<typeof computeElaborationCost> | null = null;
+      let variance: ReturnType<typeof computeElaborationVariance> | null = null;
+      if (expectedYield != null) {
+        const expectedYieldKg = computeYield({
+          liters: totalLiters,
+          baseYieldKgPerLiter: expectedYield,
+          yieldSensitivityFat: Number(version.yieldSensitivityFat),
+          yieldSensitivityProtein: Number(version.yieldSensitivityProtein),
+          baselineFatPercent: Number(version.baselineFatPercent),
+          baselineProteinPercent: Number(version.baselineProteinPercent),
+          standardWastePercent: Number(version.standardWastePercent),
+        }).expectedYieldKg;
+        const expectedByproducts = computeByproducts(totalLiters, expectedYieldKg, version.byproducts);
+        estandarCost = computeElaborationCost({
+          mode: 'estandar',
+          litros: String(totalLiters),
+          productKg: String(expectedYieldKg),
+          primaryInputs,
+          ingredients,
+          byproducts: version.byproducts.map((bp) => {
+            const exp = expectedByproducts.find((e) => e.name === bp.name);
+            return {
+              name: bp.name,
+              quantity: String(exp?.expectedQuantity ?? 0),
+              valorRecupero: bp.referenceValuePerUnit != null ? String(bp.referenceValuePerUnit) : null,
+            };
+          }),
+        });
+        variance = computeElaborationVariance(estandarCost, realCost);
+      }
 
       // --- 4. Crear el lote de producto, sellando su costo/kg (encadena los dos pasos) ---
       const productionBatch = await manager.getRepository(BatchEntity).save(
@@ -327,9 +351,11 @@ export class ProductionService {
         const consumed =
           ing.basis === 'per_liter_milk'
             ? Number(ing.quantity) * totalLiters
-            : ing.basis === 'per_kg_product'
-              ? Number(ing.quantity) * Number(principalOutput.quantity)
-              : Number(ing.quantity);
+            : ing.basis === 'per_1000_liters_milk'
+              ? (Number(ing.quantity) * totalLiters) / 1000
+              : ing.basis === 'per_kg_product'
+                ? Number(ing.quantity) * Number(principalOutput.quantity)
+                : Number(ing.quantity);
         if (!(consumed > 0)) continue;
         const lots = await manager.getRepository(BatchEntity).find({
           where: { productId: ing.productId, status: 'activo' },

@@ -10,6 +10,8 @@ export const companySettingsSchema = z.object({
   city: z.string().max(120).optional(),
   taxId: z.string().max(30).optional(),
   phone: z.string().max(60).optional(),
+  // Alícuota de IVA (%) que se aplica a los precios cargados "con IVA" (leche, insumos…).
+  ivaRate: z.number().min(0).max(100).optional(),
 });
 export type CompanySettings = z.infer<typeof companySettingsSchema>;
 

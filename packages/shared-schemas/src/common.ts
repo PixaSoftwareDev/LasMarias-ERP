@@ -14,6 +14,13 @@ export const cuitSchema = z
 // Email opcional pero estricto
 export const emailSchema = z.string().email('Email inválido');
 
+// Email opcional de verdad: un input vacío ("" o solo espacios) cuenta como
+// "sin email", no como email inválido. Si viene algo, se valida el formato.
+export const optionalEmailSchema = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+  emailSchema.optional(),
+);
+
 // Teléfono Argentina (permisivo, con o sin código de país)
 export const phoneSchema = z
   .string()

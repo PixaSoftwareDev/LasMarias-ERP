@@ -36,7 +36,8 @@ describe('resolvePrice', () => {
   });
 
   it('sin entrada ni override devuelve null + warning (NO 0)', () => {
-    expect(resolvePrice({ clientType: 'distribuidor', productId: 'p1', items })).toEqual({
+    // mayorista no tiene precio cargado para p2 (solo minorista) → faltante.
+    expect(resolvePrice({ clientType: 'mayorista', productId: 'p2', items })).toEqual({
       unitPrice: null,
       warning: 'PRODUCTO_SIN_PRECIO',
       source: null,
@@ -45,7 +46,7 @@ describe('resolvePrice', () => {
 
   it('override null no cuenta como override (cae a la lista / faltante)', () => {
     expect(
-      resolvePrice({ clientType: 'distribuidor', productId: 'p1', items, override: null }),
+      resolvePrice({ clientType: 'mayorista', productId: 'p2', items, override: null }),
     ).toEqual({ unitPrice: null, warning: 'PRODUCTO_SIN_PRECIO', source: null });
   });
 });

@@ -6,6 +6,20 @@ import { isoDateTimeSchema } from './common';
 export const currencySchema = z.enum(['ARS', 'USD', 'EUR']);
 export type Currency = z.infer<typeof currencySchema>;
 
+// Tratamiento de IVA de un precio cargado a mano: si es "con_iva" el sistema le suma
+// la alícuota (datos de la empresa); si es "sin_iva" el precio va directo.
+export const ivaModeSchema = z.enum(['sin_iva', 'con_iva']);
+export type IvaMode = z.infer<typeof ivaModeSchema>;
+
+// Alícuota general de IVA en Argentina. Es el default si todavía no se configuró.
+export const DEFAULT_IVA_RATE = 21;
+
+// Factor multiplicador del IVA para mostrar en pantalla (display). En el backend el
+// cálculo exacto se hace con decimal (big.js); acá alcanza con number para previews.
+export function ivaFactor(mode: IvaMode | undefined, ratePercent: number): number {
+  return mode === 'con_iva' ? 1 + ratePercent / 100 : 1;
+}
+
 // Cotización del día: cuántos pesos vale 1 USD y 1 EUR. Carga manual, histórico por fecha.
 export const exchangeRateSchema = z.object({
   date: z.string(), // YYYY-MM-DD

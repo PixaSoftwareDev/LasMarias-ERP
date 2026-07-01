@@ -20,6 +20,7 @@
     "seed": "ts-node src/database/seed.ts",
     "seed:demo": "ts-node src/database/seed-demo.ts",
     "reset:demo": "ts-node src/database/reset-demo.ts",
+    "fix:client-types": "ts-node src/database/fix-client-types.ts",
     "clean": "rimraf dist .turbo"
   },
   "dependencies": {

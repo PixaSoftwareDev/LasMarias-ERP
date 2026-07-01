@@ -87,6 +87,8 @@ export const stockEntryInputSchema = z.object({
   // y se congela en el lote (la calculadora siempre trabaja en pesos). Default ARS.
   currency: currencySchema.optional(),
   warehouseId: uuidSchema.optional(),
+  // N° de lote del proveedor (insumos trazables). Requerido por bromatología en esos insumos.
+  supplierLotNumber: z.string().max(80).optional(),
   notes: z.string().max(1000).optional(),
 });
 export type StockEntryInput = z.infer<typeof stockEntryInputSchema>;

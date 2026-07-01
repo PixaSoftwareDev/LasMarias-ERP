@@ -70,14 +70,13 @@ export class PricingService {
 
   // Excel con una fila por producto y una columna por tipo de cliente.
   async exportXlsx(): Promise<Buffer> {
-    const [min, may, dist] = await Promise.all([
+    const [min, may] = await Promise.all([
       this.listByClientType('minorista'),
       this.listByClientType('mayorista'),
-      this.listByClientType('distribuidor'),
     ]);
-    type Row = { producto: string; sku: string; minorista?: number; mayorista?: number; distribuidor?: number };
+    type Row = { producto: string; sku: string; minorista?: number; mayorista?: number };
     const byProduct = new Map<string, Row>();
-    const add = (items: PriceListItem[], key: 'minorista' | 'mayorista' | 'distribuidor') => {
+    const add = (items: PriceListItem[], key: 'minorista' | 'mayorista') => {
       for (const i of items) {
         const e = byProduct.get(i.productId) ?? { producto: i.productName, sku: i.sku };
         e[key] = i.unitPrice;
@@ -86,7 +85,6 @@ export class PricingService {
     };
     add(min, 'minorista');
     add(may, 'mayorista');
-    add(dist, 'distribuidor');
     return toXlsx(
       'Listas de precios',
       [
@@ -94,7 +92,6 @@ export class PricingService {
         { header: 'SKU', key: 'sku' },
         { header: 'Minorista', key: 'minorista' },
         { header: 'Mayorista', key: 'mayorista' },
-        { header: 'Distribuidor', key: 'distribuidor' },
       ],
       [...byProduct.values()],
     );

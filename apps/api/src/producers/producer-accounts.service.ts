@@ -12,6 +12,7 @@ import { ProducerEntity } from './producer.entity';
 import { ProducerPaymentEntity } from './producer-payment.entity';
 import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
 import { CashMovementEntity } from '../finance/cash-movement.entity';
+import { receptionCharges } from './producer-accounts.helpers';
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -31,11 +32,14 @@ export class ProducerAccountsService {
     private readonly dataSource: DataSource,
   ) {}
 
-  // Importe de una recepción = litros × precio fijo congelado en el lote (batch.unitCost).
-  private receptionAmount(r: MilkReceptionEntity): { liters: number; price: number; amount: number } {
-    const liters = Number(r.liters);
-    const price = r.batch?.unitCost != null ? Number(r.batch.unitCost) : 0;
-    return { liters, price, amount: liters * price };
+  // Cargos de una recepción, POR TAMBO (delega en la función pura testeada).
+  private receptionCharges(r: MilkReceptionEntity) {
+    return receptionCharges({
+      producerId: r.producerId,
+      liters: Number(r.liters),
+      batchUnitCost: r.batch?.unitCost != null ? Number(r.batch.unitCost) : null,
+      lines: r.lines,
+    });
   }
 
   async listBalances(): Promise<ProducerBalance[]> {
@@ -45,7 +49,9 @@ export class ProducerAccountsService {
 
     const chargeBy = new Map<string, number>();
     for (const r of receptions) {
-      chargeBy.set(r.producerId, (chargeBy.get(r.producerId) ?? 0) + this.receptionAmount(r).amount);
+      for (const c of this.receptionCharges(r)) {
+        chargeBy.set(c.producerId, (chargeBy.get(c.producerId) ?? 0) + c.amount);
+      }
     }
     const paidBy = new Map<string, number>();
     for (const p of payments) {
@@ -70,33 +76,40 @@ export class ProducerAccountsService {
     const producer = await this.producers.findOne({ where: { id: producerId } });
     if (!producer) throw new NotFoundException('Tambo no encontrado');
 
+    // Traemos TODAS las recepciones aceptadas: con multi-tambo, este productor puede
+    // figurar como una línea de una descarga cuyo tambo "primario" es otro.
     const allReceptions = await this.receptions.find({
-      where: { producerId, status: 'aceptada' },
+      where: { status: 'aceptada' },
       relations: { batch: true },
       order: { receivedAt: 'DESC' },
     });
     const allPayments = await this.payments.find({ where: { producerId }, order: { occurredAt: 'DESC' } });
 
-    const totalCharge = allReceptions.reduce((a, r) => a + this.receptionAmount(r).amount, 0);
-    const totalPaid = allPayments.reduce((a, p) => a + Number(p.amount), 0);
-    const balance = round2(totalCharge - totalPaid);
-
     const inMonth = (d: Date) =>
       !month || `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` === month;
 
-    const receptions: ProducerReceptionLine[] = allReceptions
-      .filter((r) => inMonth(r.receivedAt))
-      .map((r) => {
-        const { liters, price, amount } = this.receptionAmount(r);
-        return {
-          receptionId: r.id,
-          code: r.code,
-          receivedAt: r.receivedAt.toISOString(),
-          liters,
-          pricePerLiter: price,
-          amount: round2(amount),
-        };
-      });
+    // Cargos de ESTE productor a lo largo de todas las descargas (una fila por línea suya).
+    let totalCharge = 0;
+    const receptions: ProducerReceptionLine[] = [];
+    for (const r of allReceptions) {
+      for (const c of this.receptionCharges(r)) {
+        if (c.producerId !== producerId) continue;
+        totalCharge += c.amount;
+        if (inMonth(r.receivedAt)) {
+          receptions.push({
+            receptionId: r.id,
+            code: r.code,
+            receivedAt: r.receivedAt.toISOString(),
+            liters: c.liters,
+            pricePerLiter: c.price,
+            amount: round2(c.amount),
+          });
+        }
+      }
+    }
+    const totalPaid = allPayments.reduce((a, p) => a + Number(p.amount), 0);
+    const balance = round2(totalCharge - totalPaid);
+
     const payments = allPayments.filter((p) => inMonth(p.occurredAt)).map((p) => this.toPaymentDto(p));
 
     return { producerId, producerName: producer.name, balance, receptions, payments };

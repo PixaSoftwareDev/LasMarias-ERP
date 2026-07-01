@@ -2,6 +2,7 @@
 
 import { UserEntity } from '../users/user.entity';
 import { ClientEntity } from '../clients/client.entity';
+import { ClientPriceItemEntity } from '../clients/client-price-item.entity';
 import { ProductEntity } from '../products/product.entity';
 import { BatchEntity } from '../batches/batch.entity';
 import { ProducerEntity } from '../producers/producer.entity';
@@ -28,6 +29,7 @@ import { SupplierPaymentEntity } from '../suppliers/supplier-payment.entity';
 export const entities = [
   UserEntity,
   ClientEntity,
+  ClientPriceItemEntity,
   ProductEntity,
   BatchEntity,
   ProducerEntity,

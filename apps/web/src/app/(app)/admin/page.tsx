@@ -73,16 +73,15 @@ export default function AdminHome() {
     queryKey: ['warehouses'],
     queryFn: () => inventoryApi.listWarehouses(),
   });
-  // Listas de precio: contamos los productos con precio en cualquiera de los 3 tipos.
+  // Listas de precio: contamos los productos con precio en cualquiera de los tipos.
   const pricesQuery = useQuery({
     queryKey: ['price-list', 'all-count'],
     queryFn: async () => {
-      const [min, may, dist] = await Promise.all([
+      const [min, may] = await Promise.all([
         salesApi.priceList('minorista'),
         salesApi.priceList('mayorista'),
-        salesApi.priceList('distribuidor'),
       ]);
-      const ids = new Set([...min, ...may, ...dist].map((i) => i.productId));
+      const ids = new Set([...min, ...may].map((i) => i.productId));
       return ids.size;
     },
   });
@@ -136,7 +135,7 @@ export default function AdminHome() {
       href: '/admin/precios',
       icon: Tags,
       title: 'Listas de precios',
-      desc: 'Precio de cada producto según el tipo de cliente (minorista, mayorista, distribuidor).',
+      desc: 'Precio de cada producto según el tipo de cliente (minorista, mayorista).',
       count: pricesQuery.data,
       loading: pricesQuery.isLoading,
       error: pricesQuery.isError,

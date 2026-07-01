@@ -2,7 +2,9 @@
 
 import type {
   Client,
+  ClientPriceItem,
   CreateClientInput,
+  UpsertClientPricesInput,
   CreateProductInput,
   CreateRecipeInput,
   CreateRecipeVersionInput,
@@ -96,6 +98,10 @@ export const clientsApi = {
   create: (input: CreateClientInput) => api<Client>('/api/clients', { method: 'POST', body: input }),
   update: (id: string, input: UpdateClientInput) =>
     api<Client>(`/api/clients/${id}`, { method: 'PATCH', body: input }),
+  // Precios particulares por cliente (override de la lista por tipo).
+  prices: (id: string) => api<ClientPriceItem[]>(`/api/clients/${id}/prices`),
+  upsertPrices: (id: string, input: UpsertClientPricesInput) =>
+    api<ClientPriceItem[]>(`/api/clients/${id}/prices`, { method: 'PUT', body: input }),
 };
 
 export interface UpdateProducerInput {
@@ -105,13 +111,15 @@ export interface UpdateProducerInput {
   address?: string;
   city?: string;
   agreedPricePerLiter?: number;
+  priceCurrency?: 'ARS' | 'USD' | 'EUR';
+  priceIvaMode?: 'sin_iva' | 'con_iva';
   notes?: string;
   isActive?: boolean;
 }
 
 export const producersApi = {
   list: () => api<ProducerDto[]>('/api/producers'),
-  create: (input: { name: string; agreedPricePerLiter?: number; priceCurrency?: 'ARS' | 'USD' | 'EUR'; phone?: string; city?: string }) =>
+  create: (input: UpdateProducerInput & { name: string }) =>
     api<ProducerDto>('/api/producers', { method: 'POST', body: input }),
   update: (id: string, input: UpdateProducerInput) =>
     api<ProducerDto>(`/api/producers/${id}`, { method: 'PATCH', body: input }),
@@ -172,7 +180,7 @@ export const productionApi = {
   get: (id: string) => api<ProductionOrder>(`/api/production-orders/${id}`),
   open: (input: { recipeId: string; operatorId: string; startedAt: string; milkInputs: { batchId: string; liters: number }[]; notes?: string }) =>
     api<ProductionOrder>('/api/production-orders/open', { method: 'POST', body: input }),
-  close: (id: string, input: { actualOutputs: { productId: string; quantity: number; isPrincipal: boolean }[]; warehouseId?: string; notes?: string }) =>
+  close: (id: string, input: { actualOutputs: { productId: string; quantity: number; isPrincipal: boolean }[]; warehouseId?: string; expectedYieldKgPerLiter?: number; notes?: string }) =>
     api<ProductionOrder>(`/api/production-orders/${id}/close`, { method: 'POST', body: input }),
 };
 
@@ -260,6 +268,9 @@ export const reportsApi = {
   // Exportar ventas por cliente del rango (Excel).
   exportSalesXlsx: (from: string, to: string) =>
     downloadFile(`/api/reports/export/sales.xlsx?${reportQs({ from, to })}`, 'ventas-por-cliente.xlsx'),
+  // Exportar todos los movimientos de un día (ingresos de leche, producción, ventas y caja).
+  exportDailyMovementsXlsx: (date: string) =>
+    downloadFile(`/api/reports/export/daily-movements.xlsx?date=${encodeURIComponent(date)}`, `movimientos-${date}.xlsx`),
 };
 
 // Fase comercial — Flujo de caja simple (ingresos = cobros, egresos = gastos).

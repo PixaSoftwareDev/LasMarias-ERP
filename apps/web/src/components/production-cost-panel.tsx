@@ -61,8 +61,8 @@ export function ProductionCostPanel({ breakdown, className }: Props) {
   const hasWarnings = real.warnings.length > 0;
   const costPerKgMissing = real.costoPorKg === null || real.costoPorKg === '';
 
-  const netTone = varianceTone(variance.desvioCostoNeto);
-  const kgTone = varianceTone(variance.desvioCostoPorKg);
+  const netTone = variance ? varianceTone(variance.desvioCostoNeto) : 'neutral';
+  const kgTone = variance ? varianceTone(variance.desvioCostoPorKg) : 'neutral';
 
   return (
     <Card className={className}>
@@ -124,7 +124,13 @@ export function ProductionCostPanel({ breakdown, className }: Props) {
           </div>
         </dl>
 
-        {/* REAL vs ESTÁNDAR con desvío resaltado. */}
+        {/* REAL vs ESTÁNDAR con desvío resaltado. Solo si la receta tiene rendimiento
+            esperado; si no, mostramos únicamente el costo real (pedido #12). */}
+        {!estandar || !variance ? (
+          <p className="rounded-lg border border-border-subtle bg-surface-subtle/40 px-3 py-2 text-xs text-foreground-muted">
+            La receta no tiene un rendimiento esperado cargado, así que se muestra solo el costo real (sin comparación con el estándar).
+          </p>
+        ) : (
         <div>
           <p className="mb-2 text-sm font-semibold text-foreground">Real vs. estándar</p>
           <div className="overflow-hidden rounded-lg border border-border-subtle">
@@ -169,6 +175,7 @@ export function ProductionCostPanel({ breakdown, className }: Props) {
             En verde, el costo real quedó por debajo del estándar; en rojo, por encima.
           </p>
         </div>
+        )}
       </CardContent>
     </Card>
   );

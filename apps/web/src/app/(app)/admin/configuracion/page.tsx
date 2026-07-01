@@ -27,6 +27,7 @@ export default function ConfigPage() {
   const [city, setCity] = useState('');
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
+  const [ivaRate, setIvaRate] = useState('');
 
   // --- Límites de calidad ---
   const [maxTemp, setMaxTemp] = useState('');
@@ -44,6 +45,7 @@ export default function ConfigPage() {
     setCity(d.company.city ?? '');
     setAddress(d.company.address ?? '');
     setPhone(d.company.phone ?? '');
+    setIvaRate(String(d.company.ivaRate ?? 21));
     setMaxTemp(String(d.qualityLimits.maxTemperatureCelsius));
     setMinPh(String(d.qualityLimits.minPh));
     setMaxPh(String(d.qualityLimits.maxPh));
@@ -59,6 +61,7 @@ export default function ConfigPage() {
         city: city.trim() || undefined,
         address: address.trim() || undefined,
         phone: phone.trim() || undefined,
+        ivaRate: ivaRate.trim() === '' ? undefined : Number(ivaRate),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
@@ -125,6 +128,9 @@ export default function ConfigPage() {
               </Field>
               <Field label="Teléfono" htmlFor="cfg-phone">
                 <Input id="cfg-phone" placeholder="02477 12-3456" value={phone} onChange={(e) => setPhone(e.target.value)} />
+              </Field>
+              <Field label="Alícuota de IVA (%)" htmlFor="cfg-iva" hint="Se suma a los precios cargados “con IVA” (leche, insumos). Generalmente 21.">
+                <Input id="cfg-iva" type="number" inputMode="decimal" step="0.5" min={0} max={100} suffix="%" placeholder="21" value={ivaRate} onChange={(e) => setIvaRate(e.target.value)} />
               </Field>
               <div className="flex justify-end sm:col-span-2">
                 <Button onClick={() => saveCompany.mutate()} loading={saveCompany.isPending} loadingText="Guardando..." disabled={!companyOk || saveCompany.isPending}>

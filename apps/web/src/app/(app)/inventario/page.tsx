@@ -32,12 +32,12 @@ import { RowActions } from '@/components/ui/row-actions';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge, type Status } from '@/components/ui/status-badge';
-import { inventoryApi, productsApi, exchangeRatesApi } from '@/features/api';
+import { inventoryApi, productsApi, exchangeRatesApi, settingsApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { formatDateTime, formatMoney } from '@/lib/utils';
 import { labelOr, movementReasonLabel, movementTypeLabel } from '@/lib/labels';
 import { CURRENCY_OPTIONS, currencySymbol, equivalentArs } from '@/features/currency';
-import type { StockSummary, DiscardReason, Currency } from '@lasmarias/shared-schemas';
+import { ivaFactor, type StockSummary, type DiscardReason, type Currency } from '@lasmarias/shared-schemas';
 
 type AdjustMode = 'discard' | 'count' | 'min';
 
@@ -206,6 +206,8 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
   const productsQuery = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
   const warehousesQuery = useQuery({ queryKey: ['warehouses'], queryFn: () => inventoryApi.listWarehouses() });
   const latestRate = useQuery({ queryKey: ['exchange-rate-latest'], queryFn: () => exchangeRatesApi.latest() });
+  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: () => settingsApi.get() });
+  const ivaRate = settingsQuery.data?.company.ivaRate ?? 21;
 
   const [productId, setProductId] = useState('');
   const [quantity, setQuantity] = useState('');
@@ -213,15 +215,29 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
   const [costPrefilled, setCostPrefilled] = useState(false);
   const [currency, setCurrency] = useState<Currency>('ARS');
   const [warehouseId, setWarehouseId] = useState('');
+  const [supplierLot, setSupplierLot] = useState('');
 
   const entryProducts = useMemo(
     () => (productsQuery.data ?? []).filter((p) => p.isActive),
     [productsQuery.data],
   );
 
+  const selectedProduct = (productsQuery.data ?? []).find((p) => p.id === productId);
+  const lotRequired = selectedProduct?.requiresLotNumber ?? false;
+
   function handleProductChange(id: string) {
     setProductId(id);
-    // Pre-rellenar con el último costo conocido del producto (en ARS).
+    setSupplierLot('');
+    // 1º) Costo de referencia del producto (dato maestro), con IVA aplicado si corresponde.
+    const product = (productsQuery.data ?? []).find((p) => p.id === id);
+    if (product?.defaultCost != null) {
+      const effective = product.defaultCost * ivaFactor(product.costIvaMode, ivaRate);
+      setUnitCost(String(Math.round(effective * 10000) / 10000));
+      setCurrency(product.defaultCostCurrency ?? 'ARS');
+      setCostPrefilled(true);
+      return;
+    }
+    // 2º) Si no hay costo maestro, el último costo conocido del producto (en ARS).
     const hint = stockHints.find((s) => s.productId === id);
     if (hint?.lastUnitCost != null) {
       setUnitCost(String(hint.lastUnitCost));
@@ -240,6 +256,7 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
         unitCost: unitCost ? Number(unitCost) : undefined,
         currency,
         warehouseId: warehouseId || undefined,
+        supplierLotNumber: supplierLot.trim() || undefined,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stock'] });
@@ -250,7 +267,8 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo ingresar el stock.'),
   });
 
-  const canSave = !!productId && Number(quantity) > 0 && !save.isPending;
+  const canSave =
+    !!productId && Number(quantity) > 0 && !save.isPending && (!lotRequired || supplierLot.trim() !== '');
 
   return (
     <Card>
@@ -321,6 +339,21 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
               ))}
             </select>
           </Field>
+          {lotRequired && (
+            <Field
+              label="N° de lote del proveedor"
+              htmlFor="entry-lot"
+              required
+              hint="Requerido por bromatología para este insumo."
+            >
+              <Input
+                id="entry-lot"
+                placeholder="Ej: L-2026-0421"
+                value={supplierLot}
+                onChange={(e) => setSupplierLot(e.target.value)}
+              />
+            </Field>
+          )}
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose} disabled={save.isPending}>Cancelar</Button>

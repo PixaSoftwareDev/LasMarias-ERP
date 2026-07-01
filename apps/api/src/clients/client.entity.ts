@@ -31,6 +31,10 @@ export class ClientEntity extends BaseEntity {
   @Column({ type: 'int', name: 'payment_term_days', nullable: true })
   paymentTermDays!: number | null;
 
+  // Tratamiento de IVA al venderle a este cliente ('sin_iva' | 'con_iva'). Default 'sin_iva'.
+  @Column({ type: 'varchar', length: 8, name: 'iva_mode', default: 'sin_iva' })
+  ivaMode!: string;
+
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
 

@@ -49,8 +49,10 @@ export type ElaborationVarianceDto = z.infer<typeof elaborationVarianceSchema>;
 
 export const productionCostBreakdownSchema = z.object({
   real: elaborationCostResultSchema,
-  estandar: elaborationCostResultSchema,
-  variance: elaborationVarianceSchema,
+  // Estándar y variación son null cuando la receta no tiene rendimiento esperado: en ese
+  // caso la orden muestra solo el costo real (pedido #12).
+  estandar: elaborationCostResultSchema.nullable(),
+  variance: elaborationVarianceSchema.nullable(),
 });
 export type ProductionCostBreakdown = z.infer<typeof productionCostBreakdownSchema>;
 
@@ -100,6 +102,10 @@ export const closeProductionInputSchema = z.object({
   ),
   // Cámara/sector donde se almacena el lote de producto resultante (opcional).
   warehouseId: uuidSchema.optional(),
+  // Rendimiento ESPERADO (kg/litro) cargado a mano al cerrar (pedido #12: el rendimiento
+  // se conoce al producir, no en la receta). Si se carga, habilita la comparación real vs
+  // estándar de esta orden; si se omite, se muestra solo el costo real.
+  expectedYieldKgPerLiter: z.number().positive().optional(),
   notes: z.string().max(2000).optional(),
 });
 export type CloseProductionInput = z.infer<typeof closeProductionInputSchema>;

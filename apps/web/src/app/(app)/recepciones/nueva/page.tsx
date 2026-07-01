@@ -2,11 +2,11 @@
 
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { AlertTriangle, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CheckCircle2, Plus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { z } from 'zod';
 import {
@@ -60,24 +60,33 @@ export default function NewReceptionPage() {
     queryKey: ['warehouses'],
     queryFn: () => inventoryApi.listWarehouses(),
   });
+  // Niveles de los silos (capacidad + litros actuales) para validar cuánto entra.
+  const silosQuery = useQuery({ queryKey: ['silos'], queryFn: () => inventoryApi.silos() });
+
+  // Reparto de la descarga en silos (uno o varios). Cada fila: silo + litros.
+  const [siloRows, setSiloRows] = useState<{ warehouseId: string; liters: string }[]>([
+    { warehouseId: '', liters: '' },
+  ]);
 
   const {
     register,
     handleSubmit,
     watch,
+    control,
     formState: { errors, isSubmitting, isValid },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     mode: 'onBlur',
     defaultValues: {
       receivedAt: '',
-      producerId: '',
-      liters: undefined as unknown as number,
+      // Una descarga puede traer leche de hasta 4 tambos (pedido #17).
+      producers: [{ producerId: '', liters: undefined as unknown as number, declaredLiters: undefined }],
       // La leche normalmente pasa la prueba de alcohol; el operario la desmarca sólo si falló.
       // Evita bloquear toda recepción por defecto (el back trata false como rechazo).
       quality: { alcoholTestPassed: true },
     },
   });
+  const producerLines = useFieldArray({ control, name: 'producers' });
 
   const mutation = useMutation({
     mutationFn: (input: CreateMilkReceptionInput) => receptionsApi.create(input),
@@ -112,17 +121,45 @@ export default function NewReceptionPage() {
   const qualityIssues = evaluateQuality(quality ?? {});
   const hasQualityData = !!quality && Object.values(quality).some((v) => v !== undefined && v !== null);
 
-  // Diferencia de litros EN VIVO: recibidos − declarados (sólo cuando ambos están cargados).
+  // Totales y diferencia de litros EN VIVO, sumando todos los tambos de la descarga.
   const litersDiffTolerance = 5; // L: hasta acá lo tratamos como diferencia menor (ámbar), más es rojo.
-  const watchedLiters = watch('liters');
-  const watchedDeclared = watch('declaredLiters');
-  const litersDiff =
-    typeof watchedLiters === 'number' &&
-    !Number.isNaN(watchedLiters) &&
-    typeof watchedDeclared === 'number' &&
-    !Number.isNaN(watchedDeclared)
-      ? watchedLiters - watchedDeclared
-      : null;
+  const watchedProducers = watch('producers');
+  const totalLiters = (watchedProducers ?? []).reduce(
+    (a, p) => a + (typeof p?.liters === 'number' && !Number.isNaN(p.liters) ? p.liters : 0),
+    0,
+  );
+  const totalDeclared = (watchedProducers ?? []).reduce(
+    (a, p) => a + (typeof p?.declaredLiters === 'number' && !Number.isNaN(p.declaredLiters) ? p.declaredLiters : 0),
+    0,
+  );
+  const anyDeclared = (watchedProducers ?? []).some((p) => typeof p?.declaredLiters === 'number' && !Number.isNaN(p.declaredLiters));
+  const litersDiff = anyDeclared && totalLiters > 0 ? totalLiters - totalDeclared : null;
+
+  // --- Reparto en silos: capacidad disponible + validación ---
+  const usingSilos = silos.length > 0;
+  const siloLevels = useMemo(
+    () => new Map((silosQuery.data?.silos ?? []).map((s) => [s.id, s])),
+    [silosQuery.data],
+  );
+  // Litros disponibles de un silo = capacidad − nivel actual (Infinity si no tiene capacidad).
+  const availableOf = (warehouseId: string): number => {
+    const s = siloLevels.get(warehouseId);
+    if (!s || !(s.capacityLiters > 0)) return Infinity;
+    return Math.round((s.capacityLiters - s.currentLiters) * 10) / 10;
+  };
+  const assignedLiters = siloRows.reduce((a, r) => a + (Number(r.liters) > 0 ? Number(r.liters) : 0), 0);
+  const unassignedLiters = Math.round((totalLiters - assignedLiters) * 10) / 10;
+  // ¿Alguna fila excede la capacidad de su silo?
+  const overCapacityRow = siloRows.find(
+    (r) => r.warehouseId && Number(r.liters) > 0 && Number(r.liters) > availableOf(r.warehouseId) + 1e-6,
+  );
+  const silosValid =
+    !usingSilos ||
+    (totalLiters > 0 &&
+      unassignedLiters === 0 &&
+      siloRows.every((r) => r.warehouseId && Number(r.liters) > 0) &&
+      !overCapacityRow);
+  const availableSilos = silosQuery.data?.silos ?? [];
 
   return (
     <div className="flex flex-col gap-6">
@@ -161,7 +198,16 @@ export default function NewReceptionPage() {
             ...v,
             // datetime-local llega como string sin TZ; convertimos a ISO con offset local.
             receivedAt: new Date(v.receivedAt).toISOString(),
-            liters: Number(v.liters),
+            // Con silos definidos, mandamos el reparto (uno o varios). Si no, queda el
+            // warehouseId único (cámara) del form.
+            ...(usingSilos
+              ? {
+                  silos: siloRows
+                    .filter((r) => r.warehouseId && Number(r.liters) > 0)
+                    .map((r) => ({ warehouseId: r.warehouseId, liters: Number(r.liters) })),
+                  warehouseId: undefined,
+                }
+              : {}),
           };
           return mutation.mutateAsync(input);
         })}
@@ -181,110 +227,236 @@ export default function NewReceptionPage() {
               />
             </Field>
 
-            <Field
-              label="Productor"
-              htmlFor="producerId"
-              required
-              error={errors.producerId?.message}
-              hint={producersQuery.isLoading ? 'Cargando productores...' : undefined}
-            >
-              <select
-                id="producerId"
-                className="flex min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
-                {...register('producerId')}
+            {!usingSilos && (
+              <Field
+                label="Cámara / sector destino"
+                htmlFor="warehouseId"
+                error={errors.warehouseId?.message}
+                hint="Opcional — dónde se guarda el lote de leche cruda"
               >
-                <option value="">Elegí un productor</option>
-                {producerOptions.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <Field
-              label={silos.length > 0 ? 'Silo destino' : 'Cámara / sector destino'}
-              htmlFor="warehouseId"
-              error={errors.warehouseId?.message}
-              hint={silos.length > 0 ? 'A qué silo entra esta leche. El nivel del silo sube solo.' : 'Opcional — dónde se guarda el lote de leche cruda'}
-            >
-              <select
-                id="warehouseId"
-                className="flex min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
-                {...register('warehouseId', { setValueAs: (v) => (v === '' || v == null ? undefined : v) })}
-              >
-                <option value="">Sin asignar</option>
-                {warehouseOptions.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
+                <select
+                  id="warehouseId"
+                  className="flex min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                  {...register('warehouseId', { setValueAs: (v) => (v === '' || v == null ? undefined : v) })}
+                >
+                  <option value="">Sin asignar</option>
+                  {warehouseOptions.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
 
             <Field label="N° de remito" htmlFor="remito" error={errors.remito?.message}>
               <Input placeholder="Ej: 0001-00012345" {...register('remito')} />
             </Field>
 
-            <Field
-              label="Litros declarados (remito)"
-              htmlFor="declaredLiters"
-              error={errors.declaredLiters?.message}
-              hint="Lo que dice el papel del transporte"
-            >
-              <Input
-                type="number"
-                inputMode="decimal"
-                step="0.1"
-                min={0}
-                suffix="L"
-                placeholder="Ej: 1200"
-                {...register('declaredLiters', { setValueAs: (v) => (v === '' || Number.isNaN(Number(v)) ? undefined : Number(v)) })}
-              />
-            </Field>
+          </CardContent>
+        </Card>
 
-            <Field label="Litros recibidos" htmlFor="liters" required error={errors.liters?.message}>
-              <Input
-                type="number"
-                inputMode="decimal"
-                step="0.1"
-                min={0}
-                suffix="L"
-                placeholder="Ej: 1200"
-                {...register('liters', { valueAsNumber: true })}
-              />
-            </Field>
+        {/* Tambos de la descarga: hasta 4, cada uno con sus litros (pedido #17). */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Tambos de la descarga</CardTitle>
+            <p className="text-sm text-foreground-muted">
+              Un camión puede traer leche de varios tambos. Cargá los litros de cada uno para poder pagarles por separado.
+            </p>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <div className="space-y-3">
+              {producerLines.fields.map((row, idx) => (
+                <div key={row.id} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,140px,140px,auto] sm:items-end">
+                  <Field label={idx === 0 ? 'Tambo' : ''} htmlFor={`prod-${idx}`} required error={errors.producers?.[idx]?.producerId?.message}>
+                    <select
+                      id={`prod-${idx}`}
+                      className="flex min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                      {...register(`producers.${idx}.producerId` as const)}
+                    >
+                      <option value="">Elegí un tambo</option>
+                      {producerOptions.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label={idx === 0 ? 'Declarados (remito)' : ''} htmlFor={`decl-${idx}`} error={errors.producers?.[idx]?.declaredLiters?.message}>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      step="0.1"
+                      min={0}
+                      suffix="L"
+                      placeholder="Ej: 1200"
+                      {...register(`producers.${idx}.declaredLiters` as const, { setValueAs: (v) => (v === '' || Number.isNaN(Number(v)) ? undefined : Number(v)) })}
+                    />
+                  </Field>
+                  <Field label={idx === 0 ? 'Recibidos' : ''} htmlFor={`lit-${idx}`} required error={errors.producers?.[idx]?.liters?.message}>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      step="0.1"
+                      min={0}
+                      suffix="L"
+                      placeholder="Ej: 1200"
+                      {...register(`producers.${idx}.liters` as const, { valueAsNumber: true })}
+                    />
+                  </Field>
+                  <button
+                    type="button"
+                    onClick={() => (producerLines.fields.length > 1 ? producerLines.remove(idx) : null)}
+                    disabled={producerLines.fields.length <= 1}
+                    aria-label="Quitar tambo"
+                    className="flex min-h-touch min-w-touch items-center justify-center rounded-md text-foreground-muted transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+            </div>
 
-            {/* Diferencia de litros EN VIVO (CLAUDE.md §5.1 — avisar antes de guardar). */}
-            <div className="flex flex-col justify-end">
-              <p className="mb-1.5 text-sm font-medium text-foreground">Diferencia de litros</p>
-              {litersDiff === null ? (
-                <p className="flex min-h-touch items-center text-sm text-foreground-muted">
-                  Cargá litros recibidos y declarados para verla.
-                </p>
-              ) : (
+            {producerLines.fields.length < 4 && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="self-start"
+                onClick={() => producerLines.append({ producerId: '', liters: undefined as unknown as number, declaredLiters: undefined })}
+              >
+                <Plus className="h-4 w-4" /> Agregar tambo
+              </Button>
+            )}
+
+            {/* Totales + diferencia de litros EN VIVO (CLAUDE.md §5.1). */}
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-subtle bg-surface-subtle/40 px-4 py-3">
+              <p className="text-sm">
+                <span className="text-foreground-muted">Total recibido: </span>
+                <span className="font-semibold text-foreground">{totalLiters.toLocaleString('es-AR', { maximumFractionDigits: 1 })} L</span>
+              </p>
+              {litersDiff !== null && (
                 <p
                   className={cn(
-                    'flex min-h-touch items-center gap-1.5 text-base font-semibold',
+                    'flex items-center gap-1.5 text-sm font-semibold',
                     litersDiff === 0 && 'text-foreground-muted',
                     litersDiff !== 0 && Math.abs(litersDiff) <= litersDiffTolerance && 'text-amber-600',
                     Math.abs(litersDiff) > litersDiffTolerance && 'text-red-600',
                   )}
                 >
-                  {litersDiff !== 0 && (
-                    <AlertTriangle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-                  )}
-                  {litersDiff > 0 ? '+' : ''}
-                  {litersDiff.toLocaleString('es-AR', { maximumFractionDigits: 1 })} L
-                  <span className="text-sm font-normal text-foreground-muted">
-                    {litersDiff === 0 ? '(coincide con el remito)' : '(recibido − declarado)'}
-                  </span>
+                  {litersDiff !== 0 && <AlertTriangle className="h-4 w-4 flex-shrink-0" aria-hidden="true" />}
+                  Diferencia: {litersDiff > 0 ? '+' : ''}{litersDiff.toLocaleString('es-AR', { maximumFractionDigits: 1 })} L
+                  <span className="font-normal text-foreground-muted">{litersDiff === 0 ? '(coincide con el remito)' : '(recibido − declarado)'}</span>
                 </p>
               )}
             </div>
-
           </CardContent>
         </Card>
+
+        {usingSilos && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Destino en silos</CardTitle>
+              <p className="text-sm text-foreground-muted">
+                Repartí los <span className="font-medium text-foreground">{totalLiters.toLocaleString('es-AR', { maximumFractionDigits: 1 })} L</span> recibidos en uno o más silos. Si no entra todo en uno, sumá otro.
+              </p>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <div className="space-y-3">
+                {siloRows.map((row, idx) => {
+                  const avail = row.warehouseId ? availableOf(row.warehouseId) : null;
+                  const over = !!row.warehouseId && Number(row.liters) > 0 && avail != null && Number(row.liters) > avail + 1e-6;
+                  return (
+                    <div key={idx} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,160px,auto] sm:items-end">
+                      <Field label={idx === 0 ? 'Silo' : ''} htmlFor={`silo-${idx}`}>
+                        <select
+                          id={`silo-${idx}`}
+                          className="flex min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                          value={row.warehouseId}
+                          onChange={(e) => setSiloRows((rows) => rows.map((r, i) => (i === idx ? { ...r, warehouseId: e.target.value } : r)))}
+                        >
+                          <option value="">Elegí un silo</option>
+                          {availableSilos.map((s) => (
+                            <option key={s.id} value={s.id} disabled={siloRows.some((r, i) => i !== idx && r.warehouseId === s.id)}>
+                              {s.name}{s.capacityLiters > 0 ? ` — disponible ${Math.max(0, Math.round((s.capacityLiters - s.currentLiters) * 10) / 10).toLocaleString('es-AR')} L` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label={idx === 0 ? 'Litros a este silo' : ''} htmlFor={`silolit-${idx}`} error={over ? `Supera la capacidad (disponible ${avail} L)` : undefined}>
+                        <Input
+                          id={`silolit-${idx}`}
+                          type="number"
+                          inputMode="decimal"
+                          step="0.1"
+                          min={0}
+                          suffix="L"
+                          placeholder="Ej: 20000"
+                          className={over ? 'border-red-400 bg-red-50' : ''}
+                          value={row.liters}
+                          onChange={(e) => setSiloRows((rows) => rows.map((r, i) => (i === idx ? { ...r, liters: e.target.value } : r)))}
+                        />
+                      </Field>
+                      <button
+                        type="button"
+                        onClick={() => setSiloRows((rows) => (rows.length > 1 ? rows.filter((_, i) => i !== idx) : rows))}
+                        disabled={siloRows.length <= 1}
+                        aria-label="Quitar silo"
+                        className="flex min-h-touch min-w-touch items-center justify-center rounded-md text-foreground-muted transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {siloRows.length < availableSilos.length && (
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setSiloRows((rows) => [...rows, { warehouseId: '', liters: '' }])}>
+                    <Plus className="h-4 w-4" /> Agregar silo
+                  </Button>
+                )}
+                {unassignedLiters > 0 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      setSiloRows((rows) => {
+                        const lastEmpty = [...rows].reverse().find((r) => !r.liters || Number(r.liters) <= 0);
+                        const target = lastEmpty ?? rows[rows.length - 1];
+                        return rows.map((r) => (r === target ? { ...r, liters: String(Math.round((Number(r.liters || 0) + unassignedLiters) * 10) / 10) } : r));
+                      })
+                    }
+                  >
+                    Asignar los {unassignedLiters.toLocaleString('es-AR', { maximumFractionDigits: 1 })} L que faltan
+                  </Button>
+                )}
+              </div>
+
+              <div
+                className={cn(
+                  'flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm',
+                  unassignedLiters === 0 && !overCapacityRow
+                    ? 'border-border-subtle bg-surface-subtle/40'
+                    : 'border-amber-300 bg-amber-50 text-amber-800',
+                )}
+              >
+                <span>
+                  Asignado: <span className="font-semibold">{assignedLiters.toLocaleString('es-AR', { maximumFractionDigits: 1 })} L</span> de {totalLiters.toLocaleString('es-AR', { maximumFractionDigits: 1 })} L
+                </span>
+                {overCapacityRow ? (
+                  <span className="flex items-center gap-1.5 font-medium"><AlertTriangle className="h-4 w-4" aria-hidden="true" /> Un silo supera su capacidad — sumá otro silo.</span>
+                ) : unassignedLiters > 0 ? (
+                  <span className="flex items-center gap-1.5 font-medium"><AlertTriangle className="h-4 w-4" aria-hidden="true" /> Faltan asignar {unassignedLiters.toLocaleString('es-AR', { maximumFractionDigits: 1 })} L</span>
+                ) : unassignedLiters < 0 ? (
+                  <span className="flex items-center gap-1.5 font-medium"><AlertTriangle className="h-4 w-4" aria-hidden="true" /> Asignaste de más por {Math.abs(unassignedLiters).toLocaleString('es-AR', { maximumFractionDigits: 1 })} L</span>
+                ) : (
+                  <span className="text-foreground-muted">Reparto completo ✓</span>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>
@@ -416,11 +588,13 @@ export default function NewReceptionPage() {
       <div className="sticky bottom-0 z-20 -mx-4 border-t border-border-subtle bg-surface-elevated/95 backdrop-blur sm:-mx-6">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <p className="hidden text-sm text-foreground-muted sm:block">
-            {isValid ? (
+            {isValid && silosValid ? (
               <span className="flex items-center gap-1.5">
                 <CheckCircle2 className="h-4 w-4 text-success" aria-hidden="true" />
                 Listo para guardar
               </span>
+            ) : !silosValid ? (
+              'Repartí toda la leche en silos con capacidad para guardar.'
             ) : (
               'Completá los datos requeridos para guardar.'
             )}
@@ -434,6 +608,7 @@ export default function NewReceptionPage() {
               form="new-reception-form"
               size="md"
               block
+              disabled={!silosValid}
               loading={isSubmitting || mutation.isPending}
               loadingText="Guardando..."
             >

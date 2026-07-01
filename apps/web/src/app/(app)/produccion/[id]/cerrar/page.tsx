@@ -39,6 +39,9 @@ export default function CloseProductionPage({ params }: { params: { id: string }
   const [quantities, setQuantities] = useState<Record<string, number | undefined>>({});
   // Cámara/sector destino de los lotes de producto generados al cerrar (opcional).
   const [warehouseId, setWarehouseId] = useState<string>('');
+  // Rendimiento ESPERADO (kg/litro) cargado a mano al cerrar (opcional). Si se carga,
+  // habilita la comparación real vs estándar (pedido #12).
+  const [expectedYield, setExpectedYield] = useState<string>('');
   // La orden cerrada (con costBreakdown) tras un cierre exitoso.
   const [closedOrder, setClosedOrder] = useState<ProductionOrder | null>(null);
 
@@ -58,6 +61,8 @@ export default function CloseProductionPage({ params }: { params: { id: string }
           isPrincipal: o.isPrincipal,
         })),
         warehouseId: warehouseId || undefined,
+        expectedYieldKgPerLiter:
+          expectedYield !== '' && Number(expectedYield) > 0 ? Number(expectedYield) : undefined,
       }),
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ['production-orders'] });
@@ -78,6 +83,10 @@ export default function CloseProductionPage({ params }: { params: { id: string }
   );
 
   const canClose = principal.some((o) => Number(quantities[o.productId] ?? 0) > 0);
+
+  // Rendimiento real EN VIVO = kg de producto principal ÷ litros de leche de la orden.
+  const principalKg = principal.reduce((a, o) => a + Number(quantities[o.productId] ?? 0), 0);
+  const realYield = order && order.totalMilkLiters > 0 && principalKg > 0 ? principalKg / order.totalMilkLiters : null;
 
   if (orderQuery.isLoading) {
     return <Card className="h-64 animate-pulse bg-surface-subtle" />;
@@ -189,7 +198,7 @@ export default function CloseProductionPage({ params }: { params: { id: string }
               key={o.productId}
               label={`${o.productName} — kg producidos`}
               htmlFor={`out-${o.productId}`}
-              hint={`Esperado: ${o.quantity.toLocaleString('es-AR', { maximumFractionDigits: 1 })} ${o.unit}`}
+              hint={o.quantity > 0 ? `Esperado: ${o.quantity.toLocaleString('es-AR', { maximumFractionDigits: 1 })} ${o.unit}` : undefined}
             >
               <Input
                 type="number"
@@ -224,7 +233,7 @@ export default function CloseProductionPage({ params }: { params: { id: string }
                 key={o.productId}
                 label={`${o.productName} — ${o.unit} obtenidos`}
                 htmlFor={`out-${o.productId}`}
-                hint={`Esperado: ${o.quantity.toLocaleString('es-AR', { maximumFractionDigits: 1 })} ${o.unit}`}
+                hint={o.quantity > 0 ? `Esperado: ${o.quantity.toLocaleString('es-AR', { maximumFractionDigits: 1 })} ${o.unit}` : undefined}
               >
                 <Input
                   type="number"
@@ -245,6 +254,37 @@ export default function CloseProductionPage({ params }: { params: { id: string }
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Rendimiento</CardTitle>
+          <p className="text-sm text-foreground-muted">
+            El rendimiento real se calcula solo con los kg que cargaste. Si querés comparar contra un esperado, cargalo (opcional).
+          </p>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Rendimiento esperado (kg por litro)" htmlFor="expectedYield" hint="Opcional. Ej: 0.10 = 100 kg cada 1000 L. Habilita el real vs esperado.">
+            <Input
+              id="expectedYield"
+              type="number"
+              inputMode="decimal"
+              step="0.001"
+              min={0}
+              placeholder="Ej: 0.10"
+              value={expectedYield}
+              onChange={(e) => setExpectedYield(e.target.value)}
+            />
+          </Field>
+          <div className="flex flex-col justify-end">
+            <p className="mb-1.5 text-sm font-medium text-foreground">Rendimiento real (en vivo)</p>
+            <p className="flex min-h-touch items-center text-base font-semibold text-foreground">
+              {realYield != null
+                ? `${realYield.toLocaleString('es-AR', { maximumFractionDigits: 4 })} kg/L`
+                : <span className="text-sm font-normal text-foreground-muted">Cargá los kg para verlo.</span>}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

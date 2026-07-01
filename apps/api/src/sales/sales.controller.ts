@@ -18,6 +18,7 @@ import {
   createSalesOrderInputSchema,
   registerPaymentInputSchema,
   upsertPriceListInputSchema,
+  type ClientType,
   type CreateReturnInput,
   type CreateSalesOrderInput,
   type RegisterPaymentInput,
@@ -82,7 +83,7 @@ export class SalesController {
   @Roles('admin', 'gerente', 'vendedor')
   priceList(
     @Query(new ZodValidationPipe(clientTypeQuerySchema))
-    q: { clientType: 'minorista' | 'mayorista' | 'distribuidor' },
+    q: { clientType: ClientType },
   ) {
     return this.pricing.listByClientType(q.clientType);
   }

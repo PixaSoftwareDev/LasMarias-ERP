@@ -14,9 +14,9 @@ import {
 //   - Rendimiento kg/litro:  4 decimales   → "0.0950"
 //   - Porcentajes de desvío: 4 decimales   → "5.6107"
 //
-// NOTA: hoy `computeElaborationCost` es un stub que lanza NOT_IMPLEMENTED, así que
-// TODA esta batería está en ROJO a propósito. La implementación (paso 3) la pone
-// en verde sin tocar estos números.
+// `computeElaborationCost` está implementado y esta batería pasa en verde. Es la
+// red de seguridad de la calculadora: cualquier cambio en el costeo debe seguir
+// dando exactamente estos números (verificados a mano).
 // =============================================================================
 
 describe('computeElaborationCost', () => {
@@ -353,5 +353,35 @@ describe('computeElaborationCost', () => {
       byproducts: [],
     });
     expect(r.costoInsumos).toBe('2100.00');
+  });
+
+  // ---------------------------------------------------------------------------
+  // CASO 13 — Base "por cada 1.000 litros" (CLAUDE.md / pedido #10).
+  //   Calcio: 0,25 kg por cada 1.000 L, $800/kg. Lote: litros=8000 (mínimo por tina), kg=760.
+  //   consumo = 0,25 × 8000 / 1000 = 2 kg ; costoInsumos = 2 × 800 = 1600.00
+  // ---------------------------------------------------------------------------
+  it('caso 13 — base por cada 1.000 litros: 0,25 kg/1000 L con 8000 L = 2 kg', () => {
+    const r = computeElaborationCost({
+      mode: 'real', litros: '8000', productKg: '760',
+      primaryInputs: [],
+      ingredients: [{ name: 'Calcio', quantity: '0.25', unitCost: '800', basis: 'per_1000_liters_milk' }],
+      byproducts: [],
+    });
+    expect(r.costoInsumos).toBe('1600.00');
+  });
+
+  // ---------------------------------------------------------------------------
+  // CASO 14 — Base "por 1.000 litros" con litros = 0: consumo 0, no rompe.
+  // ---------------------------------------------------------------------------
+  it('caso 14 — base por 1.000 litros con litros 0: consumo 0, sin romper', () => {
+    const r = computeElaborationCost({
+      mode: 'real', litros: '0', productKg: '0',
+      primaryInputs: [],
+      ingredients: [{ name: 'Calcio', quantity: '0.25', unitCost: '800', basis: 'per_1000_liters_milk' }],
+      byproducts: [],
+    });
+    expect(r.costoInsumos).toBe('0.00');
+    expect(r.rendimiento).toBeNull();
+    expect(r.costoPorKg).toBeNull();
   });
 });

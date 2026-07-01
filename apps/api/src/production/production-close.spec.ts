@@ -14,10 +14,26 @@ jest.mock('../inventory/inventory-movement.entity', () => ({
 jest.mock('./production-order.entity', () => ({
   ProductionOrderEntity: { name: 'ProductionOrderEntity' },
 }));
+jest.mock('../products/product.entity', () => ({ ProductEntity: { name: 'ProductEntity' } }));
 
 const PRINCIPAL_PRODUCT_ID = 'prod-mozza';
 
-function makeService(opts: { ingredients?: any[]; insumoLots?: any[] } = {}) {
+function makeService(
+  opts: {
+    ingredients?: any[];
+    insumoLots?: any[];
+    baseYieldKgPerLiter?: string | null;
+    milkProductId?: string | null;
+    products?: Record<string, any>;
+  } = {},
+) {
+  // Producto de cada input (para valuar masa a precio manual). Por defecto la leche es
+  // materia prima sin precio manual → se usa el costo del lote.
+  const milkProductId = opts.milkProductId === undefined ? 'prod-leche' : opts.milkProductId;
+  const products: Record<string, any> = {
+    'prod-leche': { id: 'prod-leche', category: 'materia_prima', defaultCost: null },
+    ...(opts.products ?? {}),
+  };
   // Orden abierta: 1000 L de leche, receta con rendimiento 0.1 kg/L y un insumo a $/L.
   const order: any = {
     id: 'order-1',
@@ -37,7 +53,7 @@ function makeService(opts: { ingredients?: any[]; insumoLots?: any[] } = {}) {
     recipe: { id: 'rec-1', productId: PRINCIPAL_PRODUCT_ID, name: 'Mozzarella' },
     recipeVersion: {
       id: 'ver-1',
-      baseYieldKgPerLiter: '0.1',
+      baseYieldKgPerLiter: opts.baseYieldKgPerLiter === undefined ? '0.1' : opts.baseYieldKgPerLiter,
       yieldSensitivityFat: '0',
       yieldSensitivityProtein: '0',
       baselineFatPercent: '3.4',
@@ -54,11 +70,11 @@ function makeService(opts: { ingredients?: any[]; insumoLots?: any[] } = {}) {
   const milkBatch: any = {
     id: 'milk-1',
     code: 'LM-LE-1',
-    productId: 'prod-leche',
+    productId: milkProductId,
     remainingQuantity: '1000',
     status: 'en_proceso',
     unit: 'litro',
-    unitCost: '10', // $10/litro
+    unitCost: '10', // $10/litro (costo del lote)
   };
 
   const savedBatches: any[] = [];
@@ -90,6 +106,10 @@ function makeService(opts: { ingredients?: any[]; insumoLots?: any[] } = {}) {
       return Promise.resolve(o);
     }),
   };
+  // Productos (para valuar masa a precio manual): findOne por id desde el map.
+  const productRepo = {
+    findOne: jest.fn(({ where: { id } }: any) => Promise.resolve(products[id] ?? null)),
+  };
 
   const manager = {
     getRepository: jest.fn((entity: any) => {
@@ -97,6 +117,7 @@ function makeService(opts: { ingredients?: any[]; insumoLots?: any[] } = {}) {
       if (name === 'BatchEntity') return batchRepo;
       if (name === 'InventoryMovementEntity') return movementRepo;
       if (name === 'ProductionOrderEntity') return orderRepo;
+      if (name === 'ProductEntity') return productRepo;
       throw new Error(`repo no mockeado: ${name}`);
     }),
   };
@@ -184,5 +205,53 @@ describe('ProductionService.close', () => {
     expect(salOut.quantity).toBe('2');
     // El lote de sal queda con 98 kg.
     expect(insumoLot.remainingQuantity).toBe('98');
+  });
+
+  it('valúa la masa (intermedio) al precio manual del producto, no al costo del lote (#14/#15)', async () => {
+    // El input es MASA con precio manual $25/kg, aunque el lote tenga costo $10.
+    const { service, savedBatches } = makeService({
+      milkProductId: 'prod-masa',
+      products: { 'prod-masa': { id: 'prod-masa', category: 'intermedio', defaultCost: '25' } },
+    });
+
+    await service.close('order-1', {
+      actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true }],
+    } as any);
+
+    // Masa: 1000 × $25 = $25000 (precio manual, NO los $10 del lote) + insumo 1000×$0.5 = $500
+    //  → $25500 / 100 kg = $255/kg.
+    const productBatch = savedBatches.find((b) => b.productId === PRINCIPAL_PRODUCT_ID);
+    expect(productBatch.unitCost).toBe('255.0000');
+  });
+
+  it('sin rendimiento esperado: muestra solo el costo real, sin estándar ni variación (#12)', async () => {
+    const { service, getOrder } = makeService({ baseYieldKgPerLiter: null });
+
+    await service.close('order-1', {
+      actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true }],
+    } as any);
+
+    const order = getOrder();
+    expect(order.status).toBe('closed');
+    // El real se calcula igual ($105/kg); el estándar y la variación quedan en null.
+    expect(order.costBreakdown.real.costoPorKg).toBe('105.0000');
+    expect(order.costBreakdown.estandar).toBeNull();
+    expect(order.costBreakdown.variance).toBeNull();
+  });
+
+  it('rendimiento esperado cargado AL CERRAR: habilita el estándar aunque la receta no lo tenga (#12)', async () => {
+    const { service, getOrder } = makeService({ baseYieldKgPerLiter: null });
+
+    await service.close('order-1', {
+      actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true }],
+      expectedYieldKgPerLiter: 0.1, // 0,1 kg/L × 1000 L = 100 kg esperados
+    } as any);
+
+    const order = getOrder();
+    expect(order.status).toBe('closed');
+    expect(order.costBreakdown.real.costoPorKg).toBe('105.0000');
+    // Con el esperado cargado a mano, ya hay comparación real vs estándar.
+    expect(order.costBreakdown.estandar).not.toBeNull();
+    expect(order.costBreakdown.variance).not.toBeNull();
   });
 });

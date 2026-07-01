@@ -14,6 +14,7 @@ import type { SiloLevel } from '@lasmarias/shared-schemas';
 // a mano. Tanque por silo (llenado de abajo hacia arriba) + velocímetro del total.
 
 const LOW_THRESHOLD = 15; // % por debajo del cual el silo está "casi vacío" (alerta).
+const HIGH_THRESHOLD = 90; // % a partir del cual el silo está "casi lleno" (poco lugar).
 
 const litros = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 0 });
 const pct = (n: number) => `${n.toLocaleString('es-AR', { maximumFractionDigits: 1 })}%`;
@@ -82,6 +83,11 @@ function Tank({ silo }: { silo: SiloLevel }) {
           {tone === 'over' && (
             <p className="mt-1 flex items-center justify-center gap-1 text-xs font-medium text-amber-600">
               <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" /> Supera la capacidad
+            </p>
+          )}
+          {tone !== 'over' && silo.capacityLiters > 0 && silo.fillPercent >= HIGH_THRESHOLD && (
+            <p className="mt-1 flex items-center justify-center gap-1 text-xs font-medium text-amber-600">
+              <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" /> Casi lleno — quedan {litros(Math.max(0, silo.capacityLiters - silo.currentLiters))} L
             </p>
           )}
         </div>
@@ -157,6 +163,28 @@ export default function SilosPage() {
         />
       ) : (
         <>
+          {/* Aviso de capacidad: silos llenos o casi llenos (sin lugar para la próxima descarga). */}
+          {(() => {
+            const tight = data.silos.filter((s) => s.capacityLiters > 0 && s.fillPercent >= HIGH_THRESHOLD);
+            if (tight.length === 0) return null;
+            return (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <TriangleAlert className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                <div>
+                  <p className="font-medium">
+                    {tight.length === 1 ? 'Hay un silo al límite de capacidad.' : `Hay ${tight.length} silos al límite de capacidad.`}
+                  </p>
+                  <p className="mt-0.5">
+                    {tight
+                      .map((s) => `${s.name} (${s.fillPercent > 100 ? 'excedido' : `quedan ${litros(Math.max(0, s.capacityLiters - s.currentLiters))} L`})`)
+                      .join(' · ')}
+                    . Repartí la próxima recepción en otro silo.
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Velocímetro del total de la planta. */}
           <Card>
             <CardContent className="flex flex-col items-center gap-2 pt-6 sm:flex-row sm:justify-center sm:gap-8">

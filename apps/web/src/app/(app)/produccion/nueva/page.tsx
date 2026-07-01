@@ -82,6 +82,8 @@ export default function NewProductionPage() {
     [doughBatchesQuery.data],
   );
 
+  // El silo es un filtro OPCIONAL: "Todos los silos" (siloId vacío) muestra la leche de
+  // todos los tanques y una orden puede combinar lotes de varios para llegar a los litros.
   const milkBatches = source === 'leche' ? milkBatchesFromReceptions : doughBatches;
 
   const [recipeId, setRecipeId] = useState('');
@@ -162,7 +164,7 @@ export default function NewProductionPage() {
           </Field>
 
           {source === 'leche' && silos.length > 0 && (
-            <Field label="Silo de origen" htmlFor="silo" hint="Filtrá los lotes de leche por silo. Vacío = todos los silos.">
+            <Field label="Silo de origen" htmlFor="silo" hint="Filtro opcional. Dejá 'Todos los silos' para combinar leche de varios tanques en la misma orden.">
               <select id="silo" className={SELECT_CLASS} value={siloId} onChange={(e) => { setSiloId(e.target.value); setInputs([{ batchId: '', liters: 0 }]); }}>
                 <option value="">Todos los silos</option>
                 {silos.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -180,7 +182,9 @@ export default function NewProductionPage() {
             {milkBatches.length === 0 && (
               <p className="rounded-md bg-warning/10 px-3 py-2 text-xs text-warning">
                 {source === 'leche'
-                  ? 'No hay lotes de leche disponibles. Cargá primero una recepción aceptada.'
+                  ? siloId
+                    ? 'No hay lotes de leche disponibles en este silo. Probá "Todos los silos" o cargá una recepción aceptada.'
+                    : 'No hay lotes de leche disponibles. Cargá primero una recepción aceptada.'
                   : 'No hay lotes de masa en stock. Elaborá primero la masa o revisá el stock.'}
               </p>
             )}

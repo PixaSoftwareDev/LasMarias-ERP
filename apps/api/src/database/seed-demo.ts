@@ -122,9 +122,8 @@ async function main() {
   const PRICES: Record<string, Record<string, number>> = {
     minorista: { 'QC-001': 3500, 'MUZ-001': 4200, 'RIC-001': 1800 },
     mayorista: { 'QC-001': 3000, 'MUZ-001': 3700, 'RIC-001': 1500 },
-    distribuidor: { 'QC-001': 2800, 'MUZ-001': 3500, 'RIC-001': 1400 },
   };
-  for (const type of ['minorista', 'mayorista', 'distribuidor'] as const) {
+  for (const type of ['minorista', 'mayorista'] as const) {
     const items = Object.entries(PRICES[type]!)
       .map(([sku, unitPrice]) => ({ productId: idBySku(sku), unitPrice }))
       .filter((i) => i.productId) as { productId: string; unitPrice: number }[];
@@ -153,7 +152,7 @@ async function main() {
     { businessName: 'Fiambrería El Cerdito', type: 'minorista', city: 'Colón', paymentTermDays: null },
     { businessName: 'Supermercado El Ahorro', type: 'mayorista', city: 'Pergamino', paymentTermDays: 30 },
     { businessName: 'Mayorista Sur SA', type: 'mayorista', city: 'Junín', paymentTermDays: 45 },
-    { businessName: 'Distribuidora Norte SRL', type: 'distribuidor', city: 'Colón', paymentTermDays: 30 },
+    { businessName: 'Distribuidora Norte SRL', type: 'mayorista', city: 'Colón', paymentTermDays: 30 },
   ];
   const existingClients = (await get<any[]>('/api/clients')) ?? [];
   for (const c of clientSeeds) {
@@ -284,10 +283,8 @@ async function main() {
     const declared = liters + Math.round(rnd(-15, 10));
     const rec = await post<any>('/api/milk-receptions', {
       receivedAt: daysAgo(RECEPCIONES * 2 - i * 2), // repartidas en el último ~mes
-      producerId: prod.id,
+      producers: [{ producerId: prod.id, liters, declaredLiters: declared }],
       remito: `R-${10000 + i}`,
-      declaredLiters: declared,
-      liters,
       quality: goodQuality(),
       // La leche entra a un silo (rota entre los silos sembrados); si no hubiera, a la cámara.
       warehouseId: siloIds.length ? pick(siloIds, i) : camaraFrio,

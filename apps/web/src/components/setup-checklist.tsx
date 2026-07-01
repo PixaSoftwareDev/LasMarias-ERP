@@ -17,12 +17,11 @@ export function SetupChecklist() {
   const prices = useQuery({
     queryKey: ['price-list', 'all-count'],
     queryFn: async () => {
-      const [min, may, dist] = await Promise.all([
+      const [min, may] = await Promise.all([
         salesApi.priceList('minorista'),
         salesApi.priceList('mayorista'),
-        salesApi.priceList('distribuidor'),
       ]);
-      return min.length + may.length + dist.length;
+      return min.length + may.length;
     },
   });
 

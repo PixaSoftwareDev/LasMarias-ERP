@@ -60,9 +60,10 @@ export function buildYieldRow(input: {
     litros: num(input.totalMilkLiters) ?? 0,
     kgReal: num(input.totalPrincipalKg) ?? 0,
     rendimientoReal: cb ? num(cb.real.rendimiento) : null,
-    rendimientoEsperado: cb ? num(cb.estandar.rendimiento) : null,
-    desvioRendimiento: cb ? num(cb.variance.desvioRendimiento) : null,
-    desvioRendimientoPct: cb ? num(cb.variance.desvioRendimientoPct) : null,
+    // Esperado y desvíos son null si la receta no tenía rendimiento esperado (pedido #12).
+    rendimientoEsperado: cb?.estandar ? num(cb.estandar.rendimiento) : null,
+    desvioRendimiento: cb?.variance ? num(cb.variance.desvioRendimiento) : null,
+    desvioRendimientoPct: cb?.variance ? num(cb.variance.desvioRendimientoPct) : null,
   };
 }
 

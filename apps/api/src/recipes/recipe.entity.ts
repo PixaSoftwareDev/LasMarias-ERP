@@ -39,8 +39,9 @@ export class RecipeVersionEntity extends BaseEntity {
   @Column({ type: 'int', name: 'version_number' })
   versionNumber!: number;
 
-  @Column({ type: 'numeric', precision: 10, scale: 4, name: 'base_yield_kg_per_liter' })
-  baseYieldKgPerLiter!: string;
+  // Rendimiento esperado (kg/litro). Nullable: se puede cargar después de producir.
+  @Column({ type: 'numeric', precision: 10, scale: 4, name: 'base_yield_kg_per_liter', nullable: true })
+  baseYieldKgPerLiter!: string | null;
 
   @Column({ type: 'numeric', precision: 10, scale: 4, name: 'yield_sensitivity_fat', default: '0' })
   yieldSensitivityFat!: string;

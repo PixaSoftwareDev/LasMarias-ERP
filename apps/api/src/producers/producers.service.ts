@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import type { IvaMode } from '@lasmarias/shared-schemas';
 import { ProducerEntity } from './producer.entity';
 
 export interface ProducerDto {
@@ -12,6 +13,7 @@ export interface ProducerDto {
   city?: string;
   agreedPricePerLiter?: number;
   priceCurrency: 'ARS' | 'USD' | 'EUR';
+  priceIvaMode: IvaMode;
   notes?: string;
   isActive: boolean;
   createdAt: string;
@@ -26,6 +28,7 @@ export interface CreateProducerInput {
   city?: string;
   agreedPricePerLiter?: number;
   priceCurrency?: 'ARS' | 'USD' | 'EUR';
+  priceIvaMode?: IvaMode;
   notes?: string;
 }
 
@@ -37,6 +40,7 @@ export interface UpdateProducerInput {
   city?: string;
   agreedPricePerLiter?: number;
   priceCurrency?: 'ARS' | 'USD' | 'EUR';
+  priceIvaMode?: IvaMode;
   notes?: string;
   isActive?: boolean;
 }
@@ -68,6 +72,7 @@ export class ProducersService {
       city: input.city ?? null,
       agreedPricePerLiter: input.agreedPricePerLiter != null ? String(input.agreedPricePerLiter) : null,
       priceCurrency: input.priceCurrency ?? 'ARS',
+      priceIvaMode: input.priceIvaMode ?? 'sin_iva',
       notes: input.notes ?? null,
       isActive: true,
     });
@@ -86,6 +91,7 @@ export class ProducersService {
     if (input.agreedPricePerLiter !== undefined)
       p.agreedPricePerLiter = String(input.agreedPricePerLiter);
     if (input.priceCurrency !== undefined) p.priceCurrency = input.priceCurrency;
+    if (input.priceIvaMode !== undefined) p.priceIvaMode = input.priceIvaMode;
     if (input.notes !== undefined) p.notes = input.notes;
     if (input.isActive !== undefined) p.isActive = input.isActive;
     return this.toDto(await this.repo.save(p));
@@ -101,6 +107,7 @@ export class ProducersService {
       city: e.city ?? undefined,
       agreedPricePerLiter: e.agreedPricePerLiter ? Number(e.agreedPricePerLiter) : undefined,
       priceCurrency: (e.priceCurrency as 'ARS' | 'USD' | 'EUR') ?? 'ARS',
+      priceIvaMode: (e.priceIvaMode as IvaMode) ?? 'sin_iva',
       notes: e.notes ?? undefined,
       isActive: e.isActive,
       createdAt: e.createdAt.toISOString(),

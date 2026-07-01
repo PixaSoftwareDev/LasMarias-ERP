@@ -20,7 +20,6 @@ import type { ClientType, Currency } from '@lasmarias/shared-schemas';
 const CLIENT_TYPES: { value: ClientType; label: string }[] = [
   { value: 'minorista', label: 'Minorista' },
   { value: 'mayorista', label: 'Mayorista' },
-  { value: 'distribuidor', label: 'Distribuidor' },
 ];
 
 // Listas de precio por tipo de cliente (CLAUDE.md §4.6). Una grilla de productos
@@ -40,8 +39,13 @@ export default function PreciosPage() {
   });
   const latestRate = useQuery({ queryKey: ['exchange-rate-latest'], queryFn: () => exchangeRatesApi.latest() });
 
+  // Productos a los que se les pone precio de venta: quesos, subproductos y la
+  // masa (intermedio) — esta última se vende a otras empresas para mozzarella.
   const sellableProducts = useMemo(
-    () => productsQuery.data?.filter((p) => p.category === 'queso' || p.category === 'subproducto') ?? [],
+    () =>
+      productsQuery.data?.filter(
+        (p) => p.category === 'queso' || p.category === 'subproducto' || p.category === 'intermedio',
+      ) ?? [],
     [productsQuery.data],
   );
 
@@ -143,7 +147,7 @@ export default function PreciosPage() {
             <EmptyState
               icon={Tags}
               title="No hay productos vendibles"
-              description="Cargá productos (quesos o subproductos) para poder ponerles precio."
+              description="Cargá productos (quesos, subproductos o masa) para poder ponerles precio."
             />
           ) : (
             <div className="space-y-2">

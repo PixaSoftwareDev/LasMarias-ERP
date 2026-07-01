@@ -1,5 +1,5 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
-import type { MilkQualityAnalysis, MilkReceptionStatus } from '@lasmarias/shared-schemas';
+import type { MilkQualityAnalysis, MilkReceptionLine, MilkReceptionStatus } from '@lasmarias/shared-schemas';
 import { BaseEntity } from '../database/base.entity';
 import { ProducerEntity } from '../producers/producer.entity';
 import { BatchEntity } from '../batches/batch.entity';
@@ -25,6 +25,16 @@ export class MilkReceptionEntity extends BaseEntity {
   // Denormalizado para reportes y para preservar el nombre histórico si el productor cambia.
   @Column({ type: 'varchar', length: 200, name: 'producer_name' })
   producerName!: string;
+
+  // Detalle por tambo de la descarga (pedido #17): litros + precio congelado por tambo.
+  // Vacío en recepciones viejas single-tambo (se usa producerId/liters del nivel raíz).
+  @Column({ type: 'jsonb', default: [] })
+  lines!: MilkReceptionLine[];
+
+  // Lotes generados por la recepción (uno por silo cuando la descarga se reparte). El
+  // `batchId` de abajo es el primero (compat); acá están todos para stock y trazabilidad.
+  @Column({ type: 'jsonb', name: 'batch_ids', default: [] })
+  batchIds!: string[];
 
   @Column({ type: 'varchar', length: 20, name: 'vehicle_plate', nullable: true })
   vehiclePlate!: string | null;

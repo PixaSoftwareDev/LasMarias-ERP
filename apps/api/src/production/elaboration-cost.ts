@@ -90,6 +90,8 @@ function consumedQuantity(ing: IngredientCost, litros: Big, productKg: Big): Big
   switch (ing.basis) {
     case 'per_liter_milk':
       return qty.times(litros);
+    case 'per_1000_liters_milk':
+      return qty.times(litros).div(1000);
     case 'per_kg_product':
       return qty.times(productKg);
     case 'fixed_per_order':

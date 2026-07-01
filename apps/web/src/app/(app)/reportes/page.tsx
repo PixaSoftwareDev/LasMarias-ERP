@@ -545,6 +545,17 @@ export default function ReportsPage() {
   const [to, setTo] = useState(defaults.to);
   const [tab, setTab] = useState<TabId>('production');
 
+  // Export de "movimientos del día" (#6) — fecha propia, por defecto hoy.
+  const today = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
+  const [movDate, setMovDate] = useState(today);
+  const exportMovs = useMutation({
+    mutationFn: () => reportsApi.exportDailyMovementsXlsx(movDate),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo exportar. Probá de nuevo.'),
+  });
+
   // El rango aplicado solo cambia cuando ambas fechas son válidas y from ≤ to.
   const validRange = !!from && !!to && from <= to;
 
@@ -562,6 +573,18 @@ export default function ReportsPage() {
           {!validRange && (
             <p className="text-xs text-danger">Revisá las fechas: &quot;desde&quot; no puede ser mayor que &quot;hasta&quot;.</p>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Export de todos los movimientos de un día (#6). */}
+      <Card>
+        <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-end sm:justify-between">
+          <Field label="Movimientos del día" htmlFor="mov-date" hint="Ingresos de leche, producción, ventas y caja (cobros, pagos y gastos) de ese día.">
+            <Input id="mov-date" type="date" value={movDate} onChange={(e) => setMovDate(e.target.value)} className="sm:w-48" />
+          </Field>
+          <Button variant="secondary" onClick={() => exportMovs.mutate()} loading={exportMovs.isPending} loadingText="Generando..." disabled={!movDate}>
+            <Download className="h-4 w-4" /> Exportar movimientos del día
+          </Button>
         </CardContent>
       </Card>
 

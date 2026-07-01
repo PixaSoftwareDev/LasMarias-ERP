@@ -24,6 +24,7 @@ const createProducerSchema = z.object({
   city: z.string().max(120).optional(),
   agreedPricePerLiter: z.coerce.number().positive().optional(),
   priceCurrency: z.enum(['ARS', 'USD', 'EUR']).optional(),
+  priceIvaMode: z.enum(['sin_iva', 'con_iva']).optional(),
   notes: z.string().max(1000).optional(),
 });
 
@@ -35,6 +36,7 @@ const updateProducerSchema = z.object({
   city: z.string().max(120).optional(),
   agreedPricePerLiter: z.coerce.number().positive().optional(),
   priceCurrency: z.enum(['ARS', 'USD', 'EUR']).optional(),
+  priceIvaMode: z.enum(['sin_iva', 'con_iva']).optional(),
   notes: z.string().max(1000).optional(),
   isActive: z.boolean().optional(),
 });

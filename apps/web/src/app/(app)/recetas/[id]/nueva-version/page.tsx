@@ -19,7 +19,7 @@ import { formatDate, formatMoney } from '@/lib/utils';
 import { CURRENCY_OPTIONS, currencySymbol, equivalentArs } from '@/features/currency';
 
 interface FormValues {
-  baseYieldKgPerLiter: number;
+  baseYieldKgPerLiter?: number;
   baselineFatPercent: number;
   baselineProteinPercent: number;
   standardWastePercent: number;
@@ -33,6 +33,7 @@ const INGREDIENT_CATEGORIES = ['materia_prima', 'insumo', 'envase', 'intermedio'
 
 const BASIS_OPTIONS: { value: IngredientBasis; label: string }[] = [
   { value: 'per_liter_milk', label: 'por litro de leche' },
+  { value: 'per_1000_liters_milk', label: 'por cada 1.000 litros' },
   { value: 'per_kg_product', label: 'por kg de producto' },
   { value: 'fixed_per_order', label: 'fijo por orden' },
 ];
@@ -108,7 +109,7 @@ export default function NewRecipeVersionPage() {
   useEffect(() => {
     if (!active || prefilled) return;
     form.reset({
-      baseYieldKgPerLiter: active.baseYieldKgPerLiter,
+      baseYieldKgPerLiter: active.baseYieldKgPerLiter ?? undefined,
       baselineFatPercent: active.baselineFatPercent,
       baselineProteinPercent: active.baselineProteinPercent,
       standardWastePercent: active.standardWastePercent,
@@ -148,7 +149,7 @@ export default function NewRecipeVersionPage() {
   const save = useMutation({
     mutationFn: (i: FormValues) =>
       recipesApi.createVersion(recipeId, {
-        baseYieldKgPerLiter: Number(i.baseYieldKgPerLiter),
+        baseYieldKgPerLiter: Number(i.baseYieldKgPerLiter) > 0 ? Number(i.baseYieldKgPerLiter) : null,
         baselineFatPercent: Number(i.baselineFatPercent),
         baselineProteinPercent: Number(i.baselineProteinPercent),
         standardWastePercent: Number(i.standardWastePercent),
@@ -201,6 +202,19 @@ export default function NewRecipeVersionPage() {
   function updateIngredient(idx: number, patch: Partial<IngredientRow>) {
     setIngredients((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
+  // Al elegir el insumo, traemos su precio de la ficha del producto (costo + moneda + unidad).
+  // Queda EDITABLE a mano (insumos con precio cargado o masa comprada que cambia por compra).
+  function selectIngredientProduct(idx: number, productId: string) {
+    const p = ingredientProducts.find((x) => x.id === productId);
+    const patch: Partial<IngredientRow> = { productId };
+    if (p) {
+      if (p.defaultCost != null && String(p.defaultCost) !== '') patch.unitCost = String(p.defaultCost);
+      if (p.defaultCostCurrency) patch.currency = p.defaultCostCurrency;
+      if ((['kg', 'litro', 'unidad', 'gramo'] as const).includes(p.unit as IngredientRow['unit']))
+        patch.unit = p.unit as IngredientRow['unit'];
+    }
+    updateIngredient(idx, patch);
+  }
   function updateByproduct(idx: number, patch: Partial<ByproductRow>) {
     setByproducts((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
@@ -230,11 +244,11 @@ export default function NewRecipeVersionPage() {
 
       <form onSubmit={form.handleSubmit(validateAndSubmit)} className="flex flex-col gap-5">
         <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2"><Gauge className="h-5 w-5 text-primary-700" aria-hidden="true" />Rendimiento base</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="flex items-center gap-2"><Gauge className="h-5 w-5 text-primary-700" aria-hidden="true" />Parámetros de cálculo (opcional)</CardTitle></CardHeader>
           <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-            <Field label="Rendimiento (kg de producto por litro)" htmlFor="baseYieldKgPerLiter" required hint="Ej: 0.10 = 100 kg de queso cada 1000 L">
-              <Input type="number" step="0.001" inputMode="decimal" {...form.register('baseYieldKgPerLiter', { valueAsNumber: true, required: true, min: 0.0001 })} />
-            </Field>
+            <p className="text-sm text-foreground-muted sm:col-span-2">
+              El rendimiento ya no se carga en la receta: se ingresa al cerrar la orden de producción.
+            </p>
             <Field label="Merma estándar (%)" htmlFor="standardWastePercent">
               <Input type="number" step="0.1" inputMode="decimal" {...form.register('standardWastePercent', { valueAsNumber: true })} />
             </Field>
@@ -285,7 +299,7 @@ export default function NewRecipeVersionPage() {
                     <select
                       className={selectClass}
                       value={row.productId}
-                      onChange={(e) => updateIngredient(idx, { productId: e.target.value })}
+                      onChange={(e) => selectIngredientProduct(idx, e.target.value)}
                     >
                       <option value="">Elegí el insumo</option>
                       {ingredientProducts.map((p) => (
@@ -324,7 +338,7 @@ export default function NewRecipeVersionPage() {
                       <option value="gramo">gramo</option>
                     </select>
                   </Field>
-                  <Field label="Costo unitario" htmlFor={`ing-cost-${idx}`} hint="Por unidad del insumo (opcional)">
+                  <Field label="Costo unitario" htmlFor={`ing-cost-${idx}`} hint="Se completa con el precio del producto; podés ajustarlo a mano.">
                     <div className="flex gap-2">
                       <Input
                         type="number"

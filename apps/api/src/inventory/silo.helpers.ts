@@ -11,3 +11,18 @@ export function siloFillPercent(currentLiters: number, capacityLiters: number): 
 export function isLowLevel(fillPercent: number, threshold = 15): boolean {
   return fillPercent < threshold;
 }
+
+// Litros que todavía entran en un silo. Capacidad 0/desconocida → Infinity (sin límite).
+export function siloAvailableLiters(capacityLiters: number, currentLiters: number): number {
+  if (!(capacityLiters > 0)) return Infinity;
+  return capacityLiters - currentLiters;
+}
+
+// ¿Entran `requested` litros en el silo? (tolerancia mínima por redondeo).
+export function siloHasRoomFor(
+  capacityLiters: number,
+  currentLiters: number,
+  requestedLiters: number,
+): boolean {
+  return requestedLiters <= siloAvailableLiters(capacityLiters, currentLiters) + 1e-6;
+}

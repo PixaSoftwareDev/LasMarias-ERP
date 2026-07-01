@@ -53,12 +53,28 @@ export const milkReceptionStatusSchema = z.enum([
 ]);
 export type MilkReceptionStatus = z.infer<typeof milkReceptionStatusSchema>;
 
+// Una descarga puede traer leche de varios tambos (hasta 4): cada tambo con sus
+// litros, para luego pagarle a cada productor por separado (pedido #17).
+export const milkReceptionLineSchema = z.object({
+  producerId: uuidSchema,
+  producerName: z.string().min(1).max(200),
+  liters: z.number().positive(),
+  declaredLiters: z.number().nonnegative().optional(),
+  // $/litro en pesos congelado al recibir (con IVA si el tambo es "con IVA"). Base del
+  // pago a ese tambo.
+  pricePerLiter: z.number().nonnegative().optional(),
+});
+export type MilkReceptionLine = z.infer<typeof milkReceptionLineSchema>;
+
 export const milkReceptionSchema = z.object({
   id: uuidSchema,
   code: z.string().min(1).max(50), // código de lote generado
   receivedAt: isoDateTimeSchema,
+  // Tambo "primario" (el primero de la descarga); el detalle real por tambo está en `lines`.
   producerId: uuidSchema,
   producerName: z.string().min(1).max(200), // denormalizado para reportes
+  // Detalle por tambo (1..4). Vacío en recepciones viejas single-tambo.
+  lines: z.array(milkReceptionLineSchema).default([]),
   vehiclePlate: z.string().max(20).optional(),
   driverName: z.string().max(120).optional(),
   remito: z.string().max(50).optional(),
@@ -83,16 +99,36 @@ export type MilkReception = z.infer<typeof milkReceptionSchema>;
 // estado y batch.
 export const createMilkReceptionInputSchema = z.object({
   receivedAt: isoDateTimeSchema,
-  producerId: uuidSchema,
+  // Tambos de la descarga: 1 (single) hasta 4. Cada uno con sus litros (y declarados).
+  producers: z
+    .array(
+      z.object({
+        producerId: uuidSchema,
+        liters: z
+          .number({ invalid_type_error: 'Los litros tienen que ser un número' })
+          .positive('Los litros tienen que ser mayor a 0'),
+        declaredLiters: z.number().nonnegative().optional(),
+      }),
+    )
+    .min(1, 'Cargá al menos un tambo')
+    .max(4, 'Hasta 4 tambos por descarga'),
   vehiclePlate: z.string().max(20).optional(),
   driverName: z.string().max(120).optional(),
   remito: z.string().max(50).optional(),
-  declaredLiters: z.number().nonnegative().optional(),
-  liters: z
-    .number({ invalid_type_error: 'Los litros tienen que ser un número' })
-    .positive('Los litros tienen que ser mayor a 0'),
   quality: milkQualityAnalysisSchema,
-  // Cámara/sector donde se almacena el lote de leche cruda resultante (opcional).
+  // Destino de la leche en silos. La descarga se puede REPARTIR en varios silos cuando no
+  // entra toda en uno (pedido: validar capacidad y pedir sumar otro silo). Cada asignación
+  // genera su propio lote en ese silo. Si se omite, la leche queda en un único lote sin silo.
+  silos: z
+    .array(
+      z.object({
+        warehouseId: uuidSchema,
+        liters: z.number().positive('Los litros tienen que ser mayor a 0'),
+      }),
+    )
+    .max(10)
+    .optional(),
+  // Compat: cámara/sector único (si no se usa el reparto por silos).
   warehouseId: uuidSchema.optional(),
   notes: z.string().max(1000).optional(),
 });

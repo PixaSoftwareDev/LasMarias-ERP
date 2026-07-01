@@ -21,7 +21,7 @@ interface FormValues {
   productId: string;
   name: string;
   description?: string;
-  baseYieldKgPerLiter: number;
+  baseYieldKgPerLiter?: number;
   baselineFatPercent: number;
   baselineProteinPercent: number;
   standardWastePercent: number;
@@ -32,6 +32,7 @@ const INGREDIENT_CATEGORIES = ['materia_prima', 'insumo', 'envase', 'intermedio'
 
 const BASIS_OPTIONS: { value: IngredientBasis; label: string }[] = [
   { value: 'per_liter_milk', label: 'por litro de leche' },
+  { value: 'per_1000_liters_milk', label: 'por cada 1.000 litros' },
   { value: 'per_kg_product', label: 'por kg de producto' },
   { value: 'fixed_per_order', label: 'fijo por orden' },
 ];
@@ -122,7 +123,8 @@ export default function NewRecipePage() {
         name: i.name,
         description: i.description,
         initialVersion: {
-          baseYieldKgPerLiter: Number(i.baseYieldKgPerLiter),
+          // Opcional: si no se cargó (o no es > 0), va null y se completa después.
+          baseYieldKgPerLiter: Number(i.baseYieldKgPerLiter) > 0 ? Number(i.baseYieldKgPerLiter) : null,
           baselineFatPercent: Number(i.baselineFatPercent),
           baselineProteinPercent: Number(i.baselineProteinPercent),
           standardWastePercent: Number(i.standardWastePercent),
@@ -176,6 +178,20 @@ export default function NewRecipePage() {
   function updateIngredient(idx: number, patch: Partial<IngredientRow>) {
     setIngredients((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
+  // Al elegir el insumo, traemos su precio de la ficha del producto (costo + moneda + unidad).
+  // Queda EDITABLE a mano: sirve tanto para insumos con precio cargado como para la masa
+  // comprada, donde el costo se ajusta en cada compra.
+  function selectIngredientProduct(idx: number, productId: string) {
+    const p = ingredientProducts.find((x) => x.id === productId);
+    const patch: Partial<IngredientRow> = { productId };
+    if (p) {
+      if (p.defaultCost != null && String(p.defaultCost) !== '') patch.unitCost = String(p.defaultCost);
+      if (p.defaultCostCurrency) patch.currency = p.defaultCostCurrency;
+      if ((['kg', 'litro', 'unidad', 'gramo'] as const).includes(p.unit as IngredientRow['unit']))
+        patch.unit = p.unit as IngredientRow['unit'];
+    }
+    updateIngredient(idx, patch);
+  }
   function updateByproduct(idx: number, patch: Partial<ByproductRow>) {
     setByproducts((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
@@ -208,12 +224,11 @@ export default function NewRecipePage() {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2"><Gauge className="h-5 w-5 text-primary-700" aria-hidden="true" />Rendimiento base</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="flex items-center gap-2"><Gauge className="h-5 w-5 text-primary-700" aria-hidden="true" />Parámetros de cálculo (opcional)</CardTitle></CardHeader>
           <CardContent className="flex flex-col gap-5">
-            {/* Lo obligatorio, siempre visible. */}
-            <Field label="Rendimiento (kg de producto por litro)" htmlFor="baseYieldKgPerLiter" required hint="Ej: 0.10 = 100 kg de queso cada 1000 L">
-              <Input type="number" step="0.001" inputMode="decimal" {...form.register('baseYieldKgPerLiter', { valueAsNumber: true, required: true, min: 0.0001 })} />
-            </Field>
+            <p className="rounded-lg border border-border-subtle bg-surface-subtle/40 px-4 py-3 text-sm text-foreground-muted">
+              El <span className="font-medium text-foreground">rendimiento</span> ya no se carga en la receta: se conoce al producir y se ingresa al <span className="font-medium text-foreground">cerrar la orden de producción</span>.
+            </p>
 
             {/* Lo opcional/avanzado, plegado para no abrumar. */}
             <details className="group rounded-lg border border-border-subtle bg-surface-subtle/40">
@@ -269,7 +284,7 @@ export default function NewRecipePage() {
                     <select
                       className={selectClass}
                       value={row.productId}
-                      onChange={(e) => updateIngredient(idx, { productId: e.target.value })}
+                      onChange={(e) => selectIngredientProduct(idx, e.target.value)}
                       onBlur={() => touch(`ing-${idx}-productId`)}
                     >
                       <option value="">Elegí el insumo</option>
@@ -311,7 +326,7 @@ export default function NewRecipePage() {
                       <option value="gramo">gramo</option>
                     </select>
                   </Field>
-                  <Field label="Costo unitario" htmlFor={`ing-cost-${idx}`} hint="Por unidad del insumo (opcional)" error={shownIng(idx, row, 'unitCost')}>
+                  <Field label="Costo unitario" htmlFor={`ing-cost-${idx}`} hint="Se completa con el precio del producto; podés ajustarlo a mano." error={shownIng(idx, row, 'unitCost')}>
                     <div className="flex gap-2">
                       <Input
                         type="number"

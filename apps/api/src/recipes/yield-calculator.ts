@@ -55,6 +55,9 @@ export function computeIngredients(
       case 'per_liter_milk':
         qty = ing.quantity * liters;
         break;
+      case 'per_1000_liters_milk':
+        qty = (ing.quantity * liters) / 1000;
+        break;
       case 'per_kg_product':
         qty = ing.quantity * expectedYieldKg;
         break;

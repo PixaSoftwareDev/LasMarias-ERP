@@ -15,7 +15,8 @@ import { TableSkeleton } from '@/components/ui/skeleton';
 import { RowActions } from '@/components/ui/row-actions';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/ui/status-badge';
-import { producersApi, exchangeRatesApi } from '@/features/api';
+import { producersApi, exchangeRatesApi, settingsApi } from '@/features/api';
+import { ivaFactor } from '@lasmarias/shared-schemas';
 import type { ProducerDto } from '@/features/receptions/types';
 import { ApiError } from '@/lib/api-client';
 import { formatMoney } from '@/lib/utils';
@@ -29,10 +30,11 @@ interface FormValues {
   address?: string;
   agreedPricePerLiter?: number;
   priceCurrency?: 'ARS' | 'USD' | 'EUR';
+  priceIvaMode?: 'sin_iva' | 'con_iva';
   notes?: string;
 }
 
-const emptyDefaults: FormValues = { name: '', taxId: '', phone: '', city: '', address: '', notes: '', priceCurrency: 'ARS' };
+const emptyDefaults: FormValues = { name: '', taxId: '', phone: '', city: '', address: '', notes: '', priceCurrency: 'ARS', priceIvaMode: 'sin_iva' };
 
 export default function ProducersPage() {
   const queryClient = useQueryClient();
@@ -41,15 +43,25 @@ export default function ProducersPage() {
   const [editing, setEditing] = useState<ProducerDto | null>(null);
   const { data = [], isLoading } = useQuery({ queryKey: ['producers'], queryFn: () => producersApi.list() });
   const latestRate = useQuery({ queryKey: ['exchange-rate-latest'], queryFn: () => exchangeRatesApi.latest() });
+  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: () => settingsApi.get() });
+  const ivaRate = settingsQuery.data?.company.ivaRate ?? 21;
 
   const form = useForm<FormValues>({ mode: 'onBlur', defaultValues: emptyDefaults });
   const watchPrice = form.watch('agreedPricePerLiter');
   const watchCurrency = form.watch('priceCurrency') ?? 'ARS';
-  // Equivalente en pesos del precio cargado (si es USD/EUR), con la última cotización.
+  const watchIva = form.watch('priceIvaMode') ?? 'sin_iva';
+  // Precio efectivo por litro en pesos: convertido (si es USD/EUR) y con IVA si corresponde.
   const priceArsEquiv = (() => {
-    if (watchCurrency === 'ARS' || !watchPrice || !latestRate.data) return null;
-    const rate = watchCurrency === 'USD' ? latestRate.data.usd : latestRate.data.eur;
-    return Number(watchPrice) * rate;
+    if (!watchPrice) return null;
+    let ars = Number(watchPrice);
+    if (watchCurrency !== 'ARS') {
+      if (!latestRate.data) return null;
+      ars *= watchCurrency === 'USD' ? latestRate.data.usd : latestRate.data.eur;
+    } else if (watchIva !== 'con_iva') {
+      // En pesos y sin IVA no hay nada para previsualizar (el precio ya es el final).
+      return null;
+    }
+    return ars * ivaFactor(watchIva, ivaRate);
   })();
 
   useEffect(() => {
@@ -61,6 +73,7 @@ export default function ProducersPage() {
         city: editing.city ?? '',
         agreedPricePerLiter: editing.agreedPricePerLiter,
         priceCurrency: editing.priceCurrency ?? 'ARS',
+        priceIvaMode: editing.priceIvaMode ?? 'sin_iva',
       });
     }
   }, [editing, form]);
@@ -82,6 +95,7 @@ export default function ProducersPage() {
         notes: i.notes || undefined,
         agreedPricePerLiter: i.agreedPricePerLiter ? Number(i.agreedPricePerLiter) : undefined,
         priceCurrency: i.priceCurrency ?? 'ARS',
+        priceIvaMode: i.priceIvaMode ?? 'sin_iva',
       };
       return editing ? producersApi.update(editing.id, body) : producersApi.create(body);
     },
@@ -144,7 +158,7 @@ export default function ProducersPage() {
                 htmlFor="agreedPricePerLiter"
                 hint={
                   priceArsEquiv != null
-                    ? `≈ ${formatMoney(priceArsEquiv)} /L (con la última cotización)`
+                    ? `≈ ${formatMoney(priceArsEquiv)} /L ${watchIva === 'con_iva' ? 'con IVA' : '(con la última cotización)'}`.trim()
                     : 'Precio de la leche. Si es en USD/EUR, se convierte a $ al recibir.'
                 }
               >
@@ -160,6 +174,20 @@ export default function ProducersPage() {
                     <option value="EUR">EUR</option>
                   </select>
                 </div>
+              </Field>
+              <Field
+                label="IVA del precio"
+                htmlFor="priceIvaMode"
+                hint={watchIva === 'con_iva' ? `Se le suma el ${ivaRate}% al recibir.` : 'El precio va directo, sin sumar IVA.'}
+              >
+                <select
+                  id="priceIvaMode"
+                  className="min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                  {...form.register('priceIvaMode')}
+                >
+                  <option value="sin_iva">Sin IVA</option>
+                  <option value="con_iva">Con IVA (+{ivaRate}%)</option>
+                </select>
               </Field>
               <Field label="Dirección" htmlFor="address" className="sm:col-span-2">
                 <Input {...form.register('address')} />

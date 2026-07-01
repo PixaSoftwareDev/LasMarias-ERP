@@ -4,6 +4,8 @@ import { ProductionOrderEntity } from '../production/production-order.entity';
 import { SalesOrderEntity } from '../sales/sales-order.entity';
 import { CreditNoteEntity } from '../sales/credit-note.entity';
 import { InventoryMovementEntity } from '../inventory/inventory-movement.entity';
+import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
+import { CashMovementEntity } from '../finance/cash-movement.entity';
 import { ReportsService } from './reports.service';
 import { ReportsController } from './reports.controller';
 
@@ -16,6 +18,8 @@ import { ReportsController } from './reports.controller';
       SalesOrderEntity,
       CreditNoteEntity,
       InventoryMovementEntity,
+      MilkReceptionEntity,
+      CashMovementEntity,
     ]),
   ],
   providers: [ReportsService],

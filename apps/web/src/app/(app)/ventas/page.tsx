@@ -14,14 +14,14 @@ import { DataTable } from '@/components/ui/data-table';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { ReturnDialog } from '@/components/sales/return-dialog';
-import { clientsApi, inventoryApi, productsApi, salesApi, exchangeRatesApi } from '@/features/api';
+import { clientsApi, inventoryApi, productsApi, salesApi, exchangeRatesApi, settingsApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useConfirm } from '@/hooks/use-confirm';
 import { formatMoney as money, formatDate } from '@/lib/utils';
 import { rateForCurrency } from '@/features/currency';
 import { DateRangeFilter } from '@/components/ui/date-range';
 import { TableSkeleton } from '@/components/ui/skeleton';
-import type { SalesOrder, Currency } from '@lasmarias/shared-schemas';
+import { ivaFactor, type SalesOrder, type Currency } from '@lasmarias/shared-schemas';
 
 // Condición de pago del despacho. El tipo vive en el schema como enum inline de
 // createSalesOrderInput; lo reflejamos acá para el selector.
@@ -115,8 +115,13 @@ export default function SalesPage() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
 
+  // Se pueden despachar quesos, subproductos y la masa (intermedio), que es el
+  // producto de mayor volumen de venta (se vende a otras empresas para mozzarella).
   const sellableProducts = useMemo(
-    () => productsQuery.data?.filter((p) => p.category === 'queso' || p.category === 'subproducto') ?? [],
+    () =>
+      productsQuery.data?.filter(
+        (p) => p.category === 'queso' || p.category === 'subproducto' || p.category === 'intermedio',
+      ) ?? [],
     [productsQuery.data],
   );
 
@@ -132,6 +137,15 @@ export default function SalesPage() {
     enabled: !!selectedClient,
   });
   const latestRate = useQuery({ queryKey: ['exchange-rate-latest'], queryFn: () => exchangeRatesApi.latest() });
+  // Precios particulares del cliente (override de la lista por tipo, en pesos).
+  const clientPricesQuery = useQuery({
+    queryKey: ['client-prices', selectedClient?.id],
+    queryFn: () => clientsApi.prices(selectedClient!.id),
+    enabled: !!selectedClient,
+  });
+  // Alícuota de IVA para aplicar el tratamiento del cliente ('con_iva' → suma IVA).
+  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: () => settingsApi.get() });
+  const ivaRate = settingsQuery.data?.company.ivaRate ?? 21;
 
   // Moneda en que está cargada la lista de precios del cliente (toda la lista comparte moneda).
   const listCurrency: Currency = priceListQuery.data?.[0]?.currency ?? 'ARS';
@@ -139,16 +153,21 @@ export default function SalesPage() {
   const listRate = rateForCurrency(latestRate.data ?? undefined, listCurrency);
   const needsRate = listCurrency !== 'ARS' && listRate == null;
 
-  // Precio de lista por producto YA convertido a pesos (la venta trabaja en $). Si la
-  // lista está en moneda extranjera y falta la cotización, no prellenamos (queda null).
+  // Precio por producto YA en pesos para prellenar: precio PARTICULAR del cliente si hay,
+  // si no la lista por tipo; y al final el IVA del cliente ('con_iva' suma la alícuota).
   const priceByProduct = useMemo(() => {
     const m = new Map<string, number>();
     for (const p of priceListQuery.data ?? []) {
       const ars = listCurrency === 'ARS' ? p.unitPrice : listRate != null ? Math.round(p.unitPrice * listRate * 100) / 100 : null;
       if (ars != null) m.set(p.productId, ars);
     }
+    // El precio particular del cliente pisa al de la lista (está cargado en pesos).
+    for (const cp of clientPricesQuery.data ?? []) m.set(cp.productId, cp.unitPrice);
+    // Tratamiento de IVA del cliente.
+    const factor = ivaFactor(selectedClient?.ivaMode, ivaRate);
+    if (factor !== 1) for (const [k, v] of m) m.set(k, Math.round(v * factor * 100) / 100);
     return m;
-  }, [priceListQuery.data, listCurrency, listRate]);
+  }, [priceListQuery.data, clientPricesQuery.data, listCurrency, listRate, selectedClient, ivaRate]);
 
   // Al elegir cliente: condición de pago default (sin plazo = contado) y prellenado
   // de precios cuando llega la lista. El precio sigue editable a mano (CLAUDE.md §4.6).
@@ -158,11 +177,11 @@ export default function SalesPage() {
   }, [selectedClient]);
 
   useEffect(() => {
-    if (!priceListQuery.data) return;
+    if (!priceListQuery.data && !clientPricesQuery.data) return;
     setLines((cur) =>
       cur.map((l) => (l.productId && priceByProduct.has(l.productId) ? { ...l, unitPrice: priceByProduct.get(l.productId)! } : l)),
     );
-  }, [priceListQuery.data, priceByProduct]);
+  }, [priceListQuery.data, clientPricesQuery.data, priceByProduct]);
 
   const stockByProduct = useMemo(
     () => new Map((stockQuery.data ?? []).map((s) => [s.productId, s])),
@@ -304,7 +323,7 @@ export default function SalesPage() {
           )}
           {!productsQuery.isLoading && sellableProducts.length === 0 && (
             <div className="rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-foreground">
-              No hay productos para vender (quesos o subproductos).{' '}
+              No hay productos para vender (quesos, subproductos o masa).{' '}
               <Link href="/productos" className="font-medium underline">Cargá un producto</Link> primero.
             </div>
           )}

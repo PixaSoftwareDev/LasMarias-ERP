@@ -32,6 +32,11 @@ export class ProducerEntity extends BaseEntity {
   @Column({ type: 'varchar', length: 3, name: 'price_currency', default: 'ARS' })
   priceCurrency!: string;
 
+  // Tratamiento de IVA del precio acordado: 'con_iva' le suma la alícuota al recibir,
+  // 'sin_iva' va directo. Default 'sin_iva'.
+  @Column({ type: 'varchar', length: 8, name: 'price_iva_mode', default: 'sin_iva' })
+  priceIvaMode!: string;
+
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
 

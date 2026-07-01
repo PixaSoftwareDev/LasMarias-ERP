@@ -65,7 +65,10 @@ export class RecipesService {
       const version = manager.getRepository(RecipeVersionEntity).create({
         recipeId: savedRecipe.id,
         versionNumber: 1,
-        baseYieldKgPerLiter: String(input.initialVersion.baseYieldKgPerLiter),
+        baseYieldKgPerLiter:
+          input.initialVersion.baseYieldKgPerLiter != null
+            ? String(input.initialVersion.baseYieldKgPerLiter)
+            : null,
         yieldSensitivityFat: String(input.initialVersion.yieldSensitivityFat ?? 0),
         yieldSensitivityProtein: String(input.initialVersion.yieldSensitivityProtein ?? 0),
         baselineFatPercent: String(input.initialVersion.baselineFatPercent ?? 3.4),
@@ -104,7 +107,7 @@ export class RecipesService {
       const v = versionRepo.create({
         recipeId,
         versionNumber: lastVersion + 1,
-        baseYieldKgPerLiter: String(input.baseYieldKgPerLiter),
+        baseYieldKgPerLiter: input.baseYieldKgPerLiter != null ? String(input.baseYieldKgPerLiter) : null,
         yieldSensitivityFat: String(input.yieldSensitivityFat ?? 0),
         yieldSensitivityProtein: String(input.yieldSensitivityProtein ?? 0),
         baselineFatPercent: String(input.baselineFatPercent ?? 3.4),
@@ -130,7 +133,8 @@ export class RecipesService {
 
     const yieldResult = computeYield({
       liters: input.liters,
-      baseYieldKgPerLiter: Number(version.baseYieldKgPerLiter),
+      // Sin rendimiento esperado, simulamos con 0 (el costo real se conoce al producir).
+      baseYieldKgPerLiter: version.baseYieldKgPerLiter != null ? Number(version.baseYieldKgPerLiter) : 0,
       yieldSensitivityFat: Number(version.yieldSensitivityFat),
       yieldSensitivityProtein: Number(version.yieldSensitivityProtein),
       baselineFatPercent: Number(version.baselineFatPercent),
@@ -209,7 +213,7 @@ export class RecipesService {
       id: v.id,
       recipeId: v.recipeId,
       versionNumber: v.versionNumber,
-      baseYieldKgPerLiter: Number(v.baseYieldKgPerLiter),
+      baseYieldKgPerLiter: v.baseYieldKgPerLiter != null ? Number(v.baseYieldKgPerLiter) : null,
       yieldSensitivityFat: Number(v.yieldSensitivityFat),
       yieldSensitivityProtein: Number(v.yieldSensitivityProtein),
       baselineFatPercent: Number(v.baselineFatPercent),

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import type {
@@ -251,6 +251,11 @@ export class InventoryService {
     return this.dataSource.transaction(async (manager) => {
       const product = await manager.getRepository(ProductEntity).findOne({ where: { id: input.productId } });
       if (!product) throw new NotFoundException(`Producto ${input.productId} no encontrado`);
+      // Insumos trazables: el N° de lote del proveedor es obligatorio (bromatología).
+      const supplierLotNumber = input.supplierLotNumber?.trim() || null;
+      if (product.requiresLotNumber && !supplierLotNumber) {
+        throw new BadRequestException(`Falta el número de lote del proveedor para ${product.name}.`);
+      }
       const code = `LM-IN-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 1000)}`;
       const batch = await manager.getRepository(BatchEntity).save(
         manager.getRepository(BatchEntity).create({
@@ -263,6 +268,7 @@ export class InventoryService {
           status: 'activo',
           warehouseId: input.warehouseId ?? null,
           unitCost: unitCostArs != null ? String(unitCostArs) : null,
+          supplierLotNumber,
           notes: input.notes ?? 'Ingreso de stock',
         }),
       );
@@ -558,11 +564,13 @@ export class InventoryService {
     const batchById = new Map<string, BatchEntity>(batches.map((b) => [b.id, b]));
     const orderById = new Map<string, ProductionOrderEntity>(orders.map((o) => [o.id, o]));
     const saleById = new Map<string, SalesOrderEntity>(sales.map((s) => [s.id, s]));
-    // Lote de leche → productor (vía recepción).
+    // Lote de leche → productor (vía recepción). Una recepción puede haber generado
+    // varios lotes (uno por silo): todos trazan al mismo productor/recepción.
     const producerByBatchId = new Map<string, TraceProducer>();
     for (const r of receptions) {
-      if (r.batchId) {
-        producerByBatchId.set(r.batchId, {
+      const ids = r.batchIds && r.batchIds.length > 0 ? r.batchIds : r.batchId ? [r.batchId] : [];
+      for (const id of ids) {
+        producerByBatchId.set(id, {
           producerId: r.producerId,
           producerName: r.producer?.name ?? r.producerName,
           receptionCode: r.code,

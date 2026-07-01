@@ -14,6 +14,8 @@ import { ProductionOrderEntity } from '../production/production-order.entity';
 import { SalesOrderEntity } from '../sales/sales-order.entity';
 import { CreditNoteEntity } from '../sales/credit-note.entity';
 import { InventoryMovementEntity } from '../inventory/inventory-movement.entity';
+import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
+import { CashMovementEntity } from '../finance/cash-movement.entity';
 import {
   aggregateSalesByProduct,
   buildYieldRow,
@@ -34,6 +36,10 @@ export class ReportsService {
     private readonly creditNotesRepo: Repository<CreditNoteEntity>,
     @InjectRepository(InventoryMovementEntity)
     private readonly movementsRepo: Repository<InventoryMovementEntity>,
+    @InjectRepository(MilkReceptionEntity)
+    private readonly receptionsRepo: Repository<MilkReceptionEntity>,
+    @InjectRepository(CashMovementEntity)
+    private readonly cashRepo: Repository<CashMovementEntity>,
   ) {}
 
   // Producción agrupada por día o mes sobre órdenes cerradas (closedAt en rango).
@@ -203,6 +209,111 @@ export class ReportsService {
         { header: 'Total', key: 'total' },
       ],
       rows.map((r) => ({ cliente: r.clientName, ventas: r.dispatchCount, total: r.total })),
+    );
+  }
+
+  // Todos los movimientos de un día (pedido #6): ingresos de leche, producción, ventas y
+  // caja (que incluye cobros, pagos y gastos). Una fila por movimiento, con su tipo.
+  async exportDailyMovementsXlsx(day: Date): Promise<Buffer> {
+    const start = new Date(day);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(day);
+    end.setHours(23, 59, 59, 999);
+
+    type MovRow = {
+      hora: string;
+      tipo: string;
+      comprobante: string;
+      contraparte: string;
+      detalle: string;
+      cantidad: number | null;
+      importe: number | null;
+      _ts: number;
+    };
+    const rows: MovRow[] = [];
+    const hhmm = (d: Date) =>
+      d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+    // 1) Ingresos de leche.
+    const receptions = await this.receptionsRepo.find({ where: { receivedAt: Between(start, end) } });
+    for (const r of receptions) {
+      rows.push({
+        hora: hhmm(r.receivedAt),
+        tipo: 'Ingreso de leche',
+        comprobante: r.code,
+        contraparte: r.producerName,
+        detalle: r.remito ? `Remito ${r.remito}` : '',
+        cantidad: Number(r.liters),
+        importe: null,
+        _ts: r.receivedAt.getTime(),
+      });
+    }
+
+    // 2) Producción (órdenes cerradas ese día).
+    const orders = await this.productionRepo.find({
+      where: { closedAt: Between(start, end), status: 'closed' },
+      relations: { recipe: true },
+    });
+    for (const o of orders) {
+      const ts = o.closedAt ?? o.startedAt;
+      rows.push({
+        hora: hhmm(ts),
+        tipo: 'Producción',
+        comprobante: o.code,
+        contraparte: o.recipe?.name ?? '',
+        detalle: `${Number(o.totalMilkLiters)} L de leche`,
+        cantidad: o.totalPrincipalKg != null ? Number(o.totalPrincipalKg) : null,
+        importe: o.totalCost != null ? Number(o.totalCost) : null,
+        _ts: ts.getTime(),
+      });
+    }
+
+    // 3) Ventas (despachos).
+    const sales = await this.salesRepo.find({
+      where: { dispatchedAt: Between(start, end) },
+      relations: { client: true },
+    });
+    for (const s of sales) {
+      rows.push({
+        hora: hhmm(s.dispatchedAt),
+        tipo: 'Venta',
+        comprobante: s.code,
+        contraparte: s.client?.businessName ?? '',
+        detalle: `${s.lines.length} ítem(s)`,
+        cantidad: null,
+        importe: Number(s.total),
+        _ts: s.dispatchedAt.getTime(),
+      });
+    }
+
+    // 4) Caja: ingresos y egresos (cobros, pagos y gastos ya impactan acá).
+    const cash = await this.cashRepo.find({ where: { occurredAt: Between(start, end) } });
+    for (const c of cash) {
+      rows.push({
+        hora: hhmm(c.occurredAt),
+        tipo: c.kind === 'income' ? 'Ingreso de caja' : 'Egreso de caja',
+        comprobante: '',
+        contraparte: '',
+        detalle: c.notes ? `${c.category} — ${c.notes}` : c.category,
+        cantidad: null,
+        importe: c.kind === 'income' ? Number(c.amount) : -Number(c.amount),
+        _ts: c.occurredAt.getTime(),
+      });
+    }
+
+    rows.sort((a, b) => a._ts - b._ts);
+    return toXlsx(
+      'Movimientos del día',
+      [
+        { header: 'Hora', key: 'hora' },
+        { header: 'Tipo', key: 'tipo' },
+        { header: 'Comprobante', key: 'comprobante' },
+        { header: 'Contraparte', key: 'contraparte' },
+        { header: 'Detalle', key: 'detalle' },
+        { header: 'Cantidad', key: 'cantidad' },
+        { header: 'Importe', key: 'importe' },
+      ],
+      rows.map(({ _ts, ...r }) => r),
     );
   }
 }

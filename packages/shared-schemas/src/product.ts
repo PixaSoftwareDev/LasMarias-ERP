@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isoDateTimeSchema, uuidSchema } from './common';
+import { currencySchema, ivaModeSchema } from './money';
 
 // Producto final del catálogo (queso cremoso, ricota, etc).
 
@@ -26,6 +27,12 @@ export const productSchema = z.object({
   trackBatches: z.boolean(), // ¿se trabaja por lote?
   // Stock mínimo: cuando el stock total cae a este valor o menos, se alerta (CLAUDE.md §4.4).
   minStockLevel: z.number().nonnegative().optional(),
+  // Costo de referencia (insumos/envases/materia prima): pre-llena el ingreso de stock.
+  defaultCost: z.number().nonnegative().optional(),
+  defaultCostCurrency: currencySchema.optional(),
+  costIvaMode: ivaModeSchema.optional(),
+  // Insumo trazable: exige N° de lote del proveedor al ingresar stock (bromatología).
+  requiresLotNumber: z.boolean().optional(),
   isActive: z.boolean(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,

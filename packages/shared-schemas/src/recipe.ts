@@ -8,6 +8,7 @@ import { currencySchema } from './money';
 
 export const ingredientBasisSchema = z.enum([
   'per_liter_milk',
+  'per_1000_liters_milk', // por cada 1.000 litros de leche (ej: 250 g de calcio /1000 L)
   'per_kg_product',
   'fixed_per_order',
 ]);
@@ -47,7 +48,9 @@ export const recipeVersionSchema = z.object({
   id: uuidSchema,
   recipeId: uuidSchema,
   versionNumber: z.number().int().positive(),
-  baseYieldKgPerLiter: z.number().positive(),
+  // Rendimiento esperado (kg/litro). OPCIONAL: se conoce recién al producir. Null = sin
+  // rendimiento esperado → la orden muestra solo el costo real, sin comparación estándar.
+  baseYieldKgPerLiter: z.number().positive().nullable(),
   yieldSensitivityFat: z.number().default(0),
   yieldSensitivityProtein: z.number().default(0),
   baselineFatPercent: z.number().default(3.4),
@@ -77,7 +80,9 @@ export const recipeSchema = z.object({
 export type Recipe = z.infer<typeof recipeSchema>;
 
 export const createRecipeVersionInputSchema = z.object({
-  baseYieldKgPerLiter: z.number().positive('El rendimiento tiene que ser mayor a 0'),
+  // Opcional al crear la receta: si no se sabe el rendimiento todavía, se carga después
+  // (se conoce al producir). Si se ingresa, tiene que ser > 0.
+  baseYieldKgPerLiter: z.number().positive('El rendimiento tiene que ser mayor a 0').nullable().optional(),
   yieldSensitivityFat: z.number().default(0),
   yieldSensitivityProtein: z.number().default(0),
   baselineFatPercent: z.number().default(3.4),
