@@ -52,6 +52,15 @@ export default function ClientsPage() {
     }
   }, [editing, form]);
 
+  // Al abrir el formulario (sobre todo al "Editar" desde una fila de más abajo) llevamos
+  // la vista al tope para que se vea. Scroll instantáneo y diferido: el suave lo pisa el
+  // foco que el menú de acciones (Radix) devuelve al cerrarse, y parecía que "no pasa nada".
+  useEffect(() => {
+    if (!showForm) return;
+    const t = setTimeout(() => window.scrollTo({ top: 0, behavior: 'auto' }), 120);
+    return () => clearTimeout(t);
+  }, [showForm, editing]);
+
   function closeForm() {
     setShowForm(false);
     setEditing(null);

@@ -79,6 +79,15 @@ export default function ProductsPage() {
     }
   }, [editing, form]);
 
+  // Al abrir el formulario (sobre todo al "Editar" desde una fila de más abajo) llevamos
+  // la vista al tope para que se vea. Scroll instantáneo y diferido: el suave lo pisa el
+  // foco que el menú de acciones (Radix) devuelve al cerrarse, y parecía que "no pasa nada".
+  useEffect(() => {
+    if (!showForm) return;
+    const t = setTimeout(() => window.scrollTo({ top: 0, behavior: 'auto' }), 120);
+    return () => clearTimeout(t);
+  }, [showForm, editing]);
+
   function closeForm() {
     setShowForm(false);
     setEditing(null);
@@ -183,7 +192,7 @@ export default function ProductsPage() {
                   className="sm:col-span-2"
                   hint="Opcional. Pre-llena el costo al ingresar stock de este insumo. Elegí si lo cargás con o sin IVA."
                 >
-                  <div className="flex gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row">
                     <Input
                       id="defaultCost"
                       type="number"
@@ -196,7 +205,7 @@ export default function ProductsPage() {
                     />
                     <select
                       aria-label="Moneda del costo"
-                      className="min-h-touch w-24 flex-none rounded-md border border-border bg-surface-elevated px-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                      className="min-h-touch w-full flex-none sm:w-24 rounded-md border border-border bg-surface-elevated px-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
                       {...form.register('defaultCostCurrency')}
                     >
                       <option value="ARS">ARS</option>
@@ -205,7 +214,7 @@ export default function ProductsPage() {
                     </select>
                     <select
                       aria-label="IVA del costo"
-                      className="min-h-touch w-32 flex-none rounded-md border border-border bg-surface-elevated px-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                      className="min-h-touch w-full flex-none sm:w-32 rounded-md border border-border bg-surface-elevated px-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
                       {...form.register('costIvaMode')}
                     >
                       <option value="sin_iva">Sin IVA</option>

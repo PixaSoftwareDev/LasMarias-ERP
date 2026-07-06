@@ -31,7 +31,7 @@ export default function RecipesPage() {
         <>
         {/* Resumen en chip compacto (consistente con el Home). */}
         <div className="flex flex-wrap gap-3">
-          <div className="flex min-w-[11rem] items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
+          <div className="flex min-w-[8rem] sm:min-w-[11rem] items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
             <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-700">
               <ChefHat className="h-4 w-4" aria-hidden="true" />
             </span>

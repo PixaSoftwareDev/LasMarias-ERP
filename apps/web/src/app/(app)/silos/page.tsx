@@ -124,7 +124,7 @@ function Gauge({ percent, label }: { percent: number; label: string }) {
 
   return (
     <div className="flex flex-col items-center">
-      <svg width="240" height="136" viewBox="0 0 260 134" role="img" aria-label={`Capacidad total de la planta, ${pct(percent)}`}>
+      <svg width="240" height="136" viewBox="0 0 260 134" className="h-auto w-full max-w-[240px]" role="img" aria-label={`Capacidad total de la planta, ${pct(percent)}`}>
         {/* Arco de fondo */}
         <polyline points={poly(0, 1)} fill="none" className="stroke-surface-subtle" strokeWidth="18" strokeLinecap="round" />
         {/* Arco de valor */}

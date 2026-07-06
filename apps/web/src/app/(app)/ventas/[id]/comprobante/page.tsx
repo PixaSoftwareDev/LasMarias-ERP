@@ -111,6 +111,7 @@ export default function ComprobantePage() {
           </div>
         </div>
 
+        <div className="overflow-x-auto">
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-foreground-muted">
@@ -140,6 +141,7 @@ export default function ComprobantePage() {
             </tr>
           </tfoot>
         </table>
+        </div>
 
         {order.currency && order.currency !== 'ARS' && (
           <p className="mt-2 text-right text-xs text-foreground-muted">

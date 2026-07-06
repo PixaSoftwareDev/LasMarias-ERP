@@ -136,9 +136,9 @@ desvio_rendimiento  = rendimiento_real − rendimiento_esperado
 
 ### Lo que se usa (la arquitectura real construida)
 
-- **Backend:** Node.js 22 + TypeScript estricto, **NestJS**, **TypeORM** con migraciones versionadas. API **REST** con prefijo `/api` (puerto 4000). Lógica de dominio (costeo, producción) en **servicios testeables sin HTTP**.
+- **Backend:** Node.js 22 + TypeScript estricto, **NestJS**, **TypeORM** con esquema **sincronizado desde las entidades** (`synchronize: true`, sin migraciones versionadas). API **REST** con prefijo `/api` (puerto 4000). Lógica de dominio (costeo, producción) en **servicios testeables sin HTTP**.
 - **Base:** **PostgreSQL 16** como única base (Docker, puerto local 55432).
-- **Frontend:** **React 18 + Next.js 14** (App Router), **TailwindCSS + shadcn/ui + Radix**, **TanStack Query**, **React Hook Form + Zod**.
+- **Frontend:** **React 18 + Next.js 14** (App Router, dev/prod en puerto 3010, proxy `/api` → backend), **TailwindCSS + shadcn/ui + Radix**, **TanStack Query**, **React Hook Form + Zod**.
 - **Validación:** **Zod** compartida entre back y front (`packages/shared-schemas`).
 - **Auth:** JWT + refresh, bcrypt, roles.
 - **Tests:** **Jest + Supertest**.
@@ -199,16 +199,31 @@ Sidebars de 20 ítems planos · tablas de 12 columnas en mobile · modales sobre
 
 ---
 
-## 9. Estado del proyecto — CERRADO (actualizado 19/06/2026)
+## 9. Estado del proyecto — CERRADO (actualizado 03/07/2026)
 
 **El producto está cerrado y entregable.** Cubre el ciclo completo (leche → producción con costo → stock → despacho → cobranza/cuenta corriente → finanzas), más trazabilidad, reportes y un Home con calendario. Todo verificado E2E y validado **responsive** (desktop + móvil).
 
-- **Arquitectura:** solo web (NestJS `apps/api` + Next.js `apps/web`), PostgreSQL única base, monorepo pnpm + Turbo. Sin colas/Redis. Esquema sincronizado desde las entidades (sin migraciones versionadas).
-- **Lo que vive en el código:** auth/usuarios, recepción de leche, silos, recetas versionadas + simulador, producción con la **calculadora de costo** (real vs estándar, decimal exacto, costeo encadenado leche→masa→producto), inventario + FEFO, trazabilidad bidireccional, ventas/despacho (precio a mano, baja stock, remito, notas de crédito), finanzas (cobranzas, pagos a tambos y proveedores, caja y bancos, cheques, conciliación, flujo de caja, rentabilidad), reportes, datos maestros e Inicio.
+- **Arquitectura:** solo web (NestJS `apps/api` puerto 4000 + Next.js `apps/web` puerto 3010), PostgreSQL única base (55432), monorepo pnpm + Turbo. Sin colas/Redis. Esquema sincronizado desde las entidades (`synchronize: true`, sin migraciones versionadas).
+- **Lo que vive en el código:** auth/usuarios, recepción de leche, silos, recetas versionadas + simulador, producción con la **calculadora de costo** (real vs estándar, decimal exacto, costeo encadenado leche→masa→producto), inventario + FEFO, trazabilidad bidireccional, ventas/despacho (precio a mano, baja stock, remito, notas de crédito), finanzas (cobranzas, pagos a tambos y proveedores unificados, caja y bancos, cheques, conciliación, flujo de caja, rentabilidad), reportes, datos maestros e Inicio.
 - **Calidad:** tests de dominio verdes (calculadora de costo + producción + FEFO), typecheck API + web limpios, build de producción OK.
 
-**Lo único que falta no es de producto sino de puesta en producción:** limpiar la base de datos demo y cargar datos reales, backups, hosting/modo producción. **No hay fases siguientes planificadas.**
+### 9.1 Trabajo posterior a la primera entrega (pulido, sin cambio de alcance)
+
+Desde la v1 (19/06) se hizo solo pulido sobre el producto cerrado, sin agregar módulos:
+
+- **Finanzas simplificada:** resumen más directo y **pagos unificados** (tambos + proveedores) pensados para el administrativo.
+- **Marca:** login con panel verde de marca + logo, e **isotipo (hoja + vaca) junto a "Las Marías"** en el sidebar y el header mobile.
+- **Home "Para resolver"** ahora suma silos casi vacíos, cheques por vencer y comprobantes vencidos; saludo con la fecha de hoy.
+- **Pulido responsive/móvil** en casi todas las pantallas: chips/KPIs que encogen en mobile, controles de formulario (precio + moneda + IVA) que apilan en pantallas chicas, títulos con `break-words`, scroll al tope al abrir/editar un formulario.
+- **Tutorial de capacitación en video** (`tutorial/`, ~8:52 min, botón por botón) grabado y **entregado al dueño**. No es parte del software; es material de onboarding.
+
+### 9.2 Puntos abiertos
+
+- **Puesta en producción (no de producto):** limpiar la base demo y cargar datos reales, backups, hosting/modo producción.
+- **Decisión del dueño sobre el costeo encadenado (toca el corazón del sistema):** el `default_cost` de la Masa quedó en **NULL** para que la muzzarella herede el **costo real** del lote de masa (leche→masa→queso), como pide §5.5. Falta confirmar si el negocio prefiere eso o un **precio de masa cargado a mano**. Nada se toca de la calculadora sin esa confirmación.
+
+**No hay fases siguientes planificadas.**
 
 ---
 
-*Documento maestro — Quesería Las Marías, Argentina. Producto cerrado, junio 2026.*
+*Documento maestro — Quesería Las Marías, Argentina. Producto cerrado (v1 junio 2026, pulido al 03/07/2026).*

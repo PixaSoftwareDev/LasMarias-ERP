@@ -161,7 +161,7 @@ export default function PreciosPage() {
                     <p className="font-mono text-xs text-foreground-muted">{p.sku} · por {p.unit}</p>
                   </div>
                   <div className="flex-shrink-0 text-right">
-                    <div className="relative w-36">
+                    <div className="relative w-28 sm:w-36">
                       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-foreground-muted">{currencySymbol(currency)}</span>
                       <Input
                         type="number"

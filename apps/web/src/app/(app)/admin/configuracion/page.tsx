@@ -154,7 +154,7 @@ export default function ConfigPage() {
               <Field label="Temperatura máxima (°C)" htmlFor="cfg-temp" hint="La leche debe llegar fría.">
                 <Input id="cfg-temp" type="number" inputMode="decimal" step="0.1" suffix="°C" value={maxTemp} onChange={(e) => setMaxTemp(e.target.value)} />
               </Field>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label="pH mínimo" htmlFor="cfg-minph" error={!phValid && minPh && maxPh ? 'Debe ser menor al máximo' : undefined}>
                   <Input id="cfg-minph" type="number" inputMode="decimal" step="0.01" value={minPh} onChange={(e) => setMinPh(e.target.value)} />
                 </Field>

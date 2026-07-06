@@ -78,7 +78,7 @@ function KpiChip({ kpi }: { kpi: Kpi }) {
     <Link
       href={kpi.href}
       title={kpi.hint}
-      className="group flex min-w-[11rem] flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm transition-all hover:border-primary-300 hover:shadow-md"
+      className="group flex min-w-[8rem] sm:min-w-[11rem] flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm transition-all hover:border-primary-300 hover:shadow-md"
     >
       <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${KPI_TONE[kpi.tone]}`}>
         <Icon className="h-4 w-4" aria-hidden="true" />
@@ -92,7 +92,7 @@ function KpiChip({ kpi }: { kpi: Kpi }) {
 }
 
 function KpiChipSkeleton() {
-  return <div className="h-[60px] min-w-[11rem] flex-1 animate-pulse rounded-lg bg-surface-subtle" />;
+  return <div className="h-[60px] min-w-[8rem] sm:min-w-[11rem] flex-1 animate-pulse rounded-lg bg-surface-subtle" />;
 }
 
 // ─── "Para resolver" — fila accionable ───────────────────────────────────────

@@ -339,7 +339,7 @@ export default function NewRecipeVersionPage() {
                     </select>
                   </Field>
                   <Field label="Costo unitario" htmlFor={`ing-cost-${idx}`} hint="Se completa con el precio del producto; podés ajustarlo a mano.">
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row">
                       <Input
                         type="number"
                         inputMode="decimal"
@@ -351,7 +351,7 @@ export default function NewRecipeVersionPage() {
                         onChange={(e) => updateIngredient(idx, { unitCost: e.target.value })}
                       />
                       <select
-                        className={`${selectClass} w-28 flex-none`}
+                        className={`${selectClass} w-full flex-none sm:w-28`}
                         aria-label="Moneda del costo"
                         value={row.currency}
                         onChange={(e) => updateIngredient(idx, { currency: e.target.value as Currency })}

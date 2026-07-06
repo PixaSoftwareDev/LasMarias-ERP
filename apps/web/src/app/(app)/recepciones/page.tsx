@@ -197,7 +197,7 @@ export default function ReceptionsPage() {
                 <select
                   value={status}
                   onChange={(e) => setStatus(e.target.value as StatusFilter)}
-                  className="min-h-touch w-44 rounded-md border border-border bg-surface-elevated px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                  className="min-h-touch w-full sm:w-44 rounded-md border border-border bg-surface-elevated px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
                 >
                   {STATUS_CHIPS.map((c) => (
                     <option key={c.value} value={c.value}>{c.label}</option>

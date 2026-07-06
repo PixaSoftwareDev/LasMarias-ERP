@@ -151,7 +151,7 @@ function ChequeDetailDrawer({ cheque, onClose }: { cheque: Cheque; onClose: () =
               <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-foreground-muted">
                 Recorrido del cheque
               </p>
-              <div className="flex items-center gap-2 text-sm">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="rounded bg-white px-2 py-1 font-medium shadow-sm">
                   {isRecibido ? cheque.counterparty : 'Nosotros'}
                 </span>
@@ -253,7 +253,7 @@ function RejectionModal({
               <h2 className="font-display text-lg font-semibold text-foreground">
                 Cheque rechazado
               </h2>
-              <p className="text-sm text-foreground-muted">
+              <p className="break-words text-sm text-foreground-muted">
                 #{cheque.number} · {money(cheque.amount)}
                 {cheque.counterparty && ` · ${cheque.kind === 'recibido' ? 'De' : 'A'}: ${cheque.counterparty}`}
               </p>

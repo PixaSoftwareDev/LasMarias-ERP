@@ -328,7 +328,7 @@ export default function NewReceptionPage() {
             )}
 
             {/* Totales + diferencia de litros EN VIVO (CLAUDE.md §5.1). */}
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-subtle bg-surface-subtle/40 px-4 py-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-border-subtle bg-surface-subtle/40 px-4 py-3">
               <p className="text-sm">
                 <span className="text-foreground-muted">Total recibido: </span>
                 <span className="font-semibold text-foreground">{totalLiters.toLocaleString('es-AR', { maximumFractionDigits: 1 })} L</span>

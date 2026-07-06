@@ -56,3 +56,7 @@ rec-lista.png
 
 # Artefactos de Playwright MCP (capturas/snapshots de verificación)
 .playwright-mcp/
+
+# Material de capacitación (onboarding, NO es software) — pesa >1GB de raws de video
+tutorial/
+apps/web/public/tutorial_completo.mp4

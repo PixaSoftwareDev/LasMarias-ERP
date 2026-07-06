@@ -64,7 +64,7 @@ export default function SimulatorPage() {
           <CardContent className="flex flex-col gap-5">
             {/* Números clave en chips compactos (consistente con el Home). */}
             <div className="flex flex-wrap gap-3">
-              <div className="flex min-w-[12rem] flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
+              <div className="flex min-w-[8rem] sm:min-w-[12rem] flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
                 <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-secondary-50 text-secondary-700">
                   <Gauge className="h-4 w-4" aria-hidden="true" />
                 </span>
@@ -73,7 +73,7 @@ export default function SimulatorPage() {
                   <span className="block font-display text-lg font-bold tracking-tight text-foreground">{simulate.data.appliedYieldKgPerLiter.toFixed(4)} <span className="text-sm font-normal text-foreground-muted">kg/L</span></span>
                 </span>
               </div>
-              <div className="flex min-w-[12rem] flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
+              <div className="flex min-w-[8rem] sm:min-w-[12rem] flex-1 items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-4 py-3 shadow-sm">
                 <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-700">
                   <Boxes className="h-4 w-4" aria-hidden="true" />
                 </span>

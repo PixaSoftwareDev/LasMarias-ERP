@@ -78,6 +78,15 @@ export default function ProducersPage() {
     }
   }, [editing, form]);
 
+  // Al abrir el formulario (sobre todo al "Editar" desde una fila de más abajo) llevamos
+  // la vista al tope para que se vea. Scroll instantáneo y diferido: el suave lo pisa el
+  // foco que el menú de acciones (Radix) devuelve al cerrarse, y parecía que "no pasa nada".
+  useEffect(() => {
+    if (!showForm) return;
+    const t = setTimeout(() => window.scrollTo({ top: 0, behavior: 'auto' }), 120);
+    return () => clearTimeout(t);
+  }, [showForm, editing]);
+
   function closeForm() {
     setShowForm(false);
     setEditing(null);
@@ -162,11 +171,11 @@ export default function ProducersPage() {
                     : 'Precio de la leche. Si es en USD/EUR, se convierte a $ al recibir.'
                 }
               >
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <Input type="number" step="0.0001" inputMode="decimal" suffix="/L" placeholder="Ej: 320" className="flex-1" {...form.register('agreedPricePerLiter', { valueAsNumber: true })} />
                   <select
                     aria-label="Moneda del precio"
-                    className="min-h-touch w-24 rounded-md border border-border bg-surface-elevated px-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                    className="min-h-touch w-full sm:w-24 rounded-md border border-border bg-surface-elevated px-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
                     {...form.register('priceCurrency')}
                   >
                     <option value="ARS">ARS</option>

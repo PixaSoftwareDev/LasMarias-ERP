@@ -77,7 +77,7 @@ function SummaryChip({
   icon: LucideIcon; label: string; value: string; tone: keyof typeof CHIP_TONE;
   onClick?: () => void; active?: boolean;
 }) {
-  const base = 'flex min-w-[11rem] flex-1 items-center gap-3 rounded-lg border bg-surface-elevated px-4 py-3 shadow-sm text-left transition-colors';
+  const base = 'flex min-w-[8rem] sm:min-w-[11rem] flex-1 items-center gap-3 rounded-lg border bg-surface-elevated px-4 py-3 shadow-sm text-left transition-colors';
   const state = active
     ? 'border-primary-500 ring-2 ring-primary-200'
     : onClick
@@ -110,7 +110,7 @@ function SummaryChip({
 }
 
 function ChipSkeleton() {
-  return <div className="h-[60px] min-w-[11rem] flex-1 animate-pulse rounded-lg bg-surface-subtle" />;
+  return <div className="h-[60px] min-w-[8rem] sm:min-w-[11rem] flex-1 animate-pulse rounded-lg bg-surface-subtle" />;
 }
 
 // --- Fila de un ítem de stock (lista escaneable) ---
