@@ -3,8 +3,9 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
-import { Factory, Plus } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { Factory, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui/data-table';
 import { DateRangeFilter } from '@/components/ui/date-range';
@@ -13,6 +14,9 @@ import { TableSkeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge, type Status } from '@/components/ui/status-badge';
 import { productionApi } from '@/features/api';
+import { ApiError } from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
+import { useConfirm } from '@/hooks/use-confirm';
 import { formatDateTime, formatMoney } from '@/lib/utils';
 import type { ProductionOrder } from '@lasmarias/shared-schemas';
 
@@ -27,7 +31,39 @@ function statusBadge(s: ProductionOrder['status']): { variant: Status; label: st
 
 export default function ProductionPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const confirm = useConfirm();
+  const { user } = useAuth();
+  // Borrar deshace stock: solo admin/gerente (mismo criterio que anular una venta).
+  const canDelete = user?.role === 'admin' || user?.role === 'gerente';
   const { data = [], isLoading } = useQuery({ queryKey: ['production-orders'], queryFn: () => productionApi.list() });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => productionApi.remove(id),
+    onSuccess: (r) => {
+      // La reversa toca silos, stock e insumos: invalidamos todo para no dejar datos viejos.
+      queryClient.invalidateQueries();
+      toast.success(`Orden ${r.code} borrada. El stock volvió a como estaba.`);
+    },
+    onError: (err) => {
+      if (err instanceof ApiError) toast.error(err.message);
+      else toast.error('No se pudo borrar la orden. Probá de nuevo.');
+    },
+  });
+
+  const handleDelete = async (o: ProductionOrder) => {
+    const ok = await confirm({
+      title: `Borrar la orden ${o.code}`,
+      message:
+        o.status === 'closed'
+          ? 'Se elimina lo producido y la leche y los insumos vuelven al stock, como si la orden nunca hubiera existido. Solo se puede si lo producido no se vendió ni se usó todavía.'
+          : 'Se libera la leche que estaba reservada para esta orden.',
+      confirmLabel: 'Borrar orden',
+      cancelLabel: 'Cancelar',
+      destructive: true,
+    });
+    if (ok) deleteMutation.mutate(o.id);
+  };
 
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -79,16 +115,33 @@ export default function ProductionPage() {
               key: 'action',
               header: '',
               align: 'right',
-              render: (o) =>
-                o.status === 'open' || o.status === 'in_progress' ? (
-                  <Button asChild size="sm" variant="secondary" onClick={(e) => e.stopPropagation()}>
-                    <Link href={`/produccion/${o.id}/cerrar`}>Cargar producción / Cerrar</Link>
-                  </Button>
-                ) : o.status === 'closed' ? (
-                  <Button asChild size="sm" variant="ghost" onClick={(e) => e.stopPropagation()}>
-                    <Link href={`/produccion/${o.id}/cerrar`}>Ver costo</Link>
-                  </Button>
-                ) : null,
+              render: (o) => (
+                <div className="flex items-center justify-end gap-1">
+                  {o.status === 'open' || o.status === 'in_progress' ? (
+                    <Button asChild size="sm" variant="secondary" onClick={(e) => e.stopPropagation()}>
+                      <Link href={`/produccion/${o.id}/cerrar`}>Cargar producción / Cerrar</Link>
+                    </Button>
+                  ) : o.status === 'closed' ? (
+                    <Button asChild size="sm" variant="ghost" onClick={(e) => e.stopPropagation()}>
+                      <Link href={`/produccion/${o.id}/cerrar`}>Ver costo</Link>
+                    </Button>
+                  ) : null}
+                  {canDelete && (
+                    <button
+                      type="button"
+                      aria-label={`Borrar orden ${o.code}`}
+                      disabled={deleteMutation.isPending}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleDelete(o);
+                      }}
+                      className="flex min-h-touch min-w-touch items-center justify-center rounded-md text-foreground-muted transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+              ),
             },
           ]}
         />

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import {
   closeProductionInputSchema,
   openProductionInputSchema,
@@ -32,6 +32,13 @@ export class ProductionController {
   @Roles('admin', 'gerente', 'operario')
   open(@Body(new ZodValidationPipe(openProductionInputSchema)) body: OpenProductionInput) {
     return this.production.open(body);
+  }
+
+  // Borrar deshace stock (o libera reservas): acción destructiva, solo admin/gerente.
+  @Delete(':id')
+  @Roles('admin', 'gerente')
+  remove(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.production.remove(id);
   }
 
   @Post(':id/close')

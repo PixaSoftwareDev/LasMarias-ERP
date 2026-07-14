@@ -10,4 +10,6 @@ export const receptionsApi = {
 
 export const producersApi = {
   list: () => api<ProducerDto[]>('/api/producers'),
+  create: (input: { name: string; agreedPricePerLiter?: number }) =>
+    api<ProducerDto>('/api/producers', { method: 'POST', body: input }),
 };

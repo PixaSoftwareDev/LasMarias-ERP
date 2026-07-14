@@ -182,6 +182,8 @@ export const productionApi = {
     api<ProductionOrder>('/api/production-orders/open', { method: 'POST', body: input }),
   close: (id: string, input: { actualOutputs: { productId: string; quantity: number; isPrincipal: boolean }[]; warehouseId?: string; expectedYieldKgPerLiter?: number; notes?: string }) =>
     api<ProductionOrder>(`/api/production-orders/${id}/close`, { method: 'POST', body: input }),
+  remove: (id: string) =>
+    api<{ deleted: true; code: string }>(`/api/production-orders/${id}`, { method: 'DELETE' }),
 };
 
 export interface ConsumableBatch {

@@ -77,8 +77,10 @@ export class ProducersController {
     return this.accounts.registerPayment(body, user.sub);
   }
 
+  // El operario también puede dar de alta un tambo: lo necesita al cargar una recepción
+  // cuando llega leche de un tambo que todavía no está en el sistema.
   @Post()
-  @Roles('admin', 'gerente')
+  @Roles('admin', 'gerente', 'operario')
   create(@Body(new ZodValidationPipe(createProducerSchema)) body: CreateProducerInput) {
     return this.producers.create(body);
   }

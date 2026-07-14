@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import type {
   CloseProductionInput,
   OpenProductionInput,
@@ -420,6 +420,84 @@ export class ProductionService {
         relations: { recipe: true, operator: true },
       });
       return this.toDto(reloaded!);
+    });
+  }
+
+  // Borra una orden deshaciendo su efecto en stock. NO recalcula ningún costo: solo
+  // revierte movimientos, así la calculadora queda intacta (CLAUDE.md §5).
+  // - Abierta: la leche estaba solo reservada (en_proceso) → se libera y se borra.
+  // - Cerrada: se devuelve lo consumido (leche/masa e insumos) y se eliminan los lotes
+  //   producidos, PERO solo si están intactos: si ya se vendieron o se usaron en otra
+  //   elaboración, se rechaza con un aviso claro (borrar rompería trazabilidad y costos).
+  async remove(id: string): Promise<{ deleted: true; code: string }> {
+    return this.dataSource.transaction(async (manager) => {
+      const orderRepo = manager.getRepository(ProductionOrderEntity);
+      const batchRepo = manager.getRepository(BatchEntity);
+      const movementRepo = manager.getRepository(InventoryMovementEntity);
+      const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+      const order = await orderRepo.findOne({ where: { id } });
+      if (!order) throw new NotFoundException(`Orden de producción ${id} no encontrada`);
+
+      if (order.status === 'open' || order.status === 'in_progress') {
+        // Liberar los lotes de leche reservados, salvo que otra orden abierta también los use.
+        const others = await orderRepo.find({ where: { status: In(['open', 'in_progress']) } });
+        const stillInUse = new Set(
+          others.filter((o) => o.id !== order.id).flatMap((o) => o.milkInputs.map((mi) => mi.batchId)),
+        );
+        for (const mi of order.milkInputs) {
+          if (stillInUse.has(mi.batchId)) continue;
+          const batch = await batchRepo.findOne({ where: { id: mi.batchId } });
+          if (batch && batch.status === 'en_proceso') {
+            batch.status = 'activo';
+            await batchRepo.save(batch);
+          }
+        }
+        await orderRepo.remove(order);
+        return { deleted: true as const, code: order.code };
+      }
+
+      if (order.status === 'closed') {
+        const movements = await movementRepo.find({
+          where: { referenceType: 'production_order', referenceId: order.id },
+        });
+        const producedBatchIds = [...new Set(movements.filter((m) => m.type === 'in').map((m) => m.batchId))];
+
+        // Guardia: lo producido tiene que estar intacto (ni vendido ni consumido después).
+        for (const batchId of producedBatchIds) {
+          const batch = await batchRepo.findOne({ where: { id: batchId } });
+          if (!batch) continue;
+          const usedElsewhere = await movementRepo
+            .createQueryBuilder('m')
+            .where('m.batch_id = :batchId', { batchId })
+            .andWhere('m.reference_id IS DISTINCT FROM :orderId', { orderId: order.id })
+            .getCount();
+          if (usedElsewhere > 0 || Number(batch.remainingQuantity) !== Number(batch.initialQuantity)) {
+            throw new BadRequestException(
+              `No se puede borrar la orden ${order.code}: el lote ${batch.code} ya se usó (venta u otra elaboración). Anulá primero ese movimiento.`,
+            );
+          }
+        }
+
+        // Devolver al stock lo que la orden consumió (leche/masa e insumos por FEFO).
+        for (const m of movements) {
+          if (m.type !== 'out') continue;
+          const batch = await batchRepo.findOne({ where: { id: m.batchId } });
+          if (!batch) continue;
+          batch.remainingQuantity = String(round3(Number(batch.remainingQuantity) + Number(m.quantity)));
+          if (batch.status === 'agotado' && Number(batch.remainingQuantity) > 0) batch.status = 'activo';
+          await batchRepo.save(batch);
+        }
+
+        if (movements.length > 0) await movementRepo.remove(movements);
+        if (producedBatchIds.length > 0) await batchRepo.delete(producedBatchIds);
+        await orderRepo.remove(order);
+        return { deleted: true as const, code: order.code };
+      }
+
+      // Cancelada: no dejó efecto en stock.
+      await orderRepo.remove(order);
+      return { deleted: true as const, code: order.code };
     });
   }
 

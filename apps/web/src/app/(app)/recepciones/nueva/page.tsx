@@ -73,6 +73,7 @@ export default function NewReceptionPage() {
     handleSubmit,
     watch,
     control,
+    setValue,
     formState: { errors, isSubmitting, isValid },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -108,6 +109,29 @@ export default function NewReceptionPage() {
   });
 
   const producerOptions = useMemo(() => producersQuery.data ?? [], [producersQuery.data]);
+
+  // Alta de tambo sin salir de la recepción: si llega leche de un tambo que todavía
+  // no está en el sistema, se crea acá mismo y queda seleccionado en la fila.
+  const [newTamboAt, setNewTamboAt] = useState<number | null>(null);
+  const [newTamboName, setNewTamboName] = useState('');
+  const [newTamboPrice, setNewTamboPrice] = useState('');
+  const createTambo = useMutation({
+    mutationFn: (input: { name: string; agreedPricePerLiter?: number }) => producersApi.create(input),
+    onSuccess: (p) => {
+      // Lo sumamos a la lista al instante para que el select ya tenga la opción.
+      queryClient.setQueryData<typeof producerOptions>(['producers'], (old) => [...(old ?? []), p]);
+      queryClient.invalidateQueries({ queryKey: ['producers'] });
+      if (newTamboAt != null) setValue(`producers.${newTamboAt}.producerId`, p.id, { shouldValidate: true });
+      setNewTamboAt(null);
+      setNewTamboName('');
+      setNewTamboPrice('');
+      toast.success(`Tambo "${p.name}" creado y seleccionado`);
+    },
+    onError: (err) => {
+      if (err instanceof ApiError) toast.error(err.message);
+      else toast.error('No se pudo crear el tambo. Probá de nuevo.');
+    },
+  });
   // La leche va a un SILO (CLAUDE.md §9). Si hay silos definidos, el destino se limita a
   // ellos; si todavía no se crearon, dejamos todas las ubicaciones para no bloquear la carga.
   const allWarehouses = useMemo(() => warehousesQuery.data ?? [], [warehousesQuery.data]);
@@ -266,18 +290,31 @@ export default function NewReceptionPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <div className="space-y-3">
-              {producerLines.fields.map((row, idx) => (
-                <div key={row.id} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,140px,140px,auto] sm:items-end">
+              {producerLines.fields.map((row, idx) => {
+                const producerField = register(`producers.${idx}.producerId` as const);
+                return (
+                <div key={row.id} className="flex flex-col gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,140px,140px,auto] sm:items-end">
                   <Field label={idx === 0 ? 'Tambo' : ''} htmlFor={`prod-${idx}`} required error={errors.producers?.[idx]?.producerId?.message}>
                     <select
                       id={`prod-${idx}`}
                       className="flex min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
-                      {...register(`producers.${idx}.producerId` as const)}
+                      {...producerField}
+                      onChange={(e) => {
+                        // "Crear tambo nuevo…" no es un tambo: abre el mini-formulario de alta.
+                        if (e.target.value === '__nuevo__') {
+                          setNewTamboAt(idx);
+                          setValue(`producers.${idx}.producerId`, '');
+                          return;
+                        }
+                        void producerField.onChange(e);
+                      }}
                     >
                       <option value="">Elegí un tambo</option>
                       {producerOptions.map((p) => (
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
+                      <option value="__nuevo__">➕ Crear tambo nuevo…</option>
                     </select>
                   </Field>
                   <Field label={idx === 0 ? 'Declarados (remito)' : ''} htmlFor={`decl-${idx}`} error={errors.producers?.[idx]?.declaredLiters?.message}>
@@ -312,7 +349,69 @@ export default function NewReceptionPage() {
                     <Trash2 className="h-4 w-4" aria-hidden="true" />
                   </button>
                 </div>
-              ))}
+
+                {/* Mini-formulario de alta de tambo, pegado a la fila que lo pidió. */}
+                {newTamboAt === idx && (
+                  <div className="rounded-lg border border-primary-100 bg-primary-50/50 p-4">
+                    <p className="mb-3 text-sm font-medium">Nuevo tambo</p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <Field label="Nombre del tambo" htmlFor={`new-tambo-name-${idx}`} required>
+                        <Input
+                          id={`new-tambo-name-${idx}`}
+                          placeholder="Ej: Tambo Don Pedro"
+                          value={newTamboName}
+                          onChange={(e) => setNewTamboName(e.target.value)}
+                          autoFocus
+                        />
+                      </Field>
+                      <Field label="Precio por litro" htmlFor={`new-tambo-price-${idx}`} hint="Opcional — se puede cargar después en Tambos">
+                        <Input
+                          id={`new-tambo-price-${idx}`}
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min={0}
+                          prefix="$"
+                          placeholder="Ej: 450"
+                          value={newTamboPrice}
+                          onChange={(e) => setNewTamboPrice(e.target.value)}
+                        />
+                      </Field>
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={!newTamboName.trim()}
+                        loading={createTambo.isPending}
+                        loadingText="Creando..."
+                        onClick={() =>
+                          createTambo.mutate({
+                            name: newTamboName.trim(),
+                            agreedPricePerLiter: Number(newTamboPrice) > 0 ? Number(newTamboPrice) : undefined,
+                          })
+                        }
+                      >
+                        Crear tambo
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setNewTamboAt(null);
+                          setNewTamboName('');
+                          setNewTamboPrice('');
+                        }}
+                      >
+                        Cancelar
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                </div>
+                );
+              })}
             </div>
 
             {producerLines.fields.length < 4 && (
