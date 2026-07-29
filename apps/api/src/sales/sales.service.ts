@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, MoreThanOrEqual, Repository } from 'typeorm';
 import type { EntityManager } from 'typeorm';
 import type {
   CreateReturnInput,
@@ -106,6 +106,24 @@ export class SalesService {
         });
       }
       total = Math.round(total * 100) / 100;
+
+      // Aviso de posible doble-click: mismo cliente, mismo importe y mismas líneas, hace pocos
+      // minutos. No bloquea de una (podría ser otra venta real): frena y pide confirmar; el
+      // front reenvía con confirmDuplicate=true al confirmar.
+      if (!input.confirmDuplicate) {
+        const since = new Date(Date.now() - 10 * 60 * 1000);
+        const recent = await manager.getRepository(SalesOrderEntity).find({
+          where: { clientId: client.id, dispatchedAt: MoreThanOrEqual(since) },
+        });
+        const sig = (ls: { productId: string; quantity: number }[]) =>
+          ls.map((l) => `${l.productId}:${l.quantity}`).sort().join('|');
+        const mySig = sig(lines);
+        const dup = recent.find((o) => Number(o.total) === total && sig(o.lines as any) === mySig);
+        if (dup)
+          throw new ConflictException(
+            `Recién cargaste un despacho igual a ${client.businessName} por $${total} (${dup.code}). Si es otra venta real, confirmá para cargarlo igual.`,
+          );
+      }
 
       const dispatchedAt = new Date();
       // Forma de pago efectiva: la elegida, o la del cliente (sin plazo = contado).

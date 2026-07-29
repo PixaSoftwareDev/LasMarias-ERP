@@ -131,6 +131,9 @@ export const createMilkReceptionInputSchema = z.object({
   // Compat: cámara/sector único (si no se usa el reparto por silos).
   warehouseId: uuidSchema.optional(),
   notes: z.string().max(1000).optional(),
+  // Si el sistema detecta una recepción igual del mismo día (posible doble carga) frena y
+  // avisa. El front reenvía con este flag en true cuando el usuario confirma que es real.
+  confirmDuplicate: z.boolean().optional(),
 });
 
 export type CreateMilkReceptionInput = z.infer<typeof createMilkReceptionInputSchema>;

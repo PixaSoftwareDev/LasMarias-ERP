@@ -25,6 +25,7 @@ function makeService(
     baseYieldKgPerLiter?: string | null;
     milkProductId?: string | null;
     products?: Record<string, any>;
+    milkRemaining?: string;
   } = {},
 ) {
   // Producto de cada input (para valuar masa a precio manual). Por defecto la leche es
@@ -71,7 +72,7 @@ function makeService(
     id: 'milk-1',
     code: 'LM-LE-1',
     productId: milkProductId,
-    remainingQuantity: '1000',
+    remainingQuantity: opts.milkRemaining ?? '1000',
     status: 'en_proceso',
     unit: 'litro',
     unitCost: '10', // $10/litro (costo del lote)
@@ -152,6 +153,17 @@ describe('ProductionService.close', () => {
     // Hay un movimiento de salida de leche por producción.
     const milkOut = savedMovements.find((m) => m.reason === 'production' && m.type === 'out');
     expect(milkOut.quantity).toBe('1000');
+  });
+
+  it('frena el doble consumo: no cierra si al lote de leche ya no le alcanza (otra orden lo consumió)', async () => {
+    // El lote quedó con 800 L (otra orden ya consumió parte) pero esta orden pide 1000.
+    const { service } = makeService({ milkRemaining: '800' });
+
+    await expect(
+      service.close('order-1', {
+        actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true }],
+      } as any),
+    ).rejects.toThrow(/no alcanza para cerrar/);
   });
 
   it('sella el costo/kg en el lote de producto creado', async () => {

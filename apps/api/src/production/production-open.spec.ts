@@ -15,7 +15,7 @@ jest.mock('../products/product.entity', () => ({ ProductEntity: { name: 'Product
 
 const PRINCIPAL_PRODUCT_ID = 'prod-mozza';
 
-function makeService(milkBatches: any[]) {
+function makeService(milkBatches: any[], openOrders: any[] = []) {
   const recipe: any = {
     id: 'rec-1',
     productId: PRINCIPAL_PRODUCT_ID,
@@ -47,6 +47,8 @@ function makeService(milkBatches: any[]) {
     }),
   };
   const orderRepo = {
+    // Órdenes abiertas que ya comprometen lotes (para el chequeo de doble reserva).
+    find: jest.fn().mockResolvedValue(openOrders),
     createQueryBuilder: jest.fn(() => ({
       select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
@@ -149,5 +151,15 @@ describe('ProductionService.open — regla de silos', () => {
     ]);
 
     await expect(service.open(input as any)).rejects.toThrow(/no tiene suficiente/);
+  });
+
+  it('frena el doble consumo: no deja comprometer un lote que otra orden abierta ya reservó', async () => {
+    // El lote 'a' tiene 1000 L pero otra orden abierta ya comprometió 700 → quedan 300 y esta pide 600.
+    const { service } = makeService(
+      [milkBatch('a', 'silo-norte', '1000'), milkBatch('b', 'silo-sur')],
+      [{ id: 'otra-orden', status: 'open', milkInputs: [{ batchId: 'a', liters: 700 }] }],
+    );
+
+    await expect(service.open(input as any)).rejects.toThrow(/ya está comprometido por otra orden/);
   });
 });

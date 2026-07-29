@@ -58,6 +58,9 @@ export const createSalesOrderInputSchema = z.object({
   // Moneda en que se cotizaron los precios (los unitPrice ya llegan en pesos convertidos).
   // El backend registra la cotización del día. Si se omite → ARS.
   currency: currencySchema.optional(),
+  // Si el sistema detecta un despacho igual al mismo cliente hace pocos minutos (posible
+  // doble-click) frena y avisa. El front reenvía con este flag cuando el usuario confirma.
+  confirmDuplicate: z.boolean().optional(),
 });
 export type CreateSalesOrderInput = z.infer<typeof createSalesOrderInputSchema>;
 

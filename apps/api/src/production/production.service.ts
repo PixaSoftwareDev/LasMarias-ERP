@@ -58,24 +58,51 @@ export class ProductionService {
   // Reserva los lotes de materia prima (leche o masa) y calcula las salidas esperadas con la
   // versión activa de la receta. Es la parte común de ABRIR y EDITAR una orden: NO consume
   // stock (solo marca los lotes en_proceso), no corre la calculadora de costo (eso es al cerrar).
-  private async reserveMilkAndPlan(manager: import('typeorm').EntityManager, input: OpenProductionInput) {
+  private async reserveMilkAndPlan(
+    manager: import('typeorm').EntityManager,
+    input: OpenProductionInput,
+    excludeOrderId?: string,
+  ) {
     const recipe = await this.recipes.get(input.recipeId);
     const version = recipe.activeVersion;
     if (!version) throw new BadRequestException('La receta no tiene versión activa');
 
+    // Litros ya COMPROMETIDOS por otras órdenes abiertas sobre cada lote. La reserva marca el
+    // lote "en_proceso" pero NO descuenta el saldo, así que sin esto dos órdenes podrían
+    // comprometer el mismo lote y terminar consumiéndolo dos veces (doble consumo). Restamos lo
+    // comprometido del saldo disponible. Se excluye la propia orden (al editar) para no contarse.
+    const openOrders = await manager
+      .getRepository(ProductionOrderEntity)
+      .find({ where: { status: In(['open', 'in_progress']) } });
+    const reservedByOthers = new Map<string, number>();
+    for (const o of openOrders) {
+      if (o.id === excludeOrderId) continue;
+      for (const omi of o.milkInputs) {
+        reservedByOthers.set(omi.batchId, (reservedByOthers.get(omi.batchId) ?? 0) + Number(omi.liters));
+      }
+    }
+
     // Una orden puede consumir leche de VARIOS silos para llegar a los litros que necesita:
     // cada lote entra con su propio costo/litro y la calculadora los suma (elaboration-cost.ts).
     const milkInputs: ProductionMilkInput[] = [];
+    const requestedSoFar = new Map<string, number>();
     let totalLiters = 0;
     for (const mi of input.milkInputs) {
       const batch = await manager.getRepository(BatchEntity).findOne({ where: { id: mi.batchId } });
       if (!batch) throw new BadRequestException(`Lote de leche ${mi.batchId} no encontrado`);
       if (batch.status !== 'activo' && batch.status !== 'en_proceso')
         throw new BadRequestException(`El lote ${batch.code} no está disponible`);
-      if (Number(batch.remainingQuantity) < mi.liters)
+      // Disponible real = saldo del lote − lo comprometido por otras órdenes − lo ya pedido por
+      // esta misma orden (si repite el lote en varias líneas).
+      const already = (reservedByOthers.get(batch.id) ?? 0) + (requestedSoFar.get(batch.id) ?? 0);
+      const available = Math.round((Number(batch.remainingQuantity) - already) * 1000) / 1000;
+      if (available < mi.liters)
         throw new BadRequestException(
-          `El lote ${batch.code} no tiene suficiente: pide ${mi.liters}, queda ${batch.remainingQuantity}`,
+          already > 0
+            ? `El lote ${batch.code} ya está comprometido por otra orden abierta: quedan ${available} disponibles y esta orden pide ${mi.liters}.`
+            : `El lote ${batch.code} no tiene suficiente: pide ${mi.liters}, queda ${batch.remainingQuantity}`,
         );
+      requestedSoFar.set(batch.id, (requestedSoFar.get(batch.id) ?? 0) + mi.liters);
       milkInputs.push({ batchId: batch.id, batchCode: batch.code, liters: mi.liters });
       totalLiters += mi.liters;
       // Marcar lote como en proceso (reserva, no consumo)
@@ -195,7 +222,8 @@ export class ProductionService {
       }
 
       // Reservar los nuevos lotes y recalcular salidas esperadas con la versión activa vigente.
-      const plan = await this.reserveMilkAndPlan(manager, input);
+      // Se excluye esta orden del cálculo de "comprometido por otras" para no contarse a sí misma.
+      const plan = await this.reserveMilkAndPlan(manager, input, order.id);
 
       order.recipeId = plan.recipe.id;
       order.recipeVersionId = plan.version.id;
@@ -297,7 +325,14 @@ export class ProductionService {
           quantity: String(mi.liters),
           unitCost,
         });
-        const remaining = Math.max(0, Number(batch.remainingQuantity) - mi.liters);
+        // Guarda dura contra el doble consumo: al cerrar SE RE-VALIDA que el lote alcance. Antes
+        // un Math.max(0,…) clampeaba a cero en silencio y dejaba consumir más de lo que había
+        // (dos órdenes cerrando el mismo lote). Ahora frena con un aviso claro.
+        if (Number(batch.remainingQuantity) < mi.liters)
+          throw new BadRequestException(
+            `El lote ${batch.code} no alcanza para cerrar la orden ${order.code}: pide ${mi.liters} y quedan ${batch.remainingQuantity}. Puede que otra orden ya lo haya consumido.`,
+          );
+        const remaining = Math.round((Number(batch.remainingQuantity) - mi.liters) * 1000) / 1000;
         batch.remainingQuantity = String(remaining);
         batch.status = remaining === 0 ? 'agotado' : 'activo';
         await manager.getRepository(BatchEntity).save(batch);

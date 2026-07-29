@@ -90,6 +90,9 @@ export const stockEntryInputSchema = z.object({
   // N° de lote del proveedor (insumos trazables). Requerido por bromatología en esos insumos.
   supplierLotNumber: z.string().max(80).optional(),
   notes: z.string().max(1000).optional(),
+  // Si el sistema detecta un ingreso igual reciente (posible doble carga) frena y avisa.
+  // El front reenvía con este flag en true cuando el usuario confirma que es real.
+  confirmDuplicate: z.boolean().optional(),
 });
 export type StockEntryInput = z.infer<typeof stockEntryInputSchema>;
 

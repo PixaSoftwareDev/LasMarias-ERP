@@ -249,7 +249,7 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
   }
 
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (confirmDuplicate?: boolean) =>
       inventoryApi.addStockEntry({
         productId,
         quantity: Number(quantity),
@@ -257,6 +257,7 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
         currency,
         warehouseId: warehouseId || undefined,
         supplierLotNumber: supplierLot.trim() || undefined,
+        confirmDuplicate,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stock'] });
@@ -264,7 +265,17 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
       toast.success('Stock ingresado.');
       onClose();
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo ingresar el stock.'),
+    onError: (e) => {
+      // 409 = posible doble carga del mismo ingreso: avisamos y ofrecemos cargarlo igual.
+      if (e instanceof ApiError && e.status === 409) {
+        toast.warning(e.message, {
+          duration: 12000,
+          action: { label: 'Cargar igual', onClick: () => save.mutate(true) },
+        });
+        return;
+      }
+      toast.error(e instanceof ApiError ? e.message : 'No se pudo ingresar el stock.');
+    },
   });
 
   const canSave =
@@ -357,7 +368,7 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose} disabled={save.isPending}>Cancelar</Button>
-          <Button onClick={() => save.mutate()} loading={save.isPending} loadingText="Guardando..." disabled={!canSave}>
+          <Button onClick={() => save.mutate(undefined)} loading={save.isPending} loadingText="Guardando..." disabled={!canSave}>
             <Plus className="h-4 w-4" /> Ingresar
           </Button>
         </div>

@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { Between, DataSource, EntityManager, Repository } from 'typeorm';
 import type {
   CreateWarehouseInput,
   UpdateWarehouseInput,
@@ -256,6 +256,37 @@ export class InventoryService {
       if (product.requiresLotNumber && !supplierLotNumber) {
         throw new BadRequestException(`Falta el número de lote del proveedor para ${product.name}.`);
       }
+
+      // Aviso de posible doble carga del mismo ingreso. Con N° de lote de proveedor, dos
+      // ingresos del mismo producto con el mismo lote es un duplicado casi seguro. Sin lote,
+      // avisamos si ya hubo hoy un ingreso del mismo producto por la misma cantidad. No bloquea:
+      // frena y pide confirmar (puede ser una compra real repetida); el front reenvía con el flag.
+      if (!input.confirmDuplicate) {
+        const batchRepo = manager.getRepository(BatchEntity);
+        let dup: BatchEntity | null = null;
+        if (supplierLotNumber) {
+          dup = await batchRepo.findOne({ where: { productId: product.id, supplierLotNumber } });
+        } else {
+          const dayStart = new Date();
+          dayStart.setHours(0, 0, 0, 0);
+          const dayEnd = new Date();
+          dayEnd.setHours(23, 59, 59, 999);
+          const sameDay = await batchRepo.find({
+            where: { productId: product.id, productionDate: Between(dayStart, dayEnd) },
+          });
+          dup =
+            sameDay.find(
+              (b) => b.code.startsWith('LM-IN') && Number(b.initialQuantity) === Number(input.quantity),
+            ) ?? null;
+        }
+        if (dup)
+          throw new ConflictException(
+            supplierLotNumber
+              ? `Ya ingresaste ${product.name} con el lote de proveedor "${supplierLotNumber}" (${dup.code}). Si es otra compra real, confirmá para cargarla igual.`
+              : `Ya cargaste hoy un ingreso de ${product.name} por ${input.quantity} ${product.unit} (${dup.code}). Si es otra compra real, confirmá para cargarla igual.`,
+          );
+      }
+
       const code = `LM-IN-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 1000)}`;
       const batch = await manager.getRepository(BatchEntity).save(
         manager.getRepository(BatchEntity).create({

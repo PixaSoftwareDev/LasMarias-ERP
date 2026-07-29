@@ -211,13 +211,14 @@ export default function SalesPage() {
   }
 
   const create = useMutation({
-    mutationFn: () =>
+    mutationFn: (confirmDuplicate?: boolean) =>
       salesApi.createOrder({
         clientId,
         lines: validLines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitPrice: l.unitPrice })),
         notes: notes || undefined,
         paymentMode,
         currency: listCurrency,
+        confirmDuplicate,
       }),
     onSuccess: (o) => {
       queryClient.invalidateQueries({ queryKey: ['sales-orders'] });
@@ -233,7 +234,17 @@ export default function SalesPage() {
       );
       resetForm();
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo registrar la venta. Probá de nuevo.'),
+    onError: (e) => {
+      // 409 = posible doble-click / venta repetida: avisamos y ofrecemos registrarla igual.
+      if (e instanceof ApiError && e.status === 409) {
+        toast.warning(e.message, {
+          duration: 12000,
+          action: { label: 'Cargar igual', onClick: () => create.mutate(true) },
+        });
+        return;
+      }
+      toast.error(e instanceof ApiError ? e.message : 'No se pudo registrar la venta. Probá de nuevo.');
+    },
   });
 
   const deleteMutation = useMutation({
@@ -306,7 +317,7 @@ export default function SalesPage() {
       });
       if (!ok) return;
     }
-    create.mutate();
+    create.mutate(undefined);
   }
 
   const orders = ordersQuery.data ?? [];

@@ -102,7 +102,18 @@ export default function NewReceptionPage() {
         router.push('/recepciones');
       }
     },
-    onError: (err) => {
+    onError: (err, input) => {
+      // 409 = posible doble carga: avisamos y ofrecemos cargarla igual (reenvía confirmando).
+      if (err instanceof ApiError && err.status === 409) {
+        toast.warning(err.message, {
+          duration: 12000,
+          action: {
+            label: 'Cargar igual',
+            onClick: () => mutation.mutate({ ...input, confirmDuplicate: true }),
+          },
+        });
+        return;
+      }
       if (err instanceof ApiError) toast.error(err.message);
       else toast.error('No se pudo guardar la recepción. Probá de nuevo.');
     },

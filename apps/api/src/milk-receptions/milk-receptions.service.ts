@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, DataSource, Repository } from 'typeorm';
 import Big from 'big.js';
@@ -132,6 +132,24 @@ export class MilkReceptionsService {
     const producerName =
       lines.length > 1 ? `${primary.producerName} +${lines.length - 1} tambo(s)` : primary.producerName;
     const litersStr = totalLiters.toString();
+
+    // Aviso de posible doble carga: misma recepción del mismo tambo, el mismo día y por los
+    // mismos litros. No bloquea de una (puede haber dos descargas reales): frena y pide
+    // confirmar. Al confirmar, el front reenvía con confirmDuplicate=true y se salta el chequeo.
+    if (!input.confirmDuplicate) {
+      const dayStart = new Date(receivedAt);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(receivedAt);
+      dayEnd.setHours(23, 59, 59, 999);
+      const sameDay = await this.repo.find({
+        where: { producerId: primary.producerId, receivedAt: Between(dayStart, dayEnd) },
+      });
+      const dup = sameDay.find((r) => Number(r.liters) === Number(litersStr));
+      if (dup)
+        throw new ConflictException(
+          `Ya cargaste una recepción de ${primary.producerName} el ${dayStart.toLocaleDateString('es-AR')} por ${litersStr} litros (${dup.code}). Si es otra descarga real, confirmá para cargarla igual.`,
+        );
+    }
 
     return this.dataSource.transaction(async (manager) => {
       const code = await this.nextBatchCode(manager, receivedAt);
