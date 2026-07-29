@@ -356,18 +356,78 @@ export class SalesService {
     }
   }
 
+  // Borrar un despacho con reversa total (mismo criterio que producción y recepciones):
+  // el stock vuelve a los lotes exactos de los que salió, se elimina el cargo en cuenta
+  // corriente (y el cobro espejo si fue contado) y desaparece el remito. Solo se frena
+  // si el despacho ya tiene devoluciones: ahí el stock ya se repuso en parte y borrar
+  // encima duplicaría la reposición.
+  async removeOrder(id: string): Promise<{ deleted: true; code: string }> {
+    return this.dataSource.transaction(async (manager) => {
+      const orderRepo = manager.getRepository(SalesOrderEntity);
+      const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+      const order = await orderRepo.findOne({ where: { id } });
+      if (!order) throw new NotFoundException(`Despacho ${id} no encontrado`);
+
+      const creditNotes = await manager.getRepository(CreditNoteEntity).count({ where: { salesOrderId: id } });
+      if (creditNotes > 0) {
+        throw new BadRequestException(
+          `No se puede borrar el despacho ${order.code}: tiene devoluciones con nota de crédito. Ese despacho ya quedó compensado por la devolución.`,
+        );
+      }
+
+      // Reversa de stock: devolver a cada lote exactamente lo que salió por este despacho.
+      const movements = await manager.getRepository(InventoryMovementEntity).find({
+        where: { referenceType: 'sales_order', referenceId: id },
+      });
+      for (const m of movements) {
+        if (m.type !== 'out') continue;
+        const batch = await manager.getRepository(BatchEntity).findOne({ where: { id: m.batchId } });
+        if (!batch) continue;
+        batch.remainingQuantity = String(round3(Number(batch.remainingQuantity) + Number(m.quantity)));
+        if (batch.status === 'agotado' && Number(batch.remainingQuantity) > 0) batch.status = 'activo';
+        await manager.getRepository(BatchEntity).save(batch);
+      }
+      if (movements.length > 0) await manager.getRepository(InventoryMovementEntity).remove(movements);
+
+      // Cuenta corriente: se borra el cargo del despacho (y el cobro espejo del contado).
+      // El saldo del cliente se recalcula solo a partir de los asientos restantes.
+      const accountMovements = await manager.getRepository(AccountMovementEntity).find({
+        where: { referenceType: 'sales_order', referenceId: id },
+      });
+      if (accountMovements.length > 0) await manager.getRepository(AccountMovementEntity).remove(accountMovements);
+
+      await orderRepo.remove(order);
+      return { deleted: true as const, code: order.code };
+    });
+  }
+
   // Secuencia global de despachos con advisory lock (Postgres rechaza FOR UPDATE con agregados).
+  // MAX(code)+1 en vez de count(): si se borró un despacho intermedio, count() repetiría
+  // un código ya usado (índice único). El padding fijo hace que el MAX de texto funcione.
   private async nextOrderCode(manager: EntityManager) {
     await manager.query('SELECT pg_advisory_xact_lock(2000000001)');
-    const count = await manager.getRepository(SalesOrderEntity).count();
-    return `DSP-${String(count + 1).padStart(6, '0')}`;
+    const row = await manager
+      .getRepository(SalesOrderEntity)
+      .createQueryBuilder('o')
+      .select('MAX(o.code)', 'max')
+      .where("o.code LIKE 'DSP-%'")
+      .getRawOne<{ max: string | null }>();
+    const last = row?.max ? Number(row.max.slice('DSP-'.length)) : 0;
+    return `DSP-${String(last + 1).padStart(6, '0')}`;
   }
 
   // Secuencia global de notas de crédito (advisory lock propio).
   private async nextCreditNoteCode(manager: EntityManager) {
     await manager.query('SELECT pg_advisory_xact_lock(2000000002)');
-    const count = await manager.getRepository(CreditNoteEntity).count();
-    return `NC-${String(count + 1).padStart(6, '0')}`;
+    const row = await manager
+      .getRepository(CreditNoteEntity)
+      .createQueryBuilder('n')
+      .select('MAX(n.code)', 'max')
+      .where("n.code LIKE 'NC-%'")
+      .getRawOne<{ max: string | null }>();
+    const last = row?.max ? Number(row.max.slice('NC-'.length)) : 0;
+    return `NC-${String(last + 1).padStart(6, '0')}`;
   }
 
   private creditNoteToDto(e: CreditNoteEntity): CreditNote {

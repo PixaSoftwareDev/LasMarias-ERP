@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Header,
   Param,
@@ -67,9 +68,16 @@ export class SalesController {
     return this.sales.createOrder(body, user.sub);
   }
 
+  // Borrado con reversa total: stock a los lotes de origen + cargo de cuenta corriente.
+  @Delete('orders/:id')
+  @Roles('admin', 'gerente', 'vendedor')
+  removeOrder(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.sales.removeOrder(id);
+  }
+
   // Devolución de un despacho → nota de crédito + reposición de stock.
   @Post('orders/:id/returns')
-  @Roles('admin', 'gerente')
+  @Roles('admin', 'gerente', 'vendedor')
   createReturn(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body(new ZodValidationPipe(createReturnInputSchema)) body: CreateReturnInput,

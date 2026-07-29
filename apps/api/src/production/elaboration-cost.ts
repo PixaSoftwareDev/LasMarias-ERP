@@ -60,9 +60,19 @@ export interface ElaborationCostInput {
   byproducts: ByproductCost[];
 }
 
+/** Línea del detalle de costo: cantidad consumida × precio unitario = subtotal. */
+export interface CostDetailLine {
+  name: string;
+  cantidad: Decimal;
+  unitCost: Decimal;
+  subtotal: Decimal;
+}
+
 export interface ElaborationCostResult {
   costoInputs: Decimal; // costo de leche/masa (Σ quantity × unitCost)
   costoInsumos: Decimal; // costo de insumos de receta (según base)
+  detalleInputs: CostDetailLine[]; // una línea por lote de leche/masa consumido
+  detalleInsumos: CostDetailLine[]; // una línea por insumo de receta (verificable a mano)
   costoBruto: Decimal; // costoInputs + costoInsumos
   valorSubproductos: Decimal; // crédito por subproductos (Σ kg × valor_recupero)
   costoNeto: Decimal; // costoBruto − valorSubproductos (puede ser negativo)
@@ -105,12 +115,28 @@ export function computeElaborationCost(input: ElaborationCostInput): Elaboration
   const warnings: ElaborationWarning[] = [];
 
   // Costo de la materia prima principal (leche o masa): Σ cantidad × costo unitario del lote.
+  // Se guarda también el detalle por línea para que el desglose sea verificable a mano.
+  const detalleInputs: CostDetailLine[] = input.primaryInputs.map((pi) => ({
+    name: pi.name,
+    cantidad: new Big(pi.quantity).toString(),
+    unitCost: new Big(pi.unitCost).toString(),
+    subtotal: new Big(pi.quantity).times(new Big(pi.unitCost)).toFixed(MONEY_DP),
+  }));
   const costoInputs = input.primaryInputs.reduce(
     (acc, pi) => acc.plus(new Big(pi.quantity).times(new Big(pi.unitCost))),
     new Big(0),
   );
 
   // Costo de insumos de receta: cada uno según su base.
+  const detalleInsumos: CostDetailLine[] = input.ingredients.map((ing) => {
+    const cantidad = consumedQuantity(ing, litros, productKg);
+    return {
+      name: ing.name,
+      cantidad: cantidad.toString(),
+      unitCost: new Big(ing.unitCost).toString(),
+      subtotal: cantidad.times(new Big(ing.unitCost)).toFixed(MONEY_DP),
+    };
+  });
   const costoInsumos = input.ingredients.reduce(
     (acc, ing) => acc.plus(consumedQuantity(ing, litros, productKg).times(new Big(ing.unitCost))),
     new Big(0),
@@ -147,6 +173,8 @@ export function computeElaborationCost(input: ElaborationCostInput): Elaboration
   return {
     costoInputs: costoInputs.toFixed(MONEY_DP),
     costoInsumos: costoInsumos.toFixed(MONEY_DP),
+    detalleInputs,
+    detalleInsumos,
     costoBruto: costoBruto.toFixed(MONEY_DP),
     valorSubproductos: valorSubproductos.toFixed(MONEY_DP),
     costoNeto: costoNeto.toFixed(MONEY_DP),

@@ -7,6 +7,7 @@ import { RecipesModule } from '../recipes/recipes.module';
 import { BatchesModule } from '../batches/batches.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { UsersModule } from '../users/users.module';
+import { ExchangeRatesModule } from '../exchange-rates/exchange-rates.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { UsersModule } from '../users/users.module';
     BatchesModule,
     InventoryModule,
     UsersModule,
+    ExchangeRatesModule,
   ],
   providers: [ProductionService],
   controllers: [ProductionController],

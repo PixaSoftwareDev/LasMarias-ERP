@@ -16,6 +16,7 @@ import { PageHeader } from '@/components/page-header';
 import { ReturnDialog } from '@/components/sales/return-dialog';
 import { clientsApi, inventoryApi, productsApi, salesApi, exchangeRatesApi, settingsApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
 import { useConfirm } from '@/hooks/use-confirm';
 import { formatMoney as money, formatDate } from '@/lib/utils';
 import { rateForCurrency } from '@/features/currency';
@@ -100,6 +101,9 @@ export default function SalesPage() {
   const queryClient = useQueryClient();
   const router = useRouter();
   const confirm = useConfirm();
+  const { user } = useAuth();
+  // Borrar deshace stock y cuenta corriente: lo puede hacer quien opera la pantalla (mismo criterio que producción).
+  const canDelete = user?.role === 'admin' || user?.role === 'gerente' || user?.role === 'vendedor';
   const ordersQuery = useQuery({ queryKey: ['sales-orders'], queryFn: () => salesApi.listOrders() });
   const clientsQuery = useQuery({ queryKey: ['clients'], queryFn: () => clientsApi.list() });
   const productsQuery = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
@@ -231,6 +235,28 @@ export default function SalesPage() {
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo registrar la venta. Probá de nuevo.'),
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => salesApi.removeOrder(id),
+    onSuccess: (r) => {
+      // La reversa toca stock, cuenta corriente y home: invalidamos todo.
+      queryClient.invalidateQueries();
+      toast.success(`Venta ${r.code} borrada. El stock volvió a los lotes y se descontó de la cuenta del cliente.`);
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo borrar la venta. Probá de nuevo.'),
+  });
+
+  const handleDelete = async (o: SalesOrder) => {
+    const ok = await confirm({
+      title: `Borrar la venta ${o.code}`,
+      message:
+        'Se elimina el remito, la mercadería vuelve al stock (a los mismos lotes) y se borra el cargo de la cuenta corriente del cliente, como si la venta nunca hubiera existido. Si tiene devoluciones no se puede borrar.',
+      confirmLabel: 'Borrar venta',
+      cancelLabel: 'Cancelar',
+      destructive: true,
+    });
+    if (ok) deleteMutation.mutate(o.id);
+  };
 
   // Cuando se elige un producto, traemos su precio de lista (si existe).
   function updateLine(idx: number, patch: Partial<Line>) {
@@ -559,6 +585,20 @@ export default function SalesPage() {
                     >
                       <Undo2 className="h-4 w-4" /> Devolver
                     </Button>
+                    {canDelete && (
+                      <button
+                        type="button"
+                        aria-label={`Borrar venta ${o.code}`}
+                        disabled={deleteMutation.isPending}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDelete(o);
+                        }}
+                        className="flex min-h-touch min-w-touch items-center justify-center rounded-md text-foreground-muted transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                    )}
                   </div>
                 ),
               },

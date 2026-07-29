@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, GitBranch, Milk, Plus, Search } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, GitBranch, Milk, Plus, Search, Trash2 } from 'lucide-react';
 import type { MilkReception } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -14,6 +15,9 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge, type Status } from '@/components/ui/status-badge';
 import { formatDateTime, formatLiters } from '@/lib/utils';
 import { receptionsApi } from '@/features/receptions/api';
+import { ApiError } from '@/lib/api-client';
+import { useAuth } from '@/hooks/use-auth';
+import { useConfirm } from '@/hooks/use-confirm';
 import { cn, normalizeText } from '@/lib/utils';
 
 function statusToBadge(s: MilkReception['status']): { variant: Status; label: string } {
@@ -49,10 +53,40 @@ function sortVal(r: MilkReception, key: SortKey): string | number {
 }
 
 export default function ReceptionsPage() {
+  const queryClient = useQueryClient();
+  const confirm = useConfirm();
+  const { user } = useAuth();
+  // Borrar deshace stock y cuenta corriente del tambo: lo puede hacer quien opera la pantalla (mismo criterio que producción).
+  const canDelete = user?.role === 'admin' || user?.role === 'gerente' || user?.role === 'operario';
   const { data, isLoading, error } = useQuery({
     queryKey: ['receptions'],
     queryFn: () => receptionsApi.list(),
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => receptionsApi.remove(id),
+    onSuccess: (r) => {
+      // La reversa toca silos, stock y la deuda con el tambo: invalidamos todo.
+      queryClient.invalidateQueries();
+      toast.success(`Recepción ${r.code} borrada. La leche salió del stock y del silo.`);
+    },
+    onError: (err) => {
+      if (err instanceof ApiError) toast.error(err.message);
+      else toast.error('No se pudo borrar la recepción. Probá de nuevo.');
+    },
+  });
+
+  const handleDelete = async (r: MilkReception) => {
+    const ok = await confirm({
+      title: `Borrar la recepción ${r.code}`,
+      message:
+        'Se elimina la recepción y su leche sale del silo y del stock, como si nunca se hubiera cargado. También se descuenta de lo que se le debe al tambo. Solo se puede si esa leche no se usó en una elaboración.',
+      confirmLabel: 'Borrar recepción',
+      cancelLabel: 'Cancelar',
+      destructive: true,
+    });
+    if (ok) deleteMutation.mutate(r.id);
+  };
 
   const [page, setPage] = useState(0);
   const [query, setQuery] = useState('');
@@ -242,12 +276,27 @@ export default function ReceptionsPage() {
                       {r.blockedReason && (
                         <p className="mt-2 rounded-md bg-red-50 px-2 py-1 text-xs text-danger">{r.blockedReason}</p>
                       )}
-                      {r.batchId && (
-                        <Button asChild size="sm" variant="ghost" className="mt-2 w-full">
-                          <Link href={`/trazabilidad?lote=${r.batchId}`}>
-                            <GitBranch className="h-4 w-4" /> Ver recorrido
-                          </Link>
-                        </Button>
+                      {(r.batchId || canDelete) && (
+                        <div className="mt-2 flex items-center gap-2">
+                          {r.batchId && (
+                            <Button asChild size="sm" variant="ghost" className="flex-1">
+                              <Link href={`/trazabilidad?lote=${r.batchId}`}>
+                                <GitBranch className="h-4 w-4" /> Ver recorrido
+                              </Link>
+                            </Button>
+                          )}
+                          {canDelete && (
+                            <button
+                              type="button"
+                              aria-label={`Borrar recepción ${r.code}`}
+                              disabled={deleteMutation.isPending}
+                              onClick={() => void handleDelete(r)}
+                              className="flex min-h-touch min-w-touch items-center justify-center rounded-md text-foreground-muted transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
+                            >
+                              <Trash2 className="h-4 w-4" aria-hidden="true" />
+                            </button>
+                          )}
+                        </div>
                       )}
                     </Card>
                   );
@@ -280,13 +329,26 @@ export default function ReceptionsPage() {
                             <StatusBadge status={s.variant}>{s.label}</StatusBadge>
                           </td>
                           <td className="px-4 py-3 text-right">
-                            {r.batchId && (
-                              <Button asChild size="sm" variant="ghost">
-                                <Link href={`/trazabilidad?lote=${r.batchId}`}>
-                                  <GitBranch className="h-4 w-4" /> Ver recorrido
-                                </Link>
-                              </Button>
-                            )}
+                            <div className="flex items-center justify-end gap-1">
+                              {r.batchId && (
+                                <Button asChild size="sm" variant="ghost">
+                                  <Link href={`/trazabilidad?lote=${r.batchId}`}>
+                                    <GitBranch className="h-4 w-4" /> Ver recorrido
+                                  </Link>
+                                </Button>
+                              )}
+                              {canDelete && (
+                                <button
+                                  type="button"
+                                  aria-label={`Borrar recepción ${r.code}`}
+                                  disabled={deleteMutation.isPending}
+                                  onClick={() => void handleDelete(r)}
+                                  className="flex min-h-touch min-w-touch items-center justify-center rounded-md text-foreground-muted transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
+                                >
+                                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -16,7 +17,7 @@ import { PageHeader } from '@/components/page-header';
 import { productsApi, recipesApi, exchangeRatesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { formatDate, formatMoney } from '@/lib/utils';
-import { CURRENCY_OPTIONS, currencySymbol, equivalentArs } from '@/features/currency';
+import { currencySymbol, equivalentArs } from '@/features/currency';
 
 interface FormValues {
   baseYieldKgPerLiter?: number;
@@ -156,14 +157,20 @@ export default function NewRecipeVersionPage() {
         yieldSensitivityFat: Number(i.yieldSensitivityFat),
         yieldSensitivityProtein: Number(i.yieldSensitivityProtein),
         notes: i.notes?.trim() ? i.notes.trim() : undefined,
-        ingredients: ingredients.map((r) => ({
-          productId: r.productId,
-          quantity: Number(r.quantity),
-          unit: r.unit,
-          basis: r.basis,
-          unitCost: r.unitCost === '' ? undefined : Number(r.unitCost),
-          currency: r.currency,
-        })),
+        ingredients: ingredients.map((r) => {
+          // El precio vigente vive en la ficha del producto; en la versión solo queda
+          // congelado un respaldo (se usa si la ficha no tiene precio al elaborar).
+          const p = ingredientProducts.find((x) => x.id === r.productId);
+          const fichaCost = p && p.defaultCost != null ? p.defaultCost : null;
+          return {
+            productId: r.productId,
+            quantity: Number(r.quantity),
+            unit: r.unit,
+            basis: r.basis,
+            unitCost: fichaCost != null ? Number(fichaCost) : r.unitCost === '' ? undefined : Number(r.unitCost),
+            currency: fichaCost != null ? (p?.defaultCostCurrency ?? 'ARS') : r.currency,
+          };
+        }),
         byproducts: byproducts.map((r) => ({
           name: r.name.trim(),
           expectedYield: Number(r.expectedYield),
@@ -239,8 +246,8 @@ export default function NewRecipeVersionPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title={`Nueva versión — ${recipe.data.name}`}
-        description="Editá lo que cambia y guardá. La versión anterior queda archivada y los lotes ya producidos conservan la versión con la que se hicieron."      />
+        title={`Modificar receta — ${recipe.data.name}`}
+        description="Editá lo que cambia y guardá. El cambio se guarda como una versión nueva: la anterior queda archivada y los lotes ya producidos conservan la versión con la que se hicieron."      />
 
       <form onSubmit={form.handleSubmit(validateAndSubmit)} className="flex flex-col gap-5">
         <Card>
@@ -279,7 +286,7 @@ export default function NewRecipeVersionPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <p className="text-xs text-foreground-muted">
-              Cargá lo que se consume al elaborar: leche, fermento, cuajo, sal, mano de obra, energía, envase. El costo unitario hace que el costeo sea real.
+              Cargá fermento, cuajo, sal, mano de obra, energía, envase… El precio de cada insumo se toma de su <strong>ficha en Productos</strong>: actualizalo ahí y las próximas elaboraciones lo usan solas. La leche (o la masa) que consume la orden <strong>no va acá</strong>: su costo se toma solo del lote al elaborar.
             </p>
             {ingredients.length === 0 && (
               <p className="rounded-md bg-surface-subtle px-3 py-2 text-xs text-foreground-muted">
@@ -294,6 +301,19 @@ export default function NewRecipeVersionPage() {
                     <Trash2 className="h-4 w-4" /> Quitar
                   </Button>
                 </div>
+                {(() => {
+                  // La leche/masa que consume la orden ya se cuesta sola desde el lote:
+                  // cargarla también como insumo la cobraría DOS veces (aviso, no bloqueo).
+                  const p = ingredientProducts.find((x) => x.id === row.productId);
+                  if (!p || (p.category !== 'materia_prima' && p.category !== 'intermedio')) return null;
+                  return (
+                    <div className="mb-3 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-foreground">
+                      Ojo: la leche o la masa que consume la orden ya se cuesta sola, con el costo del lote.
+                      Si además la cargás acá como insumo, ese costo se cuenta <strong>dos veces</strong> y el lote va a dar más caro de lo real.
+                      Para corregirlo, quitá este insumo y guardá la nueva versión.
+                    </div>
+                  );
+                })()}
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <Field label="Producto" htmlFor={`ing-product-${idx}`} required>
                     <select
@@ -338,35 +358,52 @@ export default function NewRecipeVersionPage() {
                       <option value="gramo">gramo</option>
                     </select>
                   </Field>
-                  <Field label="Costo unitario" htmlFor={`ing-cost-${idx}`} hint="Se completa con el precio del producto; podés ajustarlo a mano.">
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <Input
-                        type="number"
-                        inputMode="decimal"
-                        step="0.01"
-                        prefix={currencySymbol(row.currency)}
-                        placeholder="0"
-                        className="flex-1"
-                        value={row.unitCost}
-                        onChange={(e) => updateIngredient(idx, { unitCost: e.target.value })}
-                      />
-                      <select
-                        className={`${selectClass} w-full flex-none sm:w-28`}
-                        aria-label="Moneda del costo"
-                        value={row.currency}
-                        onChange={(e) => updateIngredient(idx, { currency: e.target.value as Currency })}
+                  {(() => {
+                    // El precio del insumo vive en la FICHA del producto (Productos):
+                    // acá solo se muestra. Al elaborar se usa siempre el precio vigente.
+                    const p = ingredientProducts.find((x) => x.id === row.productId);
+                    const fichaCost = p && p.defaultCost != null ? p.defaultCost : null;
+                    const currency = (p?.defaultCostCurrency ?? 'ARS') as Currency;
+                    return (
+                      <Field
+                        label="Costo unitario"
+                        htmlFor={`ing-cost-${idx}`}
+                        hint="Se toma de la ficha del producto al elaborar. Si cambia el precio, actualizalo en Productos y las próximas órdenes lo usan solas."
                       >
-                        {CURRENCY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.value}</option>)}
-                      </select>
-                    </div>
-                    {(() => {
-                      const eq = equivalentArs(row.unitCost, row.currency, latestRate.data ?? undefined);
-                      if (eq != null) return <p className="mt-1 text-xs text-foreground-muted">≈ {formatMoney(eq)} /unidad (cotización del día)</p>;
-                      if (row.currency !== 'ARS' && Number(row.unitCost) > 0)
-                        return <p className="mt-1 text-xs text-warning">Cargá la cotización del día para ver el equivalente en pesos.</p>;
-                      return null;
-                    })()}
-                  </Field>
+                        {!row.productId ? (
+                          <p className="rounded-md bg-surface-subtle px-3 py-2 text-sm text-foreground-muted">
+                            Elegí el insumo: el precio se trae de su ficha de producto.
+                          </p>
+                        ) : fichaCost != null ? (
+                          <div className="flex min-h-touch w-full items-center justify-between gap-2 rounded-md border border-border bg-surface-subtle px-3 py-2 text-base">
+                            <span className="font-medium">
+                              {currencySymbol(currency)} {Number(fichaCost).toLocaleString('es-AR')} / {p?.unit}
+                            </span>
+                            <Link href="/productos" className="text-xs font-medium text-primary-700 underline">
+                              Cambiar en Productos
+                            </Link>
+                          </div>
+                        ) : row.unitCost !== '' && Number(row.unitCost) > 0 ? (
+                          <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground">
+                            El producto no tiene costo en su ficha: se usará el guardado en la receta ({currencySymbol(row.currency)}{' '}
+                            {Number(row.unitCost).toLocaleString('es-AR')}). Mejor cargalo en{' '}
+                            <Link href="/productos" className="font-medium underline">Productos</Link>.
+                          </p>
+                        ) : (
+                          <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground">
+                            Sin costo cargado: este insumo va a costear $0. Cargá su precio en{' '}
+                            <Link href="/productos" className="font-medium underline">Productos</Link>.
+                          </p>
+                        )}
+                        {fichaCost != null && currency !== 'ARS' && (() => {
+                          const eq = equivalentArs(String(fichaCost), currency, latestRate.data ?? undefined);
+                          if (eq != null)
+                            return <p className="mt-1 text-xs text-foreground-muted">≈ {formatMoney(eq)} /{p?.unit} (cotización del día)</p>;
+                          return <p className="mt-1 text-xs text-warning">Cargá la cotización del día para ver el equivalente en pesos.</p>;
+                        })()}
+                      </Field>
+                    );
+                  })()}
                 </div>
               </div>
             ))}
@@ -473,7 +510,7 @@ export default function NewRecipeVersionPage() {
 
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={() => router.back()}>Cancelar</Button>
-          <Button type="submit" loading={save.isPending}>Guardar nueva versión</Button>
+          <Button type="submit" loading={save.isPending}>Guardar cambios</Button>
         </div>
       </form>
 

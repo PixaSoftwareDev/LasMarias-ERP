@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Factory, Plus, Trash2 } from 'lucide-react';
+import { Factory, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui/data-table';
 import { DateRangeFilter } from '@/components/ui/date-range';
@@ -34,8 +34,8 @@ export default function ProductionPage() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
   const { user } = useAuth();
-  // Borrar deshace stock: solo admin/gerente (mismo criterio que anular una venta).
-  const canDelete = user?.role === 'admin' || user?.role === 'gerente';
+  // Borrar deshace stock: lo puede hacer quien opera la pantalla (mismo criterio que anular una venta).
+  const canDelete = user?.role === 'admin' || user?.role === 'gerente' || user?.role === 'operario';
   const { data = [], isLoading } = useQuery({ queryKey: ['production-orders'], queryFn: () => productionApi.list() });
 
   const deleteMutation = useMutation({
@@ -118,9 +118,18 @@ export default function ProductionPage() {
               render: (o) => (
                 <div className="flex items-center justify-end gap-1">
                   {o.status === 'open' || o.status === 'in_progress' ? (
-                    <Button asChild size="sm" variant="secondary" onClick={(e) => e.stopPropagation()}>
-                      <Link href={`/produccion/${o.id}/cerrar`}>Cargar producción / Cerrar</Link>
-                    </Button>
+                    <>
+                      {canDelete && (
+                        <Button asChild size="sm" variant="ghost" onClick={(e) => e.stopPropagation()}>
+                          <Link href={`/produccion/${o.id}/editar`} aria-label={`Editar orden ${o.code}`}>
+                            <Pencil className="h-4 w-4" /> Editar
+                          </Link>
+                        </Button>
+                      )}
+                      <Button asChild size="sm" variant="secondary" onClick={(e) => e.stopPropagation()}>
+                        <Link href={`/produccion/${o.id}/cerrar`}>Cargar producción / Cerrar</Link>
+                      </Button>
+                    </>
                   ) : o.status === 'closed' ? (
                     <Button asChild size="sm" variant="ghost" onClick={(e) => e.stopPropagation()}>
                       <Link href={`/produccion/${o.id}/cerrar`}>Ver costo</Link>

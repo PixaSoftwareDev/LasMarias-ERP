@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { ChefHat, Copy, Plus } from 'lucide-react';
+import { ChefHat, Pencil, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui/data-table';
 import { TableSkeleton } from '@/components/ui/skeleton';
@@ -17,7 +17,7 @@ export default function RecipesPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Recetas"
-        description="Cada producto tiene su receta con el rinde (kg por litro) y los costos. Para cambiar el rinde o los costos, creá una nueva versión: las producciones ya hechas conservan la versión con la que se elaboraron."        action={
+        description="Cada producto tiene su receta con el rinde (kg por litro) y los costos. Para cambiarla tocá Modificar: el cambio se guarda como una nueva versión y las producciones ya hechas conservan la versión con la que se elaboraron."        action={
           <div className="flex gap-2">
             <Button asChild variant="secondary"><Link href="/recetas/simulador">Simulador</Link></Button>
             <Button asChild><Link href="/recetas/nueva"><Plus className="h-4 w-4" /> Nueva</Link></Button>
@@ -56,7 +56,7 @@ export default function RecipesPage() {
               align: 'right',
               render: (r) => (
                 <Button asChild size="sm" variant="secondary">
-                  <Link href={`/recetas/${r.id}/nueva-version`}><Copy className="h-4 w-4" /> Nueva versión</Link>
+                  <Link href={`/recetas/${r.id}/nueva-version`}><Pencil className="h-4 w-4" /> Modificar</Link>
                 </Button>
               ),
             },

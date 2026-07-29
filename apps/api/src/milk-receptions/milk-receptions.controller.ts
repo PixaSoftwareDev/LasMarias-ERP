@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import {
   createMilkReceptionInputSchema,
@@ -40,5 +40,12 @@ export class MilkReceptionsController {
     @CurrentUser() user: JwtUserPayload,
   ) {
     return this.receptions.create(body, user.sub);
+  }
+
+  // Borrado con reversa de stock (mismo criterio que las órdenes de producción).
+  @Delete(':id')
+  @Roles('admin', 'gerente', 'operario')
+  remove(@Param('id') id: string) {
+    return this.receptions.remove(id);
   }
 }

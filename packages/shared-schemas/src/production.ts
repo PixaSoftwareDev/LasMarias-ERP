@@ -24,10 +24,23 @@ export const productionOutputSchema = z.object({
 });
 export type ProductionOutput = z.infer<typeof productionOutputSchema>;
 
+// Línea del detalle de costo (una por lote de leche/masa o por insumo): cantidad × precio = subtotal.
+export const costDetailLineSchema = z.object({
+  name: z.string(),
+  cantidad: z.string(),
+  unitCost: z.string(),
+  subtotal: z.string(),
+});
+export type CostDetailLine = z.infer<typeof costDetailLineSchema>;
+
 // Desglose de costo de una elaboración (calculadora — CLAUDE.md §5). Valores DECIMAL como string.
 export const elaborationCostResultSchema = z.object({
   costoInputs: z.string(), // leche o masa
   costoInsumos: z.string(),
+  // Detalle línea por línea, verificable a mano. Opcional: las órdenes cerradas antes
+  // de este campo no lo tienen guardado.
+  detalleInputs: z.array(costDetailLineSchema).optional(),
+  detalleInsumos: z.array(costDetailLineSchema).optional(),
   costoBruto: z.string(),
   valorSubproductos: z.string(),
   costoNeto: z.string(),

@@ -79,6 +79,11 @@ describe('computeElaborationCost', () => {
     expect(r.rendimiento).toBe('0.0950');
     expect(r.costoPorKg).toBe('3358.4211');
     expect(r.warnings).toEqual([]);
+    // Detalle línea por línea: los mismos números de la cuenta a mano de arriba.
+    expect(r.detalleInputs).toEqual([{ name: 'Leche', cantidad: '1000', unitCost: '300', subtotal: '300000.00' }]);
+    expect(r.detalleInsumos).toHaveLength(6);
+    expect(r.detalleInsumos[3]).toEqual({ name: 'Mano de obra', cantidad: '95', unitCost: '40', subtotal: '3800.00' });
+    expect(r.detalleInsumos[5]).toEqual({ name: 'Envase', cantidad: '1', unitCost: '1500', subtotal: '1500.00' });
   });
 
   // CASO 1 estándar: litros=1000, kg_esperado=0,10×1000=100, suero esperado=0,85×1000=850.

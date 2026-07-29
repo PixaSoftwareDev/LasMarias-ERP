@@ -180,6 +180,8 @@ export const productionApi = {
   get: (id: string) => api<ProductionOrder>(`/api/production-orders/${id}`),
   open: (input: { recipeId: string; operatorId: string; startedAt: string; milkInputs: { batchId: string; liters: number }[]; notes?: string }) =>
     api<ProductionOrder>('/api/production-orders/open', { method: 'POST', body: input }),
+  update: (id: string, input: { recipeId: string; operatorId: string; startedAt: string; milkInputs: { batchId: string; liters: number }[]; notes?: string }) =>
+    api<ProductionOrder>(`/api/production-orders/${id}`, { method: 'PATCH', body: input }),
   close: (id: string, input: { actualOutputs: { productId: string; quantity: number; isPrincipal: boolean }[]; warehouseId?: string; expectedYieldKgPerLiter?: number; notes?: string }) =>
     api<ProductionOrder>(`/api/production-orders/${id}/close`, { method: 'POST', body: input }),
   remove: (id: string) =>
@@ -318,6 +320,8 @@ export const salesApi = {
   getOrder: (id: string) => api<SalesOrder>(`/api/sales/orders/${id}`),
   createOrder: (input: CreateSalesOrderInput) =>
     api<SalesOrder>('/api/sales/orders', { method: 'POST', body: input }),
+  removeOrder: (id: string) =>
+    api<{ deleted: true; code: string }>(`/api/sales/orders/${id}`, { method: 'DELETE' }),
   // Listas de precio por tipo de cliente (editable a mano).
   priceList: (clientType: ClientType) =>
     api<PriceListItem[]>(`/api/sales/price-list?clientType=${encodeURIComponent(clientType)}`),

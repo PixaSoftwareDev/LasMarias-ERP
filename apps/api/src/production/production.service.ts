@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import type {
   CloseProductionInput,
+  Currency,
   OpenProductionInput,
   ProductionMilkInput,
   ProductionOrder,
@@ -13,7 +14,7 @@ import { RecipesService } from '../recipes/recipes.service';
 import { BatchEntity } from '../batches/batch.entity';
 import { ProductEntity } from '../products/product.entity';
 import { InventoryMovementEntity } from '../inventory/inventory-movement.entity';
-import { computeByproducts, computeIngredients, computeYield } from '../recipes/yield-calculator';
+import { computeByproducts, computeYield } from '../recipes/yield-calculator';
 import {
   computeElaborationCost,
   computeElaborationVariance,
@@ -21,6 +22,7 @@ import {
   type PrimaryInput,
 } from './elaboration-cost';
 import { UsersService } from '../users/users.service';
+import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 
 @Injectable()
 export class ProductionService {
@@ -30,6 +32,7 @@ export class ProductionService {
     private readonly recipes: RecipesService,
     private readonly users: UsersService,
     private readonly dataSource: DataSource,
+    private readonly exchangeRates: ExchangeRatesService,
   ) {}
 
   async list(): Promise<ProductionOrder[]> {
@@ -50,92 +53,152 @@ export class ProductionService {
     return this.toDto(r);
   }
 
-  async open(input: OpenProductionInput): Promise<ProductionOrder> {
+  // Reserva los lotes de materia prima (leche o masa) y calcula las salidas esperadas con la
+  // versión activa de la receta. Es la parte común de ABRIR y EDITAR una orden: NO consume
+  // stock (solo marca los lotes en_proceso), no corre la calculadora de costo (eso es al cerrar).
+  private async reserveMilkAndPlan(manager: import('typeorm').EntityManager, input: OpenProductionInput) {
     const recipe = await this.recipes.get(input.recipeId);
-    if (!recipe.activeVersion) throw new BadRequestException('La receta no tiene versión activa');
+    const version = recipe.activeVersion;
+    if (!version) throw new BadRequestException('La receta no tiene versión activa');
+
+    // Una orden puede consumir leche de VARIOS silos para llegar a los litros que necesita:
+    // cada lote entra con su propio costo/litro y la calculadora los suma (elaboration-cost.ts).
+    const milkInputs: ProductionMilkInput[] = [];
+    let totalLiters = 0;
+    for (const mi of input.milkInputs) {
+      const batch = await manager.getRepository(BatchEntity).findOne({ where: { id: mi.batchId } });
+      if (!batch) throw new BadRequestException(`Lote de leche ${mi.batchId} no encontrado`);
+      if (batch.status !== 'activo' && batch.status !== 'en_proceso')
+        throw new BadRequestException(`El lote ${batch.code} no está disponible`);
+      if (Number(batch.remainingQuantity) < mi.liters)
+        throw new BadRequestException(
+          `El lote ${batch.code} no tiene suficiente: pide ${mi.liters}, queda ${batch.remainingQuantity}`,
+        );
+      milkInputs.push({ batchId: batch.id, batchCode: batch.code, liters: mi.liters });
+      totalLiters += mi.liters;
+      // Marcar lote como en proceso (reserva, no consumo)
+      batch.status = 'en_proceso';
+      await manager.getRepository(BatchEntity).save(batch);
+    }
+
+    // Sin rendimiento esperado, la salida esperada queda en 0 (se conoce al cerrar).
+    const yieldResult = computeYield({
+      liters: totalLiters,
+      baseYieldKgPerLiter: version.baseYieldKgPerLiter ?? 0,
+      yieldSensitivityFat: version.yieldSensitivityFat,
+      yieldSensitivityProtein: version.yieldSensitivityProtein,
+      baselineFatPercent: version.baselineFatPercent,
+      baselineProteinPercent: version.baselineProteinPercent,
+      standardWastePercent: version.standardWastePercent,
+    });
+    const byproducts = computeByproducts(totalLiters, yieldResult.expectedYieldKg, version.byproducts);
+
+    const expectedOutputs: ProductionOutput[] = [
+      {
+        productId: recipe.productId,
+        productName: recipe.productName,
+        quantity: yieldResult.expectedYieldKg,
+        unit: 'kg',
+        isPrincipal: true,
+      },
+      ...byproducts.map((bp) => {
+        // Si el subproducto está mapeado a un producto del catálogo (destinationProductId),
+        // usamos ese id para que al cerrar genere su propio lote de stock (ej. suero).
+        const recipeBp = version.byproducts.find((b) => b.name === bp.name);
+        return {
+          productId: recipeBp?.destinationProductId ?? recipe.productId,
+          productName: bp.name,
+          quantity: bp.expectedQuantity,
+          unit: bp.unit as 'kg' | 'litro' | 'unidad',
+          isPrincipal: false,
+        };
+      }),
+    ];
+
+    return { recipe, version, milkInputs, expectedOutputs, totalLiters };
+  }
+
+  async open(input: OpenProductionInput): Promise<ProductionOrder> {
     const operator = await this.users.findById(input.operatorId);
 
     return this.dataSource.transaction(async (manager) => {
-      // Validar lotes de leche y litros disponibles
-      const milkInputs: ProductionMilkInput[] = [];
-      let totalLiters = 0;
-      // Una orden puede consumir leche de VARIOS silos para llegar a los litros que necesita:
-      // cada lote entra con su propio costo/litro y la calculadora los suma (elaboration-cost.ts).
-      for (const mi of input.milkInputs) {
-        const batch = await manager.getRepository(BatchEntity).findOne({ where: { id: mi.batchId } });
-        if (!batch) throw new BadRequestException(`Lote de leche ${mi.batchId} no encontrado`);
-        if (batch.status !== 'activo' && batch.status !== 'en_proceso')
-          throw new BadRequestException(`El lote ${batch.code} no está disponible`);
-        if (Number(batch.remainingQuantity) < mi.liters)
-          throw new BadRequestException(
-            `El lote ${batch.code} no tiene suficiente: pide ${mi.liters}, queda ${batch.remainingQuantity}`,
-          );
-        milkInputs.push({ batchId: batch.id, batchCode: batch.code, liters: mi.liters });
-        totalLiters += mi.liters;
-        // Marcar lote como en proceso
-        batch.status = 'en_proceso';
-        await manager.getRepository(BatchEntity).save(batch);
-      }
-
-      // Calcular salidas esperadas con la versión activa (ya validamos arriba que existe)
-      const version = recipe.activeVersion!;
-      // Sin rendimiento esperado, la salida esperada queda en 0 (se conoce al cerrar).
-      const yieldResult = computeYield({
-        liters: totalLiters,
-        baseYieldKgPerLiter: version.baseYieldKgPerLiter ?? 0,
-        yieldSensitivityFat: version.yieldSensitivityFat,
-        yieldSensitivityProtein: version.yieldSensitivityProtein,
-        baselineFatPercent: version.baselineFatPercent,
-        baselineProteinPercent: version.baselineProteinPercent,
-        standardWastePercent: version.standardWastePercent,
-      });
-      const ingredients = computeIngredients(totalLiters, yieldResult.expectedYieldKg, version.ingredients);
-      const byproducts = computeByproducts(totalLiters, yieldResult.expectedYieldKg, version.byproducts);
-
-      const expectedOutputs: ProductionOutput[] = [
-        {
-          productId: recipe.productId,
-          productName: recipe.productName,
-          quantity: yieldResult.expectedYieldKg,
-          unit: 'kg',
-          isPrincipal: true,
-        },
-        ...byproducts.map((bp) => {
-          // Si el subproducto está mapeado a un producto del catálogo (destinationProductId),
-          // usamos ese id para que al cerrar genere su propio lote de stock (ej. suero).
-          const recipeBp = version.byproducts.find((b) => b.name === bp.name);
-          return {
-            productId: recipeBp?.destinationProductId ?? recipe.productId,
-            productName: bp.name,
-            quantity: bp.expectedQuantity,
-            unit: bp.unit as 'kg' | 'litro' | 'unidad',
-            isPrincipal: false,
-          };
-        }),
-      ];
+      const plan = await this.reserveMilkAndPlan(manager, input);
 
       // Generar código de orden de producción: OP-YYYYMMDD-NNNN
       const code = await this.nextOrderCode(manager, new Date(input.startedAt));
 
       const order = manager.getRepository(ProductionOrderEntity).create({
         code,
-        recipeId: recipe.id,
-        recipeVersionId: version.id,
+        recipeId: plan.recipe.id,
+        recipeVersionId: plan.version.id,
         status: 'open',
         startedAt: new Date(input.startedAt),
         operatorId: operator.id,
-        milkInputs,
-        expectedOutputs,
+        milkInputs: plan.milkInputs,
+        expectedOutputs: plan.expectedOutputs,
         actualOutputs: [],
-        totalMilkLiters: String(totalLiters),
+        totalMilkLiters: String(plan.totalLiters),
         notes: input.notes ?? null,
         // ingredientes y byproducts ya están en el snapshot de la versión
       });
       const saved = await manager.getRepository(ProductionOrderEntity).save(order);
-      // referenciar ingredients en notes informativo — los ingredients están registrados en la versión congelada
-      void ingredients;
 
       const reloaded = await manager.getRepository(ProductionOrderEntity).findOne({
+        where: { id: saved.id },
+        relations: { recipe: true, operator: true },
+      });
+      return this.toDto(reloaded!);
+    });
+  }
+
+  // Edita una orden ABIERTA (por si se cargó algo mal antes de cerrarla): receta, fecha,
+  // lotes/litros y notas. Es seguro porque una orden abierta todavía no consumió stock ni
+  // corrió la calculadora — solo tiene lotes reservados. Libera las reservas viejas y aplica
+  // las nuevas, igual que abrir. Una orden cerrada NO se edita (hay que borrarla y rehacerla).
+  async update(id: string, input: OpenProductionInput): Promise<ProductionOrder> {
+    const operator = await this.users.findById(input.operatorId);
+
+    return this.dataSource.transaction(async (manager) => {
+      const orderRepo = manager.getRepository(ProductionOrderEntity);
+      const batchRepo = manager.getRepository(BatchEntity);
+
+      const order = await orderRepo.findOne({ where: { id } });
+      if (!order) throw new NotFoundException(`Orden de producción ${id} no encontrada`);
+      if (order.status !== 'open' && order.status !== 'in_progress')
+        throw new ForbiddenException(
+          `La orden ${order.code} ya está cerrada: no se puede editar. Si algo quedó mal, borrala y volvé a cargarla.`,
+        );
+
+      // Liberar los lotes de leche que esta orden tenía reservados, salvo que otra orden
+      // abierta también los use (mismo criterio que el borrado de una orden abierta).
+      const others = await orderRepo.find({ where: { status: In(['open', 'in_progress']) } });
+      const stillInUse = new Set(
+        others.filter((o) => o.id !== order.id).flatMap((o) => o.milkInputs.map((mi) => mi.batchId)),
+      );
+      for (const mi of order.milkInputs) {
+        if (stillInUse.has(mi.batchId)) continue;
+        const batch = await batchRepo.findOne({ where: { id: mi.batchId } });
+        if (batch && batch.status === 'en_proceso') {
+          batch.status = 'activo';
+          await batchRepo.save(batch);
+        }
+      }
+
+      // Reservar los nuevos lotes y recalcular salidas esperadas con la versión activa vigente.
+      const plan = await this.reserveMilkAndPlan(manager, input);
+
+      order.recipeId = plan.recipe.id;
+      order.recipeVersionId = plan.version.id;
+      order.startedAt = new Date(input.startedAt);
+      order.operatorId = operator.id;
+      order.milkInputs = plan.milkInputs;
+      order.expectedOutputs = plan.expectedOutputs;
+      order.totalMilkLiters = String(plan.totalLiters);
+      order.notes = input.notes ?? null;
+      // El código de la orden se conserva (se asignó al abrir); no se regenera aunque cambie la fecha.
+      const saved = await orderRepo.save(order);
+
+      const reloaded = await orderRepo.findOne({
         where: { id: saved.id },
         relations: { recipe: true, operator: true },
       });
@@ -210,12 +273,33 @@ export class ProductionService {
 
       // --- 3. Calcular el costo real y estándar con la calculadora de elaboración ---
       const totalLiters = Number(order.totalMilkLiters);
-      const ingredients: IngredientCost[] = version.ingredients.map((ing) => ({
-        name: ing.productName,
-        quantity: String(ing.quantity),
-        unitCost: String(ing.unitCost ?? 0),
-        basis: ing.basis,
-      }));
+      // El precio de cada insumo vive en la FICHA del producto (Datos maestros → Productos):
+      // al cerrar se usa el precio vigente de la ficha (convertido a $ del día de elaboración
+      // si está en USD/EUR). El congelado en la versión de receta queda solo de respaldo,
+      // para insumos sin precio en la ficha o sin producto asociado. Así el administrativo
+      // actualiza un precio en UN solo lugar y las próximas elaboraciones lo toman solas.
+      const ingredients: IngredientCost[] = [];
+      for (const ing of version.ingredients) {
+        let unitCost = String(ing.unitCost ?? 0);
+        if (ing.productId) {
+          const ingProduct = await manager
+            .getRepository(ProductEntity)
+            .findOne({ where: { id: ing.productId } });
+          if (ingProduct && ingProduct.defaultCost != null && String(ingProduct.defaultCost) !== '') {
+            const currency = (ingProduct.defaultCostCurrency ?? 'ARS') as Currency;
+            unitCost =
+              currency === 'ARS'
+                ? String(ingProduct.defaultCost)
+                : String(await this.exchangeRates.toArs(ingProduct.defaultCost, currency, order.startedAt));
+          }
+        }
+        ingredients.push({
+          name: ing.productName,
+          quantity: String(ing.quantity),
+          unitCost,
+          basis: ing.basis,
+        });
+      }
 
       // Cantidades reales de subproductos (por nombre, desde lo que carga el operario).
       const byproductActuals: Record<string, number> = {};
@@ -280,7 +364,9 @@ export class ProductionService {
         manager.getRepository(BatchEntity).create({
           code: `LM-PP-${order.code.replace('OP-', '')}`,
           productId: principalProductId,
-          productionDate: new Date(),
+          // La fecha del lote es la fecha de elaboración de la orden (puede ser un día
+          // anterior si se cargó atrasada), no el momento en que se cierra en el sistema.
+          productionDate: order.startedAt,
           initialQuantity: String(principalOutput.quantity),
           remainingQuantity: String(principalOutput.quantity),
           unit: 'kg',
@@ -318,7 +404,7 @@ export class ProductionService {
           manager.getRepository(BatchEntity).create({
             code: `LM-SP-${order.code.replace('OP-', '')}-${bpIdx}`,
             productId: o.productId,
-            productionDate: new Date(),
+            productionDate: order.startedAt,
             initialQuantity: String(o.quantity),
             remainingQuantity: String(o.quantity),
             unit: bpProduct.unit,
@@ -503,21 +589,23 @@ export class ProductionService {
 
   // Secuencia atómica por día con pg_advisory_xact_lock (mismo patrón que recepciones).
   // Lock key prefijada con 1 para no colisionar con la de leche.
+  // Secuencia = MAX(código del día)+1, no count(): si se borró una orden intermedia,
+  // count() repetiría un código ya usado (índice único).
   private async nextOrderCode(manager: import('typeorm').EntityManager, date: Date) {
-    const start = new Date(date); start.setHours(0, 0, 0, 0);
-    const end = new Date(date); end.setHours(23, 59, 59, 999);
     const lockKey = 1_00000000 + date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
     await manager.query('SELECT pg_advisory_xact_lock($1)', [lockKey]);
-    const count = await manager
-      .getRepository(ProductionOrderEntity)
-      .createQueryBuilder('o')
-      .where('o.started_at BETWEEN :start AND :end', { start, end })
-      .getCount();
     const yyyy = date.getFullYear();
     const mm = String(date.getMonth() + 1).padStart(2, '0');
     const dd = String(date.getDate()).padStart(2, '0');
-    const seq = String(count + 1).padStart(4, '0');
-    return `OP-${yyyy}${mm}${dd}-${seq}`;
+    const prefix = `OP-${yyyy}${mm}${dd}-`;
+    const row = await manager
+      .getRepository(ProductionOrderEntity)
+      .createQueryBuilder('o')
+      .select('MAX(o.code)', 'max')
+      .where('o.code LIKE :prefix', { prefix: `${prefix}%` })
+      .getRawOne<{ max: string | null }>();
+    const last = row?.max ? Number(row.max.slice(prefix.length)) : 0;
+    return `${prefix}${String(last + 1).padStart(4, '0')}`;
   }
 
   toDto(e: ProductionOrderEntity): ProductionOrder {

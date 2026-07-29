@@ -48,8 +48,10 @@ function makeService(milkBatches: any[]) {
   };
   const orderRepo = {
     createQueryBuilder: jest.fn(() => ({
+      select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
-      getCount: jest.fn().mockResolvedValue(0),
+      // Sin órdenes previas del día → la secuencia arranca en 0001 (MAX = null).
+      getRawOne: jest.fn().mockResolvedValue({ max: null }),
     })),
     create: jest.fn().mockImplementation((o) => ({ ...o, id: 'order-1' })),
     save: jest.fn().mockImplementation((o) => {
@@ -83,6 +85,7 @@ function makeService(milkBatches: any[]) {
     recipes as any,
     users as any,
     dataSource as any,
+    { toArs: jest.fn() } as any, // exchangeRates (no se usa en open)
   );
 
   return { service, savedBatches, getOrder: () => savedOrder };

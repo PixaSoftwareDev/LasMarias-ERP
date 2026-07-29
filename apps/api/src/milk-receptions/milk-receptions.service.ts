@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, DataSource, Repository } from 'typeorm';
 import Big from 'big.js';
@@ -10,6 +10,7 @@ import type {
 } from '@lasmarias/shared-schemas';
 import { MilkReceptionEntity } from './milk-reception.entity';
 import { BatchEntity } from '../batches/batch.entity';
+import { InventoryMovementEntity } from '../inventory/inventory-movement.entity';
 import { WarehouseEntity } from '../inventory/warehouse.entity';
 import { siloHasRoomFor } from '../inventory/silo.helpers';
 import { ProducersService } from '../producers/producers.service';
@@ -230,25 +231,81 @@ export class MilkReceptionsService {
     });
   }
 
+  // Borrar una recepción con reversa total de stock (mismo criterio que borrar una orden
+  // de producción). Elimina los lotes de leche que creó (el silo baja solo) y la deuda con
+  // el tambo se recalcula automáticamente porque se deriva de las recepciones aceptadas.
+  // Se permite aunque el lote ya haya sido dado de baja por ajuste (vencido/merma): esos
+  // ajustes también se borran. Lo único que frena es que la leche se haya usado en una
+  // elaboración: ahí primero hay que borrar esa orden.
+  async remove(id: string): Promise<{ deleted: true; code: string }> {
+    return this.dataSource.transaction(async (manager) => {
+      const receptionRepo = manager.getRepository(MilkReceptionEntity);
+      const batchRepo = manager.getRepository(BatchEntity);
+      const movementRepo = manager.getRepository(InventoryMovementEntity);
+
+      const reception = await receptionRepo.findOne({ where: { id } });
+      if (!reception) throw new NotFoundException(`Recepción ${id} no encontrada`);
+
+      const batchIds =
+        reception.batchIds && reception.batchIds.length > 0
+          ? reception.batchIds
+          : reception.batchId
+            ? [reception.batchId]
+            : [];
+
+      // Guardia: la leche no tiene que haberse usado en ninguna elaboración.
+      for (const batchId of batchIds) {
+        const batch = await batchRepo.findOne({ where: { id: batchId } });
+        if (!batch) continue;
+        if (batch.status === 'en_proceso') {
+          throw new BadRequestException(
+            `No se puede borrar la recepción ${reception.code}: la leche del lote ${batch.code} está reservada por una orden de producción abierta. Borrá primero esa orden.`,
+          );
+        }
+        const usedInProduction = await movementRepo
+          .createQueryBuilder('m')
+          .where('m.batch_id = :batchId', { batchId })
+          .andWhere("m.reference_type IS DISTINCT FROM 'stock_adjustment'")
+          .getCount();
+        if (usedInProduction > 0) {
+          throw new BadRequestException(
+            `No se puede borrar la recepción ${reception.code}: la leche del lote ${batch.code} ya se usó en una elaboración. Borrá primero esa orden de producción.`,
+          );
+        }
+      }
+
+      // Reversa: primero la recepción (referencia al batch), después los ajustes de
+      // stock que apunten a esos lotes, y al final los lotes (el nivel del silo baja solo).
+      await receptionRepo.remove(reception);
+      if (batchIds.length > 0) {
+        const adjustments = await movementRepo
+          .createQueryBuilder('m')
+          .where('m.batch_id IN (:...ids)', { ids: batchIds })
+          .getMany();
+        if (adjustments.length > 0) await movementRepo.remove(adjustments);
+        await batchRepo.delete(batchIds);
+      }
+      return { deleted: true as const, code: reception.code };
+    });
+  }
+
   // Próximo código secuencial del día. Usa pg_advisory_xact_lock para evitar
   // races entre transacciones concurrentes. La clave de lock es YYYYMMDD del día.
-  // (Postgres no permite FOR UPDATE en queries con agregados como COUNT.)
+  // Secuencia = MAX(código del día)+1, no count(): si se borró una recepción intermedia,
+  // count() repetiría un código ya usado (índice único).
   private async nextBatchCode(manager: import('typeorm').EntityManager, date: Date) {
-    const start = new Date(date);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(date);
-    end.setHours(23, 59, 59, 999);
-
     const lockKey = date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
     await manager.query('SELECT pg_advisory_xact_lock($1)', [lockKey]);
 
-    const count = await manager
+    const prefix = formatMilkBatchCode({ date, sequence: 1 }).slice(0, -4); // LM-LC-YYYYMMDD-
+    const row = await manager
       .getRepository(MilkReceptionEntity)
       .createQueryBuilder('r')
-      .where('r.received_at BETWEEN :start AND :end', { start, end })
-      .getCount();
-
-    return formatMilkBatchCode({ date, sequence: count + 1 });
+      .select('MAX(r.code)', 'max')
+      .where('r.code LIKE :prefix', { prefix: `${prefix}%` })
+      .getRawOne<{ max: string | null }>();
+    const last = row?.max ? Number(row.max.slice(prefix.length)) : 0;
+    return formatMilkBatchCode({ date, sequence: last + 1 });
   }
 
   toDto(e: MilkReceptionEntity): MilkReception {

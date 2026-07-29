@@ -6,6 +6,8 @@ export const receptionsApi = {
   list: () => api<MilkReception[]>('/api/milk-receptions'),
   create: (input: CreateMilkReceptionInput) =>
     api<MilkReception>('/api/milk-receptions', { method: 'POST', body: input }),
+  remove: (id: string) =>
+    api<{ deleted: true; code: string }>(`/api/milk-receptions/${id}`, { method: 'DELETE' }),
 };
 
 export const producersApi = {

@@ -85,6 +85,7 @@ function makeService(fx: Fixture) {
     { get: jest.fn() } as any,
     { findById: jest.fn() } as any,
     dataSource as any,
+    { toArs: jest.fn() } as any, // exchangeRates (no se usa en remove)
   );
 
   return { service, batchesById, removedOrders, removedMovements, deletedBatchIds };

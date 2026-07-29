@@ -190,7 +190,7 @@ export default function ProductsPage() {
                   label="Costo de referencia"
                   htmlFor="defaultCost"
                   className="sm:col-span-2"
-                  hint="Opcional. Pre-llena el costo al ingresar stock de este insumo. Elegí si lo cargás con o sin IVA."
+                  hint="Es el precio que usan las recetas para costear este insumo al elaborar: actualizalo acá cuando cambie y las próximas órdenes lo toman solas. También pre-llena el costo al ingresar stock."
                 >
                   <div className="flex flex-col gap-2 sm:flex-row">
                     <Input

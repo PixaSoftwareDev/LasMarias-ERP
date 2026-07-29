@@ -123,14 +123,18 @@ function makeService(
   };
   const dataSource = { transaction: jest.fn((cb: any) => cb(manager)) };
 
+  // Cotización mockeada: 1 USD = $1000 (para insumos con precio en dólares en la ficha).
+  const exchangeRates = { toArs: jest.fn(async (amount: any) => Number(amount) * 1000) };
+
   const service = new ProductionService(
     orderRepo as any, // orders repo (no se usa en close salvo vía manager)
     {} as any, // recipes
     {} as any, // users
     dataSource as any,
+    exchangeRates as any,
   );
 
-  return { service, milkBatch, savedBatches, savedMovements, getOrder: () => savedOrder };
+  return { service, milkBatch, savedBatches, savedMovements, exchangeRates, getOrder: () => savedOrder };
 }
 
 describe('ProductionService.close', () => {
@@ -253,5 +257,67 @@ describe('ProductionService.close', () => {
     // Con el esperado cargado a mano, ya hay comparación real vs estándar.
     expect(order.costBreakdown.estandar).not.toBeNull();
     expect(order.costBreakdown.variance).not.toBeNull();
+  });
+
+  it('el precio del insumo sale de la FICHA del producto (vigente), no del congelado en la receta', async () => {
+    const { service, getOrder } = makeService({
+      ingredients: [
+        { productName: 'Fermento', productId: 'prod-fermento', quantity: 1, unitCost: 0.5, basis: 'per_liter_milk' },
+      ],
+      products: {
+        'prod-fermento': { id: 'prod-fermento', category: 'insumo', defaultCost: '1', defaultCostCurrency: 'ARS' },
+      },
+    });
+
+    await service.close('order-1', {
+      actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true }],
+    } as any);
+
+    // Leche 1000×$10 = $10000 + fermento 1000×$1 (precio de la FICHA, no los $0.5 de la
+    // receta) = $1000 → $11000 / 100 kg = $110/kg.
+    const order = getOrder();
+    expect(order.costBreakdown.real.costoPorKg).toBe('110.0000');
+    // El detalle por línea queda guardado en el desglose, verificable a mano.
+    expect(order.costBreakdown.real.detalleInsumos).toEqual([
+      { name: 'Fermento', cantidad: '1000', unitCost: '1', subtotal: '1000.00' },
+    ]);
+    expect(order.costBreakdown.real.detalleInputs).toEqual([
+      { name: 'LM-LE-1', cantidad: '1000', unitCost: '10', subtotal: '10000.00' },
+    ]);
+  });
+
+  it('insumo sin precio en la ficha: usa el congelado en la versión de receta (respaldo)', async () => {
+    const { service, getOrder } = makeService({
+      ingredients: [
+        { productName: 'Fermento', productId: 'prod-fermento', quantity: 1, unitCost: 0.5, basis: 'per_liter_milk' },
+      ],
+      products: { 'prod-fermento': { id: 'prod-fermento', category: 'insumo', defaultCost: null } },
+    });
+
+    await service.close('order-1', {
+      actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true }],
+    } as any);
+
+    // Leche $10000 + fermento 1000×$0.5 = $500 → $10500 / 100 kg = $105/kg (igual que siempre).
+    expect(getOrder().costBreakdown.real.costoPorKg).toBe('105.0000');
+  });
+
+  it('insumo con precio en USD en la ficha: se convierte a pesos del día de elaboración', async () => {
+    const { service, getOrder, exchangeRates } = makeService({
+      ingredients: [
+        { productName: 'Fermento importado', productId: 'prod-fermento', quantity: 1, unitCost: 200, basis: 'per_liter_milk' },
+      ],
+      products: {
+        'prod-fermento': { id: 'prod-fermento', category: 'insumo', defaultCost: '0.3', defaultCostCurrency: 'USD' },
+      },
+    });
+
+    await service.close('order-1', {
+      actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true }],
+    } as any);
+
+    // USD 0,30 × $1000 = $300/litro → leche $10000 + 1000×$300 = $300000 → $310000/100 = $3100/kg.
+    expect(exchangeRates.toArs).toHaveBeenCalledWith('0.3', 'USD', expect.any(Date));
+    expect(getOrder().costBreakdown.real.costoPorKg).toBe('3100.0000');
   });
 });

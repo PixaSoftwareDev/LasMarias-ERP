@@ -12,6 +12,18 @@
     @apply text-base text-foreground;
   }
 
+  /* Inputs numéricos sin las flechitas de subir/bajar: se cargan solo con el
+     teclado (evita cambios accidentales con el mouse/rueda en cantidades y precios). */
+  input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
   /* Barra de scroll fina y discreta (estilo apps modernas) en lugar de la gris
      gruesa del sistema. Aplica a la página y a cualquier contenedor con scroll. */
   * {

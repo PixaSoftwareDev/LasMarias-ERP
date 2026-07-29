@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/page-header';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { inventoryApi, productionApi, recipesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
@@ -18,7 +19,7 @@ import { useAuth } from '@/hooks/use-auth';
 interface MilkBatch {
   id: string;
   code: string;
-  label: string; // texto a mostrar en el option (código + cantidad disponible)
+  label: string;
   remainingQuantity: number | string;
 }
 
@@ -29,34 +30,31 @@ interface MilkInputRow {
 
 type SourceKind = 'leche' | 'masa';
 
-// Mismo lenguaje visual que el resto de los selects de la app (fondo elevado + foco).
 const SELECT_CLASS =
   'min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-1';
 
-// Fecha de hoy en formato YYYY-MM-DD según el reloj local (no UTC, que corre un día en Argentina).
-function todayLocal(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// La masa (producto intermedio) se guarda con código LM-PP-…; la leche cruda con LM-LC-….
+// Así detectamos con qué se elaboró la orden para mostrar el origen correcto al editar.
+function detectSource(batchCode: string | undefined): SourceKind {
+  return batchCode?.startsWith('LM-LC') === false ? 'masa' : 'leche';
 }
 
-export default function NewProductionPage() {
+export default function EditProductionPage() {
   const router = useRouter();
+  const params = useParams<{ id: string }>();
+  const orderId = params.id;
   const queryClient = useQueryClient();
   const { user, hydrated } = useAuth();
+
+  const orderQuery = useQuery({ queryKey: ['production-order', orderId], queryFn: () => productionApi.get(orderId) });
   const recipes = useQuery({ queryKey: ['recipes'], queryFn: () => recipesApi.list() });
 
-  // Origen de la materia prima a consumir.
-  // - "leche": lotes de leche cruda en stock, filtrables por silo (CLAUDE.md §9).
-  // - "masa": lotes intermedios en stock (ej. para elaborar mozzarella desde masa).
   const [source, setSource] = useState<SourceKind>('leche');
-  // Silo de origen (opcional): filtra los lotes de leche disponibles a ese silo.
   const [siloId, setSiloId] = useState('');
 
-  // Silos definidos, para el selector de origen.
   const warehousesQuery = useQuery({ queryKey: ['warehouses'], queryFn: () => inventoryApi.listWarehouses() });
   const silos = useMemo(() => (warehousesQuery.data ?? []).filter((w) => w.kind === 'silo'), [warehousesQuery.data]);
 
-  // Lotes de leche cruda disponibles (con su silo). Filtra por silo si se eligió uno.
   const milkBatchesQuery = useQuery({
     queryKey: ['milk-batches', siloId],
     queryFn: () => inventoryApi.milkBatches(siloId || undefined),
@@ -72,7 +70,6 @@ export default function NewProductionPage() {
     [milkBatchesQuery.data],
   );
 
-  // Lotes de masa (categoría intermedio) en stock.
   const doughBatchesQuery = useQuery({
     queryKey: ['consumable-batches', 'intermedio'],
     queryFn: () => inventoryApi.consumableBatches('intermedio'),
@@ -88,47 +85,72 @@ export default function NewProductionPage() {
     [doughBatchesQuery.data],
   );
 
-  // El silo es un filtro OPCIONAL: "Todos los silos" (siloId vacío) muestra la leche de
-  // todos los tanques y una orden puede combinar lotes de varios para llegar a los litros.
-  const milkBatches = source === 'leche' ? milkBatchesFromReceptions : doughBatches;
+  const availableBatches = source === 'leche' ? milkBatchesFromReceptions : doughBatches;
+
+  // Los lotes que la orden ya tiene reservados están "en proceso" y NO aparecen en la lista de
+  // disponibles (que solo trae los "activos"). Los sumamos como opción para poder mantenerlos.
+  const milkBatches: MilkBatch[] = useMemo(() => {
+    const merged = [...availableBatches];
+    for (const mi of orderQuery.data?.milkInputs ?? []) {
+      if (detectSource(mi.batchCode) !== source) continue;
+      if (merged.some((b) => b.id === mi.batchId)) continue;
+      merged.push({
+        id: mi.batchId,
+        code: mi.batchCode,
+        remainingQuantity: mi.liters,
+        label: `${mi.batchCode} (reservado en esta orden)`,
+      });
+    }
+    return merged;
+  }, [availableBatches, orderQuery.data, source]);
 
   const [recipeId, setRecipeId] = useState('');
-  // Fecha de elaboración: por defecto hoy, pero editable para cargar órdenes atrasadas.
-  // El código de la orden y del lote sale de esta fecha (OP-YYYYMMDD / LM-PP-YYYYMMDD).
-  const [startedDate, setStartedDate] = useState(todayLocal);
+  const [startedDate, setStartedDate] = useState('');
   const [notes, setNotes] = useState('');
   const [inputs, setInputs] = useState<MilkInputRow[]>([{ batchId: '', liters: 0 }]);
+  const [seeded, setSeeded] = useState(false);
 
-  // Al cambiar de origen, reseteamos las filas para no enviar lotes de la otra fuente.
+  // Precargar el formulario con los datos de la orden una sola vez, cuando llega del servidor.
+  useEffect(() => {
+    const order = orderQuery.data;
+    if (!order || seeded) return;
+    setRecipeId(order.recipeId);
+    setStartedDate(order.startedAt.slice(0, 10));
+    setNotes(order.notes ?? '');
+    setSource(detectSource(order.milkInputs[0]?.batchCode));
+    setInputs(
+      order.milkInputs.length
+        ? order.milkInputs.map((mi) => ({ batchId: mi.batchId, liters: mi.liters }))
+        : [{ batchId: '', liters: 0 }],
+    );
+    setSeeded(true);
+  }, [orderQuery.data, seeded]);
+
   function changeSource(next: SourceKind) {
     if (next === source) return;
     setSource(next);
     setInputs([{ batchId: '', liters: 0 }]);
   }
 
-  const open = useMutation({
+  const save = useMutation({
     mutationFn: () =>
-      productionApi.open({
+      productionApi.update(orderId, {
         recipeId,
-        operatorId: user!.id,
-        // Mediodía local: evita que el huso horario corra la fecha al día anterior/siguiente.
+        // Conservamos el operario original de la orden.
+        operatorId: orderQuery.data!.operatorId,
         startedAt: new Date(`${startedDate}T12:00:00`).toISOString(),
         milkInputs: inputs.filter((i) => i.batchId && i.liters > 0),
         notes: notes || undefined,
       }),
     onSuccess: (r) => {
-      queryClient.invalidateQueries({ queryKey: ['production-orders'] });
-      // Continuidad del pipeline: la orden recién abierta hay que CERRARLA cargando la
-      // producción real. Llevamos directo a ese paso en vez de a la lista (CLAUDE.md §7).
-      toast.success(`Orden ${r.code} abierta — ahora cargá la producción`);
-      router.push(`/produccion/${r.id}/cerrar`);
+      queryClient.invalidateQueries();
+      toast.success(`Orden ${r.code} actualizada`);
+      router.push('/produccion');
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo abrir la orden. Probá de nuevo.'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar la orden. Probá de nuevo.'),
   });
 
   useEffect(() => {
-    // Esperamos a que la sesión se hidrate desde el navegador antes de decidir
-    // el redirect; si no, el primer render (user=null) patea al login por error.
     if (hydrated && !user) router.replace('/login');
   }, [hydrated, user, router]);
 
@@ -144,11 +166,46 @@ export default function NewProductionPage() {
     }
   }
 
+  if (orderQuery.isLoading) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader title="Editar orden" description="Cargando la orden…" />
+        <TableSkeleton />
+      </div>
+    );
+  }
+
+  const order = orderQuery.data;
+  if (!order) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader title="Editar orden" description="No encontramos esta orden." action={<Button asChild variant="ghost"><Link href="/produccion"><ArrowLeft className="h-4 w-4" /> Volver</Link></Button>} />
+      </div>
+    );
+  }
+
+  // Solo las órdenes abiertas se pueden editar; una cerrada ya movió stock y costo.
+  const editable = order.status === 'open' || order.status === 'in_progress';
+  if (!editable) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader title={`Orden ${order.code}`} description="Esta orden ya está cerrada." action={<Button asChild variant="ghost"><Link href="/produccion"><ArrowLeft className="h-4 w-4" /> Volver</Link></Button>} />
+        <Card>
+          <CardContent className="py-6 text-sm text-foreground-muted">
+            La orden <span className="font-mono">{order.code}</span> ya está cerrada, así que no se puede editar. Si algo
+            quedó mal, borrala desde la lista y volvé a cargarla.
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Abrir orden de producción"
-        description="Elegí la receta, el origen (leche o masa) y los lotes a consumir. Las salidas reales se cargan al cerrar."        action={<Button asChild variant="ghost"><Link href="/produccion"><ArrowLeft className="h-4 w-4" /> Volver</Link></Button>}
+        title={`Editar orden ${order.code}`}
+        description="Corregí lo que se haya cargado mal. La orden sigue abierta: no se consumió stock todavía."
+        action={<Button asChild variant="ghost"><Link href="/produccion"><ArrowLeft className="h-4 w-4" /> Volver</Link></Button>}
       />
 
       <Card>
@@ -158,13 +215,12 @@ export default function NewProductionPage() {
             label="Fecha de elaboración"
             htmlFor="startedDate"
             required
-            hint="Por defecto es hoy. Cambiala si estás cargando una elaboración de otro día: el número de lote sale de esta fecha."
+            hint="El número de lote de la orden no cambia aunque corrijas la fecha."
           >
             <Input
               id="startedDate"
               type="date"
               value={startedDate}
-              max={todayLocal()}
               onChange={(e) => setStartedDate(e.target.value)}
             />
           </Field>
@@ -180,7 +236,7 @@ export default function NewProductionPage() {
             label="¿Con qué se elabora?"
             htmlFor="source"
             required
-            hint="Elaboración en dos pasos: primero leche → masa, después masa → mozzarella o queso. La masa es un producto intermedio que queda en stock con su propio costo."
+            hint="Elaboración en dos pasos: primero leche → masa, después masa → mozzarella o queso."
           >
             <select className={SELECT_CLASS} value={source} onChange={(e) => changeSource(e.target.value as SourceKind)}>
               <option value="leche">Leche cruda (paso 1: hacer masa)</option>
@@ -189,8 +245,8 @@ export default function NewProductionPage() {
           </Field>
 
           {source === 'leche' && silos.length > 0 && (
-            <Field label="Silo de origen" htmlFor="silo" hint="Filtro opcional. Dejá 'Todos los silos' para combinar leche de varios tanques en la misma orden.">
-              <select id="silo" className={SELECT_CLASS} value={siloId} onChange={(e) => { setSiloId(e.target.value); setInputs([{ batchId: '', liters: 0 }]); }}>
+            <Field label="Silo de origen" htmlFor="silo" hint="Filtro opcional. Dejá 'Todos los silos' para combinar leche de varios tanques.">
+              <select id="silo" className={SELECT_CLASS} value={siloId} onChange={(e) => setSiloId(e.target.value)}>
                 <option value="">Todos los silos</option>
                 {silos.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
@@ -204,15 +260,6 @@ export default function NewProductionPage() {
                 <Plus className="h-4 w-4" /> Agregar lote
               </Button>
             </div>
-            {milkBatches.length === 0 && (
-              <p className="rounded-md bg-warning/10 px-3 py-2 text-xs text-warning">
-                {source === 'leche'
-                  ? siloId
-                    ? 'No hay lotes de leche disponibles en este silo. Probá "Todos los silos" o cargá una recepción aceptada.'
-                    : 'No hay lotes de leche disponibles. Cargá primero una recepción aceptada.'
-                  : 'No hay lotes de masa en stock. Elaborá primero la masa o revisá el stock.'}
-              </p>
-            )}
             <div className="space-y-2">
               {inputs.map((row, idx) => (
                 <div key={idx} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,140px,auto]">
@@ -256,8 +303,8 @@ export default function NewProductionPage() {
 
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={() => router.push('/produccion')}>Cancelar</Button>
-        <Button onClick={() => open.mutate()} loading={open.isPending} disabled={!recipeId || !startedDate || inputs.every((i) => !i.batchId)}>
-          Abrir orden
+        <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!recipeId || !startedDate || inputs.every((i) => !i.batchId)}>
+          Guardar cambios
         </Button>
       </div>
     </div>

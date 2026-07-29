@@ -124,6 +124,49 @@ export function ProductionCostPanel({ breakdown, className }: Props) {
           </div>
         </dl>
 
+        {/* Detalle línea por línea (cantidad × precio = subtotal), verificable a mano.
+            Las órdenes cerradas antes de que existiera este detalle no lo tienen guardado. */}
+        {((real.detalleInputs?.length ?? 0) > 0 || (real.detalleInsumos?.length ?? 0) > 0) && (
+          <div>
+            <p className="mb-2 text-sm font-semibold text-foreground">Detalle, línea por línea</p>
+            <div className="overflow-x-auto rounded-lg border border-border-subtle">
+              <table className="w-full min-w-[24rem] text-sm">
+                <thead className="bg-surface-subtle/40 text-xs uppercase tracking-wide text-foreground-muted">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">Concepto</th>
+                    <th className="px-3 py-2 text-right font-medium">Cantidad</th>
+                    <th className="px-3 py-2 text-right font-medium">Precio unit.</th>
+                    <th className="px-3 py-2 text-right font-medium">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(real.detalleInputs ?? []).map((l) => (
+                    <tr key={`input-${l.name}`} className="border-t border-border-subtle">
+                      <td className="px-3 py-2">
+                        {l.name} <span className="text-xs text-foreground-muted">(leche / masa)</span>
+                      </td>
+                      <td className="px-3 py-2 text-right">{kg(l.cantidad)}</td>
+                      <td className="px-3 py-2 text-right">{pesos(l.unitCost)}</td>
+                      <td className="px-3 py-2 text-right font-medium">{pesos(l.subtotal)}</td>
+                    </tr>
+                  ))}
+                  {(real.detalleInsumos ?? []).map((l) => (
+                    <tr key={`insumo-${l.name}`} className="border-t border-border-subtle">
+                      <td className="px-3 py-2">{l.name}</td>
+                      <td className="px-3 py-2 text-right">{kg(l.cantidad)}</td>
+                      <td className="px-3 py-2 text-right">{pesos(l.unitCost)}</td>
+                      <td className="px-3 py-2 text-right font-medium">{pesos(l.subtotal)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-1 text-xs text-foreground-muted">
+              El precio de cada insumo se toma de su ficha en Productos al cerrar la orden.
+            </p>
+          </div>
+        )}
+
         {/* REAL vs ESTÁNDAR con desvío resaltado. Solo si la receta tiene rendimiento
             esperado; si no, mostramos únicamente el costo real (pedido #12). */}
         {!estandar || !variance ? (
