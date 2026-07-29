@@ -37,6 +37,7 @@ function makeService(milkBatches: any[], openOrders: any[] = []) {
 
   const byId = new Map(milkBatches.map((b) => [b.id, b]));
   const savedBatches: any[] = [];
+  const savedMovements: any[] = [];
   let savedOrder: any = null;
 
   const batchRepo = {
@@ -44,6 +45,13 @@ function makeService(milkBatches: any[], openOrders: any[] = []) {
     save: jest.fn().mockImplementation((b) => {
       savedBatches.push(b);
       return Promise.resolve(b);
+    }),
+  };
+  const movementRepo = {
+    create: jest.fn().mockImplementation((m) => ({ ...m })),
+    save: jest.fn().mockImplementation((m) => {
+      savedMovements.push(m);
+      return Promise.resolve(m);
     }),
   };
   const orderRepo = {
@@ -77,6 +85,7 @@ function makeService(milkBatches: any[], openOrders: any[] = []) {
       const name = entity?.name ?? '';
       if (name === 'BatchEntity') return batchRepo;
       if (name === 'ProductionOrderEntity') return orderRepo;
+      if (name === 'InventoryMovementEntity') return movementRepo;
       throw new Error(`repo no mockeado: ${name}`);
     }),
   };
@@ -90,7 +99,7 @@ function makeService(milkBatches: any[], openOrders: any[] = []) {
     { toArs: jest.fn() } as any, // exchangeRates (no se usa en open)
   );
 
-  return { service, savedBatches, getOrder: () => savedOrder };
+  return { service, savedBatches, savedMovements, getOrder: () => savedOrder };
 }
 
 function milkBatch(id: string, warehouseId: string, remaining = '1000') {
@@ -133,15 +142,34 @@ describe('ProductionService.open — regla de silos', () => {
     expect(saved.milkInputs.map((m: any) => m.batchId)).toEqual(['a', 'b']);
   });
 
-  it('marca cada lote consumido como en proceso', async () => {
+  it('descuenta el stock del silo al reservar (marca en proceso y baja el saldo)', async () => {
+    const { service, savedBatches, savedMovements } = makeService([
+      milkBatch('a', 'silo-norte'), // 1000 L, pide 600 → queda 400
+      milkBatch('b', 'silo-sur'), // 1000 L, pide 500 → queda 500
+    ]);
+
+    await service.open(input as any);
+
+    // Los lotes quedan en proceso mientras la orden está abierta.
+    expect(savedBatches.filter((b) => b.status === 'en_proceso')).toHaveLength(2);
+    // Y el saldo YA bajó (reserva = consumo), no se espera al cierre.
+    expect(savedBatches.find((b) => b.id === 'a').remainingQuantity).toBe('400');
+    expect(savedBatches.find((b) => b.id === 'b').remainingQuantity).toBe('500');
+    // Con su movimiento de salida registrado (uno por lote), para poder revertir si se borra/edita.
+    expect(savedMovements.filter((m) => m.type === 'out' && m.reason === 'production')).toHaveLength(2);
+  });
+
+  it('deja el lote en agotado si la reserva lo consume por completo', async () => {
     const { service, savedBatches } = makeService([
-      milkBatch('a', 'silo-norte'),
+      milkBatch('a', 'silo-norte', '600'), // pide 600 → queda 0
       milkBatch('b', 'silo-sur'),
     ]);
 
     await service.open(input as any);
 
-    expect(savedBatches.filter((b) => b.status === 'en_proceso')).toHaveLength(2);
+    const a = savedBatches.find((b) => b.id === 'a');
+    expect(a.remainingQuantity).toBe('0');
+    expect(a.status).toBe('agotado');
   });
 
   it('sigue frenando si un lote no tiene litros suficientes', async () => {
@@ -153,13 +181,14 @@ describe('ProductionService.open — regla de silos', () => {
     await expect(service.open(input as any)).rejects.toThrow(/no tiene suficiente/);
   });
 
-  it('frena el doble consumo: no deja comprometer un lote que otra orden abierta ya reservó', async () => {
-    // El lote 'a' tiene 1000 L pero otra orden abierta ya comprometió 700 → quedan 300 y esta pide 600.
-    const { service } = makeService(
-      [milkBatch('a', 'silo-norte', '1000'), milkBatch('b', 'silo-sur')],
-      [{ id: 'otra-orden', status: 'open', milkInputs: [{ batchId: 'a', liters: 700 }] }],
-    );
+  it('previene el doble consumo: un lote ya reservado por otra orden llega con el saldo bajado', async () => {
+    // Al reservar se descuenta de verdad, así que si otra orden ya tomó parte del lote 'a', esta
+    // orden lo ve con el saldo ya reducido (300 L) y su pedido de 600 no entra.
+    const { service } = makeService([
+      milkBatch('a', 'silo-norte', '300'), // otra orden ya reservó 700 de los 1000 originales
+      milkBatch('b', 'silo-sur'),
+    ]);
 
-    await expect(service.open(input as any)).rejects.toThrow(/ya está comprometido por otra orden/);
+    await expect(service.open(input as any)).rejects.toThrow(/no tiene suficiente/);
   });
 });

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import {
   createWarehouseInputSchema,
   updateWarehouseInputSchema,
@@ -115,6 +115,14 @@ export class InventoryController {
     @CurrentUser() user: JwtUserPayload,
   ) {
     return this.inventory.addStockEntry(body, user.sub);
+  }
+
+  // Eliminar un ingreso de stock cargado de más (papelera). Borra el lote y su movimiento sin
+  // dejar rastro de "baja/vencido"; solo si el ingreso está intacto (no se consumió ni ajustó).
+  @Delete('stock-entry/:batchId')
+  @Roles('admin', 'gerente', 'operario')
+  deleteStockEntry(@Param('batchId', new ParseUUIDPipe()) batchId: string) {
+    return this.inventory.deleteStockEntry(batchId);
   }
 
   @Post('discard')

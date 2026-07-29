@@ -1,7 +1,8 @@
 import { ProductionService } from './production.service';
 
 // Tests del método REMOVE: borrar una orden deshaciendo su efecto en stock.
-// - Abierta: libera la leche reservada (en_proceso → activo) y borra la orden.
+// - Abierta: la leche ya estaba descontada (reserva = consumo) → se DEVUELVE al silo por sus
+//   movimientos de salida y se borra la orden.
 // - Cerrada: devuelve lo consumido, elimina lotes producidos y movimientos — solo si
 //   lo producido está intacto (si ya se vendió o se usó, se rechaza con aviso claro).
 // Verificable a mano: las cantidades restauradas son sumas exactas de los movimientos.
@@ -92,27 +93,45 @@ function makeService(fx: Fixture) {
 }
 
 describe('ProductionService.remove — orden abierta', () => {
-  it('libera la leche reservada y borra la orden', async () => {
-    const milk = { id: 'milk-1', code: 'LM-LE-1', status: 'en_proceso', remainingQuantity: '1000' };
+  it('devuelve al silo la leche reservada y borra la orden', async () => {
+    // El lote arrancó en 1000 y la orden reservó 500 (ya descontados) → queda 500.
+    const milk = { id: 'milk-1', code: 'LM-LE-1', status: 'en_proceso', remainingQuantity: '500' };
     const order = { id: 'op-1', code: 'OP-1', status: 'open', milkInputs: [{ batchId: 'milk-1', liters: 500 }] };
-    const { service, batchesById, removedOrders } = makeService({ orders: [order], batches: [milk], movements: [] });
+    const movements = [{ id: 'm-out', batchId: 'milk-1', type: 'out', quantity: '500', referenceId: 'op-1' }];
+    const { service, batchesById, removedOrders, removedMovements } = makeService({
+      orders: [order],
+      batches: [milk],
+      movements,
+    });
 
     const res = await service.remove('op-1');
 
     expect(res).toEqual({ deleted: true, code: 'OP-1' });
+    // La leche vuelve al silo (500 → 1000) y el lote queda disponible de nuevo.
+    expect(batchesById.get('milk-1').remainingQuantity).toBe('1000');
     expect(batchesById.get('milk-1').status).toBe('activo');
+    // Su movimiento de salida se borra.
+    expect(removedMovements).toHaveLength(1);
     expect(removedOrders).toHaveLength(1);
   });
 
-  it('NO libera un lote que otra orden abierta también está usando', async () => {
-    const milk = { id: 'milk-1', code: 'LM-LE-1', status: 'en_proceso', remainingQuantity: '1000' };
+  it('devuelve solo SU parte: lo reservado por otra orden abierta sigue descontado', async () => {
+    // milk-1 arrancó en 1000; op-1 reservó 500 y op-2 reservó 300 → quedan 200.
+    const milk = { id: 'milk-1', code: 'LM-LE-1', status: 'en_proceso', remainingQuantity: '200' };
     const order = { id: 'op-1', code: 'OP-1', status: 'open', milkInputs: [{ batchId: 'milk-1', liters: 500 }] };
     const other = { id: 'op-2', code: 'OP-2', status: 'open', milkInputs: [{ batchId: 'milk-1', liters: 300 }] };
-    const { service, batchesById } = makeService({ orders: [order, other], batches: [milk], movements: [] });
+    const movements = [
+      { id: 'm1', batchId: 'milk-1', type: 'out', quantity: '500', referenceId: 'op-1' },
+      { id: 'm2', batchId: 'milk-1', type: 'out', quantity: '300', referenceId: 'op-2' },
+    ];
+    const { service, batchesById, removedMovements } = makeService({ orders: [order, other], batches: [milk], movements });
 
     await service.remove('op-1');
 
-    expect(batchesById.get('milk-1').status).toBe('en_proceso');
+    // Se devuelven los 500 de op-1 (200 → 700); los 300 de op-2 siguen descontados.
+    expect(batchesById.get('milk-1').remainingQuantity).toBe('700');
+    // Solo se borra el movimiento de op-1.
+    expect(removedMovements.map((m: any) => m.id)).toEqual(['m1']);
   });
 });
 

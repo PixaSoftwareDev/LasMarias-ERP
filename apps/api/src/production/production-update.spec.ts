@@ -1,8 +1,8 @@
 import { ProductionService } from './production.service';
 
 // Tests del método UPDATE: editar una orden.
-// - ABIERTA: libera los lotes reservados y reserva los nuevos; NO consume stock ni corre la
-//   calculadora (eso es al cerrar).
+// - ABIERTA: la leche ya está descontada (reserva = consumo) → devuelve la leche vieja al silo y
+//   reserva/descuenta la nueva; NO corre la calculadora (eso es al cerrar).
 // - CERRADA: revierte su efecto y la vuelve a cerrar recalculando el costo; exige la producción
 //   real (actualOutputs). La reversión en sí está cubierta por production-remove.spec.
 // - CANCELADA: no se puede editar.
@@ -72,10 +72,22 @@ function makeService(existingOrder: any, milkBatches: any[]) {
     }),
   };
 
-  // La orden cerrada, al editarse, revierte primero su efecto (mismo camino que el borrado).
-  // Sin movimientos, la reversión es un no-op; solo hace falta que el repo exista.
+  // Movimientos de salida que la orden dejó al reservar (uno por input): los usa releaseReservedMilk
+  // para devolver la leche al editar una orden abierta (o reverseClosedOrderEffects si estaba cerrada).
+  const orderMovements = ((existingOrder.milkInputs ?? []) as any[]).map((mi, i) => ({
+    id: `mv-${i}`,
+    batchId: mi.batchId,
+    type: 'out',
+    quantity: String(mi.liters),
+    referenceId: existingOrder.id,
+  }));
   const movementRepo = {
-    find: jest.fn().mockResolvedValue([]),
+    find: jest.fn(({ where: { referenceId } }: any) =>
+      Promise.resolve(orderMovements.filter((m) => m.referenceId === referenceId)),
+    ),
+    create: jest.fn().mockImplementation((m) => ({ ...m })),
+    save: jest.fn().mockResolvedValue(undefined),
+    count: jest.fn().mockResolvedValue(1),
     remove: jest.fn().mockResolvedValue([]),
     createQueryBuilder: jest.fn(() => {
       const qb: any = {};
@@ -133,9 +145,10 @@ function openOrder(overrides: any = {}) {
 }
 
 describe('ProductionService.update — editar una orden abierta', () => {
-  it('cambia el lote y los litros: libera el viejo y reserva el nuevo', async () => {
+  it('cambia el lote y los litros: devuelve el viejo al silo y reserva/descuenta el nuevo', async () => {
+    // 'a' quedó en 500 tras reservar 500; al editar hacia 'b' la leche de 'a' vuelve al silo.
     const { service, savedBatches, getOrder } = makeService(openOrder(), [
-      batch('a', 'en_proceso'),
+      batch('a', 'en_proceso', '500'),
       batch('b', 'activo'),
     ]);
 
@@ -151,9 +164,13 @@ describe('ProductionService.update — editar una orden abierta', () => {
     expect(saved.totalMilkLiters).toBe('700');
     expect(saved.milkInputs.map((m: any) => m.batchId)).toEqual(['b']);
 
-    // El lote viejo 'a' se liberó (vuelve a activo) y el nuevo 'b' quedó reservado.
-    expect(savedBatches.find((b) => b.id === 'a')?.status).toBe('activo');
-    expect(savedBatches.find((b) => b.id === 'b')?.status).toBe('en_proceso');
+    // El lote viejo 'a' recupera sus 500 (500 → 1000) y queda activo; el nuevo 'b' se descuenta.
+    const a = savedBatches.find((b) => b.id === 'a');
+    expect(a?.status).toBe('activo');
+    expect(a?.remainingQuantity).toBe('1000');
+    const b = savedBatches.find((x) => x.id === 'b');
+    expect(b?.status).toBe('en_proceso');
+    expect(b?.remainingQuantity).toBe('300'); // 1000 − 700
   });
 
   it('deja actualizar las notas conservando el mismo código de orden', async () => {
@@ -200,14 +217,15 @@ describe('ProductionService.update — editar una orden abierta', () => {
   });
 
   it('frena si el lote nuevo no tiene litros suficientes', async () => {
-    const { service } = makeService(openOrder(), [batch('a', 'en_proceso', '100')]);
+    // Edita hacia un lote DISTINTO ('b') que solo tiene 100 L y se le piden 500.
+    const { service } = makeService(openOrder(), [batch('a', 'en_proceso', '500'), batch('b', 'activo', '100')]);
 
     await expect(
       service.update('order-1', {
         recipeId: 'rec-1',
         operatorId: 'op-1',
         startedAt: '2026-05-30T08:00:00Z',
-        milkInputs: [{ batchId: 'a', liters: 500 }],
+        milkInputs: [{ batchId: 'b', liters: 500 }],
       } as any),
     ).rejects.toThrow(/no tiene suficiente/);
   });

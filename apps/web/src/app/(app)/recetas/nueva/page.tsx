@@ -13,10 +13,12 @@ import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/page-header';
+import type { Product } from '@lasmarias/shared-schemas';
 import { productsApi, recipesApi, exchangeRatesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { formatMoney } from '@/lib/utils';
 import { currencySymbol, equivalentArs } from '@/features/currency';
+import { NewIngredientDialog } from '@/components/recipes/new-ingredient-dialog';
 
 interface FormValues {
   productId: string;
@@ -94,6 +96,8 @@ export default function NewRecipePage() {
 
   const [ingredients, setIngredients] = useState<IngredientRow[]>([]);
   const [byproducts, setByproducts] = useState<ByproductRow[]>([]);
+  // Fila de insumo que abrió el modal "Nuevo insumo" (para auto-seleccionar el creado en ella).
+  const [newInsumoForRow, setNewInsumoForRow] = useState<number | null>(null);
   // Campos de filas dinámicas que el usuario ya visitó (para validar en vivo, no recién al guardar).
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const touch = (key: string) => setTouched((s) => (s.has(key) ? s : new Set(s).add(key)));
@@ -185,19 +189,22 @@ export default function NewRecipePage() {
   function updateIngredient(idx: number, patch: Partial<IngredientRow>) {
     setIngredients((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
-  // Al elegir el insumo, traemos su precio de la ficha del producto (costo + moneda + unidad).
+  // Vuelca los datos de un producto (precio + moneda + unidad de su ficha) en una fila de insumo.
   // Queda EDITABLE a mano: sirve tanto para insumos con precio cargado como para la masa
   // comprada, donde el costo se ajusta en cada compra.
+  function applyProductToRow(idx: number, p: Product) {
+    const patch: Partial<IngredientRow> = { productId: p.id };
+    if (p.defaultCost != null && String(p.defaultCost) !== '') patch.unitCost = String(p.defaultCost);
+    if (p.defaultCostCurrency) patch.currency = p.defaultCostCurrency;
+    if ((['kg', 'litro', 'unidad', 'gramo'] as const).includes(p.unit as IngredientRow['unit']))
+      patch.unit = p.unit as IngredientRow['unit'];
+    updateIngredient(idx, patch);
+  }
+  // Al elegir el insumo del desplegable, traemos su ficha; si no se encontró, solo guardamos el id.
   function selectIngredientProduct(idx: number, productId: string) {
     const p = ingredientProducts.find((x) => x.id === productId);
-    const patch: Partial<IngredientRow> = { productId };
-    if (p) {
-      if (p.defaultCost != null && String(p.defaultCost) !== '') patch.unitCost = String(p.defaultCost);
-      if (p.defaultCostCurrency) patch.currency = p.defaultCostCurrency;
-      if ((['kg', 'litro', 'unidad', 'gramo'] as const).includes(p.unit as IngredientRow['unit']))
-        patch.unit = p.unit as IngredientRow['unit'];
-    }
-    updateIngredient(idx, patch);
+    if (p) applyProductToRow(idx, p);
+    else updateIngredient(idx, { productId });
   }
   function updateByproduct(idx: number, patch: Partial<ByproductRow>) {
     setByproducts((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -311,6 +318,13 @@ export default function NewRecipePage() {
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                     </select>
+                    <button
+                      type="button"
+                      onClick={() => setNewInsumoForRow(idx)}
+                      className="mt-1.5 text-left text-xs font-medium text-primary-700 underline"
+                    >
+                      ¿No está en la lista? Crear insumo nuevo
+                    </button>
                   </Field>
                   <Field label="Base de cálculo" htmlFor={`ing-basis-${idx}`} required>
                     <select
@@ -498,6 +512,15 @@ export default function NewRecipePage() {
           <Button type="submit" loading={create.isPending}>Crear receta</Button>
         </div>
       </form>
+
+      {/* Crear un insumo sin salir de la receta: al crearlo queda seleccionado en la fila que lo pidió. */}
+      <NewIngredientDialog
+        open={newInsumoForRow !== null}
+        onClose={() => setNewInsumoForRow(null)}
+        onCreated={(product) => {
+          if (newInsumoForRow !== null) applyProductToRow(newInsumoForRow, product);
+        }}
+      />
     </div>
   );
 }

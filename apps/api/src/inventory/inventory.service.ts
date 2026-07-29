@@ -236,6 +236,42 @@ export class InventoryService {
     return summary;
   }
 
+  // Elimina un INGRESO de stock cargado de más (la papelera de inventario): borra el lote y su
+  // movimiento de entrada, sin dejar rastro de "baja/vencido". Solo aplica a ingresos manuales
+  // (LM-IN) que estén INTACTOS: si ya se consumió, vendió o ajustó parte, se rechaza con aviso
+  // (en ese caso hay que darlo de baja, no borrarlo). Los lotes de producción, leche y ajustes
+  // se manejan desde sus propias pantallas.
+  async deleteStockEntry(batchId: string): Promise<{ deleted: true; code: string }> {
+    return this.dataSource.transaction(async (manager) => {
+      const batchRepo = manager.getRepository(BatchEntity);
+      const movementRepo = manager.getRepository(InventoryMovementEntity);
+
+      const batch = await batchRepo.findOne({ where: { id: batchId } });
+      if (!batch) throw new NotFoundException(`Lote ${batchId} no encontrado`);
+
+      const movements = await movementRepo.find({ where: { batchId } });
+      const isStockEntry =
+        batch.code.startsWith('LM-IN') && movements.some((m) => m.type === 'in' && m.referenceType === 'stock_entry');
+      if (!isStockEntry)
+        throw new BadRequestException(
+          `El lote ${batch.code} no es un ingreso de stock: se maneja desde su propia pantalla (producción, recepción o ajuste).`,
+        );
+
+      // Guarda: el ingreso tiene que estar intacto. Si tiene salidas/ajustes o el saldo bajó,
+      // significa que ya se usó parte → no se borra (se da de baja lo que quede).
+      const yaUsado =
+        movements.some((m) => m.type !== 'in') || Number(batch.remainingQuantity) !== Number(batch.initialQuantity);
+      if (yaUsado)
+        throw new BadRequestException(
+          `No se puede eliminar el lote ${batch.code}: ya se usó o se ajustó parte. Dalo de baja en su lugar.`,
+        );
+
+      await movementRepo.remove(movements);
+      await batchRepo.remove(batch);
+      return { deleted: true as const, code: batch.code };
+    });
+  }
+
   // Ingreso directo de stock (insumos/envases): crea un lote de entrada. CLAUDE.md §4.4.
   // No es el módulo de compras completo (diferido); es una carga simple para tener stock real.
   async addStockEntry(input: StockEntryInput, userId: string): Promise<InventoryMovement> {
@@ -424,7 +460,9 @@ export class InventoryService {
     const qb = this.batches
       .createQueryBuilder('b')
       .leftJoinAndSelect('b.product', 'p')
-      .where("b.status = 'activo'")
+      // Mismo criterio que milkBatches: 'en_proceso' con saldo disponible también se puede
+      // elegir (la masa reservada por otra orden abierta pero con kg de sobra debe aparecer).
+      .where("b.status IN ('activo', 'en_proceso')")
       .andWhere('b.remaining_quantity > 0');
     if (category) qb.andWhere('p.category = :category', { category });
     qb.orderBy('b.expiration_date', 'ASC').addOrderBy('b.code', 'ASC');
@@ -447,8 +485,12 @@ export class InventoryService {
   async milkBatches(warehouseId?: string): Promise<MilkBatchDto[]> {
     const qb = this.batches
       .createQueryBuilder('b')
+      // Incluye 'en_proceso': con "reservar = consumir" el saldo (remaining) ya está descontado,
+      // así que un lote reservado por otra orden abierta pero con litros disponibles TIENE que
+      // aparecer para elegir. Antes solo mostraba 'activo' y escondía tanques enteros que estaban
+      // en_proceso aunque tuvieran leche de sobra.
       .leftJoinAndSelect('b.warehouse', 'w')
-      .where("b.status = 'activo'")
+      .where("b.status IN ('activo', 'en_proceso')")
       .andWhere('b.product_id IS NULL')
       .andWhere('b.remaining_quantity > 0');
     if (warehouseId) qb.andWhere('b.warehouse_id = :warehouseId', { warehouseId });

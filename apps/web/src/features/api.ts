@@ -237,6 +237,9 @@ export const inventoryApi = {
   // Ajuste por conteo físico.
   countAdjust: (input: CountAdjustInput) =>
     api<{ adjusted: number }>('/api/inventory/count-adjust', { method: 'POST', body: input }),
+  // Eliminar un ingreso de stock intacto (papelera). Borra el lote + su movimiento, sin dejar baja.
+  deleteStockEntry: (batchId: string) =>
+    api<{ deleted: true; code: string }>(`/api/inventory/stock-entry/${batchId}`, { method: 'DELETE' }),
   // Cámaras / sectores físicos de almacenamiento (CLAUDE.md §4.4).
   // includeInactive=true para la pantalla de gestión (poder reactivar las desactivadas).
   listWarehouses: (includeInactive = false) =>

@@ -26,6 +26,9 @@ function makeService(
     milkProductId?: string | null;
     products?: Record<string, any>;
     milkRemaining?: string;
+    // false = orden VIEJA que quedó abierta antes del cambio (no descontó la leche al abrir);
+    // por defecto true = orden nueva (ya descontada al reservar).
+    milkAlreadyReserved?: boolean;
   } = {},
 ) {
   // Producto de cada input (para valuar masa a precio manual). Por defecto la leche es
@@ -98,6 +101,9 @@ function makeService(
       savedMovements.push(m);
       return Promise.resolve(m);
     }),
+    // Detección de retrocompat: ¿la orden ya registró la salida de leche al reservar? Por defecto
+    // sí (orden nueva). milkAlreadyReserved:false simula una orden vieja que quedó abierta.
+    count: jest.fn().mockResolvedValue(opts.milkAlreadyReserved === false ? 0 : 1),
   };
   const orderRepo = {
     // 1ra llamada: carga la orden a cerrar; 2da (reload final): la misma orden ya mutada.
@@ -139,25 +145,45 @@ function makeService(
 }
 
 describe('ProductionService.close', () => {
-  it('descuenta los litros de leche del lote consumido y registra la salida', async () => {
+  it('NO vuelve a descontar la leche al cerrar: ya salió del silo al reservar', async () => {
+    // El lote entra a close tal como lo dejó la reserva (en_proceso). Con la regla nueva la leche
+    // se descontó al ABRIR, así que cerrar no debe tocar el saldo ni registrar otra salida.
     const { service, savedBatches, savedMovements } = makeService();
 
     await service.close('order-1', {
       actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true }],
     } as any);
 
-    // El lote de leche queda en 0 y agotado (consumió los 1000 L).
+    // El saldo del lote de leche NO cambia al cerrar (se mantiene lo que dejó la reserva).
+    const milk = savedBatches.find((b) => b.id === 'milk-1');
+    expect(milk.remainingQuantity).toBe('1000');
+    // Solo se libera la marca de "en proceso": queda activo (todavía tiene saldo en el mock).
+    expect(milk.status).toBe('activo');
+    // Y NO se crea un nuevo movimiento de salida de leche al cerrar (ese se registró al reservar).
+    const milkOut = savedMovements.find((m) => m.reason === 'production' && m.type === 'out');
+    expect(milkOut).toBeUndefined();
+  });
+
+  it('RETROCOMPAT: una orden vieja que quedó abierta (sin descuento) SÍ descuenta la leche al cerrar', async () => {
+    // Solo aplica cuando NO hay movimiento de salida de la orden (milkAlreadyReserved:false).
+    // Para las órdenes nuevas esto nunca se dispara, así que no rompe nada a futuro.
+    const { service, savedBatches, savedMovements } = makeService({ milkAlreadyReserved: false });
+
+    await service.close('order-1', {
+      actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true }],
+    } as any);
+
+    // Al no haber salido antes, se descuenta al cerrar: 1000 → 0 y agotado.
     const milk = savedBatches.find((b) => b.id === 'milk-1');
     expect(milk.remainingQuantity).toBe('0');
     expect(milk.status).toBe('agotado');
-    // Hay un movimiento de salida de leche por producción.
+    // Y se registra su movimiento de salida (recién ahora).
     const milkOut = savedMovements.find((m) => m.reason === 'production' && m.type === 'out');
     expect(milkOut.quantity).toBe('1000');
   });
 
-  it('frena el doble consumo: no cierra si al lote de leche ya no le alcanza (otra orden lo consumió)', async () => {
-    // El lote quedó con 800 L (otra orden ya consumió parte) pero esta orden pide 1000.
-    const { service } = makeService({ milkRemaining: '800' });
+  it('RETROCOMPAT: la orden vieja tampoco cierra si al lote ya no le alcanza (guard anti-doble-consumo)', async () => {
+    const { service } = makeService({ milkAlreadyReserved: false, milkRemaining: '800' });
 
     await expect(
       service.close('order-1', {

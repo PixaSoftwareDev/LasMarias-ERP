@@ -37,7 +37,8 @@ import { ApiError } from '@/lib/api-client';
 import { formatDateTime, formatMoney } from '@/lib/utils';
 import { labelOr, movementReasonLabel, movementTypeLabel } from '@/lib/labels';
 import { CURRENCY_OPTIONS, currencySymbol, equivalentArs } from '@/features/currency';
-import { ivaFactor, type StockSummary, type DiscardReason, type Currency } from '@lasmarias/shared-schemas';
+import { ivaFactor, type StockSummary, type DiscardReason, type Currency, type InventoryMovement } from '@lasmarias/shared-schemas';
+import { useConfirm } from '@/hooks/use-confirm';
 
 type AdjustMode = 'discard' | 'count' | 'min';
 
@@ -506,6 +507,33 @@ export default function InventoryPage() {
   const stockQuery = useQuery({ queryKey: ['stock'], queryFn: () => inventoryApi.stock() });
   const movementsQuery = useQuery({ queryKey: ['inv-movements'], queryFn: () => inventoryApi.movements() });
 
+  const queryClient = useQueryClient();
+  const confirm = useConfirm();
+
+  // Papelera de ingresos: elimina un ingreso de stock cargado de más (lote + movimiento), sin
+  // dejar rastro de "baja". El backend solo lo permite si el ingreso está intacto.
+  const deleteEntry = useMutation({
+    mutationFn: (batchId: string) => inventoryApi.deleteStockEntry(batchId),
+    onSuccess: (r) => {
+      queryClient.invalidateQueries({ queryKey: ['stock'] });
+      queryClient.invalidateQueries({ queryKey: ['inv-movements'] });
+      queryClient.invalidateQueries({ queryKey: ['silos'] });
+      toast.success(`Ingreso del lote ${r.code} eliminado.`);
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo eliminar el ingreso.'),
+  });
+
+  async function handleDeleteEntry(m: InventoryMovement) {
+    const ok = await confirm({
+      title: 'Eliminar este ingreso de stock',
+      message: `Se va a eliminar el ingreso del lote ${m.batchCode ?? ''} (${m.productName ?? ''}, ${m.quantity} ${m.unit}) sin dejar rastro. Solo se puede si todavía no se usó nada de ese lote. Esta acción no se puede deshacer.`,
+      confirmLabel: 'Eliminar ingreso',
+      cancelLabel: 'Cancelar',
+      destructive: true,
+    });
+    if (ok) deleteEntry.mutate(m.batchId);
+  }
+
   const stock = stockQuery.data;
   const summary = useMemo(() => {
     if (!stock) return null;
@@ -624,6 +652,20 @@ export default function InventoryPage() {
                 )},
                 { key: 'qty', header: 'Cantidad', render: (m) => `${m.quantity} ${m.unit}`, align: 'right', sortValue: (m) => Number(m.quantity) },
                 { key: 'reason', header: 'Motivo', render: (m) => labelOr(movementReasonLabel, m.reason) },
+                // Papelera: solo en ingresos de stock por compra (los que se pueden eliminar).
+                { key: 'actions', header: '', align: 'right', render: (m) =>
+                  m.type === 'in' && m.reason === 'purchase' ? (
+                    <button
+                      type="button"
+                      aria-label={`Eliminar ingreso del lote ${m.batchCode ?? ''}`}
+                      onClick={() => handleDeleteEntry(m)}
+                      disabled={deleteEntry.isPending}
+                      className="flex min-h-touch min-w-touch items-center justify-center rounded-md text-foreground-muted transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-30"
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  ) : null,
+                },
               ]}
             />
           )}
