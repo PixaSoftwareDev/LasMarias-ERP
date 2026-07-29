@@ -1,8 +1,11 @@
 import { ProductionService } from './production.service';
 
-// Tests del método UPDATE: editar una orden ABIERTA (por si se cargó algo mal antes de cerrar).
-// Reglas: libera los lotes que la orden tenía reservados y reserva los nuevos; NO consume stock
-// ni corre la calculadora (eso es al cerrar); y una orden cerrada NO se puede editar.
+// Tests del método UPDATE: editar una orden.
+// - ABIERTA: libera los lotes reservados y reserva los nuevos; NO consume stock ni corre la
+//   calculadora (eso es al cerrar).
+// - CERRADA: revierte su efecto y la vuelve a cerrar recalculando el costo; exige la producción
+//   real (actualOutputs). La reversión en sí está cubierta por production-remove.spec.
+// - CANCELADA: no se puede editar.
 
 jest.mock('../batches/batch.entity', () => ({ BatchEntity: { name: 'BatchEntity' } }));
 jest.mock('../inventory/inventory-movement.entity', () => ({
@@ -69,12 +72,27 @@ function makeService(existingOrder: any, milkBatches: any[]) {
     }),
   };
 
+  // La orden cerrada, al editarse, revierte primero su efecto (mismo camino que el borrado).
+  // Sin movimientos, la reversión es un no-op; solo hace falta que el repo exista.
+  const movementRepo = {
+    find: jest.fn().mockResolvedValue([]),
+    remove: jest.fn().mockResolvedValue([]),
+    createQueryBuilder: jest.fn(() => {
+      const qb: any = {};
+      qb.where = jest.fn(() => qb);
+      qb.andWhere = jest.fn(() => qb);
+      qb.getCount = jest.fn(() => Promise.resolve(0));
+      return qb;
+    }),
+  };
+
   const manager = {
     query: jest.fn().mockResolvedValue(undefined),
     getRepository: jest.fn((entity: any) => {
       const name = entity?.name ?? '';
       if (name === 'BatchEntity') return batchRepo;
       if (name === 'ProductionOrderEntity') return orderRepo;
+      if (name === 'InventoryMovementEntity') return movementRepo;
       throw new Error(`repo no mockeado: ${name}`);
     }),
   };
@@ -154,8 +172,8 @@ describe('ProductionService.update — editar una orden abierta', () => {
     expect(saved.notes).toBe('corregido');
   });
 
-  it('rechaza editar una orden cerrada', async () => {
-    const { service } = makeService(openOrder({ status: 'closed' }), [batch('a', 'activo')]);
+  it('rechaza editar una orden cancelada', async () => {
+    const { service } = makeService(openOrder({ status: 'cancelled' }), [batch('a', 'activo')]);
 
     await expect(
       service.update('order-1', {
@@ -164,7 +182,21 @@ describe('ProductionService.update — editar una orden abierta', () => {
         startedAt: '2026-05-30T08:00:00Z',
         milkInputs: [{ batchId: 'a', liters: 500 }],
       } as any),
-    ).rejects.toThrow(/cerrada/);
+    ).rejects.toThrow(/cancelada/);
+  });
+
+  it('al editar una orden cerrada exige la producción real para recalcular el costo', async () => {
+    const { service } = makeService(openOrder({ status: 'closed' }), [batch('a', 'activo')]);
+
+    await expect(
+      service.update('order-1', {
+        recipeId: 'rec-1',
+        operatorId: 'op-1',
+        startedAt: '2026-05-30T08:00:00Z',
+        milkInputs: [{ batchId: 'a', liters: 500 }],
+        // Falta actualOutputs a propósito.
+      } as any),
+    ).rejects.toThrow(/producción real/);
   });
 
   it('frena si el lote nuevo no tiene litros suficientes', async () => {

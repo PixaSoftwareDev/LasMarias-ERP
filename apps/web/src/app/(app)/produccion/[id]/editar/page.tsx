@@ -110,6 +110,14 @@ export default function EditProductionPage() {
   const [inputs, setInputs] = useState<MilkInputRow[]>([{ batchId: '', liters: 0 }]);
   const [seeded, setSeeded] = useState(false);
 
+  // Solo se usan al editar una orden CERRADA: producción real (kg por producto), cámara destino
+  // y rendimiento esperado. Al guardar se revierte el stock y se vuelve a cerrar recalculando.
+  const [quantities, setQuantities] = useState<Record<string, number | undefined>>({});
+  const [warehouseId, setWarehouseId] = useState('');
+  const [expectedYield, setExpectedYield] = useState('');
+
+  const wasClosed = orderQuery.data?.status === 'closed';
+
   // Precargar el formulario con los datos de la orden una sola vez, cuando llega del servidor.
   useEffect(() => {
     const order = orderQuery.data;
@@ -123,6 +131,12 @@ export default function EditProductionPage() {
         ? order.milkInputs.map((mi) => ({ batchId: mi.batchId, liters: mi.liters }))
         : [{ batchId: '', liters: 0 }],
     );
+    // Si estaba cerrada, precargar la producción real y el esperado para no perderlos al recalcular.
+    if (order.status === 'closed') {
+      setQuantities(Object.fromEntries(order.actualOutputs.map((o) => [o.productId, o.quantity])));
+      const std = order.costBreakdown?.estandar?.rendimiento;
+      if (std) setExpectedYield(std);
+    }
     setSeeded(true);
   }, [orderQuery.data, seeded]);
 
@@ -141,6 +155,19 @@ export default function EditProductionPage() {
         startedAt: new Date(`${startedDate}T12:00:00`).toISOString(),
         milkInputs: inputs.filter((i) => i.batchId && i.liters > 0),
         notes: notes || undefined,
+        // Solo si la orden estaba cerrada: mandar la producción real para recalcular el costo.
+        ...(wasClosed
+          ? {
+              actualOutputs: (orderQuery.data?.expectedOutputs ?? []).map((o) => ({
+                productId: o.productId,
+                quantity: Number(quantities[o.productId] ?? 0),
+                isPrincipal: o.isPrincipal,
+              })),
+              warehouseId: warehouseId || undefined,
+              expectedYieldKgPerLiter:
+                expectedYield !== '' && Number(expectedYield) > 0 ? Number(expectedYield) : undefined,
+            }
+          : {}),
       }),
     onSuccess: (r) => {
       queryClient.invalidateQueries();
@@ -184,29 +211,44 @@ export default function EditProductionPage() {
     );
   }
 
-  // Solo las órdenes abiertas se pueden editar; una cerrada ya movió stock y costo.
-  const editable = order.status === 'open' || order.status === 'in_progress';
-  if (!editable) {
+  // Una orden cancelada no se edita. Las abiertas y las cerradas sí (la cerrada revierte y recalcula).
+  if (order.status === 'cancelled') {
     return (
       <div className="flex flex-col gap-6">
-        <PageHeader title={`Orden ${order.code}`} description="Esta orden ya está cerrada." action={<Button asChild variant="ghost"><Link href="/produccion"><ArrowLeft className="h-4 w-4" /> Volver</Link></Button>} />
+        <PageHeader title={`Orden ${order.code}`} description="Esta orden fue cancelada." action={<Button asChild variant="ghost"><Link href="/produccion"><ArrowLeft className="h-4 w-4" /> Volver</Link></Button>} />
         <Card>
           <CardContent className="py-6 text-sm text-foreground-muted">
-            La orden <span className="font-mono">{order.code}</span> ya está cerrada, así que no se puede editar. Si algo
-            quedó mal, borrala desde la lista y volvé a cargarla.
+            La orden <span className="font-mono">{order.code}</span> está cancelada, así que no se puede editar.
           </CardContent>
         </Card>
       </div>
     );
   }
 
+  const principalOutputs = (order.expectedOutputs ?? []).filter((o) => o.isPrincipal);
+  const byproductOutputs = (order.expectedOutputs ?? []).filter((o) => !o.isPrincipal);
+  // Para una orden cerrada necesitamos al menos un kg de producto principal para poder recalcular.
+  const closedReady = !wasClosed || principalOutputs.some((o) => Number(quantities[o.productId] ?? 0) > 0);
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title={`Editar orden ${order.code}`}
-        description="Corregí lo que se haya cargado mal. La orden sigue abierta: no se consumió stock todavía."
+        description={
+          wasClosed
+            ? 'Esta orden está cerrada. Al guardar se revierte su stock y se vuelve a cerrar recalculando el costo.'
+            : 'Corregí lo que se haya cargado mal. La orden sigue abierta: no se consumió stock todavía.'
+        }
         action={<Button asChild variant="ghost"><Link href="/produccion"><ArrowLeft className="h-4 w-4" /> Volver</Link></Button>}
       />
+
+      {wasClosed && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Esta orden ya generó stock y su costo. Al guardar se devuelve al stock lo que consumió, se
+          borran los lotes que produjo y se vuelve a cerrar con los datos nuevos.{' '}
+          <span className="font-medium">Si algún lote producido ya se vendió o se usó en otra elaboración, no se podrá editar.</span>
+        </div>
+      )}
 
       <Card>
         <CardHeader><CardTitle>Datos</CardTitle></CardHeader>
@@ -301,9 +343,95 @@ export default function EditProductionPage() {
         </CardContent>
       </Card>
 
+      {wasClosed && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Producción real</CardTitle>
+            <p className="text-sm text-foreground-muted">
+              Los kilos que realmente se obtuvieron. Con esto se recalcula el costo al volver a cerrar la orden.
+            </p>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            {principalOutputs.map((o) => (
+              <Field
+                key={o.productId}
+                label={`${o.productName} — kg producidos`}
+                htmlFor={`out-${o.productId}`}
+                hint={o.quantity > 0 ? `Esperado: ${o.quantity.toLocaleString('es-AR', { maximumFractionDigits: 1 })} ${o.unit}` : undefined}
+              >
+                <Input
+                  id={`out-${o.productId}`}
+                  type="number"
+                  inputMode="decimal"
+                  step="0.1"
+                  min={0}
+                  placeholder="Ej: 120"
+                  value={quantities[o.productId] ?? ''}
+                  onChange={(e) =>
+                    setQuantities((q) => ({ ...q, [o.productId]: e.target.value === '' ? undefined : Number(e.target.value) }))
+                  }
+                />
+              </Field>
+            ))}
+
+            {byproductOutputs.length > 0 && (
+              <div className="flex flex-col gap-4 border-t border-border-subtle pt-4">
+                <p className="text-sm font-medium text-foreground">Subproductos (opcional)</p>
+                {byproductOutputs.map((o) => (
+                  <Field
+                    key={o.productId}
+                    label={`${o.productName} — ${o.unit} obtenidos`}
+                    htmlFor={`out-${o.productId}`}
+                    hint={o.quantity > 0 ? `Esperado: ${o.quantity.toLocaleString('es-AR', { maximumFractionDigits: 1 })} ${o.unit}` : undefined}
+                  >
+                    <Input
+                      id={`out-${o.productId}`}
+                      type="number"
+                      inputMode="decimal"
+                      step="0.1"
+                      min={0}
+                      placeholder="Ej: 15"
+                      value={quantities[o.productId] ?? ''}
+                      onChange={(e) =>
+                        setQuantities((q) => ({ ...q, [o.productId]: e.target.value === '' ? undefined : Number(e.target.value) }))
+                      }
+                    />
+                  </Field>
+                ))}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 gap-4 border-t border-border-subtle pt-4 sm:grid-cols-2">
+              <Field label="Rendimiento esperado (kg por litro)" htmlFor="expectedYield" hint="Opcional. Habilita el real vs esperado.">
+                <Input
+                  id="expectedYield"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.001"
+                  min={0}
+                  placeholder="Ej: 0.10"
+                  value={expectedYield}
+                  onChange={(e) => setExpectedYield(e.target.value)}
+                />
+              </Field>
+              <Field label="Cámara / sector destino" htmlFor="warehouseId" hint="Dónde se guardan los lotes de producto. Opcional.">
+                <select id="warehouseId" className={SELECT_CLASS} value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
+                  <option value="">Sin asignar</option>
+                  {(warehousesQuery.data ?? []).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                </select>
+              </Field>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={() => router.push('/produccion')}>Cancelar</Button>
-        <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!recipeId || !startedDate || inputs.every((i) => !i.batchId)}>
+        <Button
+          onClick={() => save.mutate()}
+          loading={save.isPending}
+          disabled={!recipeId || !startedDate || inputs.every((i) => !i.batchId) || !closedReady}
+        >
           Guardar cambios
         </Button>
       </div>

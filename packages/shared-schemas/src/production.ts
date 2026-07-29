@@ -105,6 +105,24 @@ export const openProductionInputSchema = z.object({
 });
 export type OpenProductionInput = z.infer<typeof openProductionInputSchema>;
 
+// Editar una orden. Los campos de OPEN siempre aplican (leche, receta, fecha, notas).
+// Los campos de CIERRE (producción real) solo se usan cuando la orden editada ya estaba
+// CERRADA: al guardar se revierte su efecto y se vuelve a cerrar recalculando el costo.
+export const updateProductionInputSchema = openProductionInputSchema.extend({
+  actualOutputs: z
+    .array(
+      z.object({
+        productId: uuidSchema,
+        quantity: z.number().nonnegative(),
+        isPrincipal: z.boolean(),
+      }),
+    )
+    .optional(),
+  warehouseId: uuidSchema.optional(),
+  expectedYieldKgPerLiter: z.number().positive().optional(),
+});
+export type UpdateProductionInput = z.infer<typeof updateProductionInputSchema>;
+
 export const closeProductionInputSchema = z.object({
   actualOutputs: z.array(
     z.object({

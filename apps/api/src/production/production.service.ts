@@ -8,11 +8,13 @@ import type {
   ProductionMilkInput,
   ProductionOrder,
   ProductionOutput,
+  UpdateProductionInput,
 } from '@lasmarias/shared-schemas';
 import { ProductionOrderEntity } from './production-order.entity';
 import { RecipesService } from '../recipes/recipes.service';
 import { BatchEntity } from '../batches/batch.entity';
 import { ProductEntity } from '../products/product.entity';
+import { RecipeEntity, RecipeVersionEntity } from '../recipes/recipe.entity';
 import { InventoryMovementEntity } from '../inventory/inventory-movement.entity';
 import { computeByproducts, computeYield } from '../recipes/yield-calculator';
 import {
@@ -151,11 +153,13 @@ export class ProductionService {
     });
   }
 
-  // Edita una orden ABIERTA (por si se cargó algo mal antes de cerrarla): receta, fecha,
-  // lotes/litros y notas. Es seguro porque una orden abierta todavía no consumió stock ni
-  // corrió la calculadora — solo tiene lotes reservados. Libera las reservas viejas y aplica
-  // las nuevas, igual que abrir. Una orden cerrada NO se edita (hay que borrarla y rehacerla).
-  async update(id: string, input: OpenProductionInput): Promise<ProductionOrder> {
+  // Edita una orden (por si se cargó algo mal). Según el estado:
+  // - ABIERTA/en curso: solo tiene leche reservada, no consumió nada. Libera las reservas
+  //   viejas y aplica las nuevas. Simple y seguro; la calculadora no se toca.
+  // - CERRADA: ya consumió stock y corrió la calculadora. Se REVIERTE su efecto (con el mismo
+  //   guard del borrado: si el producto ya se vendió o se usó en otra elaboración, se rechaza)
+  //   y se vuelve a cerrar con los datos nuevos, recalculando el costo. Todo en una transacción.
+  async update(id: string, input: UpdateProductionInput): Promise<ProductionOrder> {
     const operator = await this.users.findById(input.operatorId);
 
     return this.dataSource.transaction(async (manager) => {
@@ -164,23 +168,29 @@ export class ProductionService {
 
       const order = await orderRepo.findOne({ where: { id } });
       if (!order) throw new NotFoundException(`Orden de producción ${id} no encontrada`);
-      if (order.status !== 'open' && order.status !== 'in_progress')
-        throw new ForbiddenException(
-          `La orden ${order.code} ya está cerrada: no se puede editar. Si algo quedó mal, borrala y volvé a cargarla.`,
-        );
+      if (order.status === 'cancelled')
+        throw new ForbiddenException(`La orden ${order.code} está cancelada y no se puede editar.`);
 
-      // Liberar los lotes de leche que esta orden tenía reservados, salvo que otra orden
-      // abierta también los use (mismo criterio que el borrado de una orden abierta).
-      const others = await orderRepo.find({ where: { status: In(['open', 'in_progress']) } });
-      const stillInUse = new Set(
-        others.filter((o) => o.id !== order.id).flatMap((o) => o.milkInputs.map((mi) => mi.batchId)),
-      );
-      for (const mi of order.milkInputs) {
-        if (stillInUse.has(mi.batchId)) continue;
-        const batch = await batchRepo.findOne({ where: { id: mi.batchId } });
-        if (batch && batch.status === 'en_proceso') {
-          batch.status = 'activo';
-          await batchRepo.save(batch);
+      const wasClosed = order.status === 'closed';
+
+      // Deshacer el efecto anterior de la orden en el stock, según su estado.
+      if (wasClosed) {
+        // Cerrada: revierte el consumo de leche/insumos y elimina los lotes producidos (con guard).
+        await this.reverseClosedOrderEffects(manager, order);
+      } else {
+        // Abierta/en curso: solo libera los lotes de leche reservados, salvo que otra orden
+        // abierta también los use.
+        const others = await orderRepo.find({ where: { status: In(['open', 'in_progress']) } });
+        const stillInUse = new Set(
+          others.filter((o) => o.id !== order.id).flatMap((o) => o.milkInputs.map((mi) => mi.batchId)),
+        );
+        for (const mi of order.milkInputs) {
+          if (stillInUse.has(mi.batchId)) continue;
+          const batch = await batchRepo.findOne({ where: { id: mi.batchId } });
+          if (batch && batch.status === 'en_proceso') {
+            batch.status = 'activo';
+            await batchRepo.save(batch);
+          }
         }
       }
 
@@ -196,10 +206,35 @@ export class ProductionService {
       order.totalMilkLiters = String(plan.totalLiters);
       order.notes = input.notes ?? null;
       // El código de la orden se conserva (se asignó al abrir); no se regenera aunque cambie la fecha.
-      const saved = await orderRepo.save(order);
+
+      if (wasClosed) {
+        // Volver a cerrar con la producción real nueva → recalcula el costo con la calculadora.
+        if (!input.actualOutputs || input.actualOutputs.length === 0)
+          throw new BadRequestException(
+            'Para editar una orden cerrada tenés que cargar la producción real (kg del producto).',
+          );
+        const recipeEntity = await manager.getRepository(RecipeEntity).findOneByOrFail({ id: order.recipeId });
+        const versionEntity = await manager
+          .getRepository(RecipeVersionEntity)
+          .findOneByOrFail({ id: order.recipeVersionId });
+        await this.applyClose(
+          manager,
+          order,
+          {
+            actualOutputs: input.actualOutputs,
+            warehouseId: input.warehouseId,
+            expectedYieldKgPerLiter: input.expectedYieldKgPerLiter,
+            notes: input.notes,
+          },
+          recipeEntity,
+          versionEntity,
+        );
+      } else {
+        await orderRepo.save(order);
+      }
 
       const reloaded = await orderRepo.findOne({
-        where: { id: saved.id },
+        where: { id: order.id },
         relations: { recipe: true, operator: true },
       });
       return this.toDto(reloaded!);
@@ -216,9 +251,27 @@ export class ProductionService {
       if (order.status === 'closed') throw new ForbiddenException(`La orden ${order.code} ya está cerrada`);
       if (order.status === 'cancelled') throw new ForbiddenException(`La orden ${order.code} fue cancelada`);
 
-      const recipe = order.recipe;
-      const version = order.recipeVersion;
+      await this.applyClose(manager, order, input, order.recipe, order.recipeVersion);
 
+      const reloaded = await manager.getRepository(ProductionOrderEntity).findOne({
+        where: { id: order.id },
+        relations: { recipe: true, operator: true },
+      });
+      return this.toDto(reloaded!);
+    });
+  }
+
+  // Corazón del sistema: consume la materia prima e insumos, corre la calculadora de costo
+  // (real vs estándar), crea el/los lote(s) de producto con su costo/kg sellado y marca la
+  // orden como cerrada. Lo usan CERRAR y también EDITAR una orden cerrada (tras revertir su
+  // efecto anterior). Recibe la receta y la versión a usar como parámetros.
+  private async applyClose(
+    manager: import('typeorm').EntityManager,
+    order: ProductionOrderEntity,
+    input: CloseProductionInput,
+    recipe: RecipeEntity,
+    version: RecipeVersionEntity,
+  ): Promise<void> {
       // --- 1. Descontar la materia prima principal (leche o masa) y recolectar su costo ---
       // primaryInputs alimenta la calculadora: cada lote consumido con su costo unitario.
       // En leche→masa son litros de leche ($/litro); en masa→mozzarella son kg de masa
@@ -499,14 +552,7 @@ export class ProductionService {
       order.unitCost = realCost.costoPorKg;
       order.costBreakdown = { real: realCost, estandar: estandarCost, variance };
       if (input.notes) order.notes = input.notes;
-      const saved = await manager.getRepository(ProductionOrderEntity).save(order);
-
-      const reloaded = await manager.getRepository(ProductionOrderEntity).findOne({
-        where: { id: saved.id },
-        relations: { recipe: true, operator: true },
-      });
-      return this.toDto(reloaded!);
-    });
+      await manager.getRepository(ProductionOrderEntity).save(order);
   }
 
   // Borra una orden deshaciendo su efecto en stock. NO recalcula ningún costo: solo
@@ -544,39 +590,7 @@ export class ProductionService {
       }
 
       if (order.status === 'closed') {
-        const movements = await movementRepo.find({
-          where: { referenceType: 'production_order', referenceId: order.id },
-        });
-        const producedBatchIds = [...new Set(movements.filter((m) => m.type === 'in').map((m) => m.batchId))];
-
-        // Guardia: lo producido tiene que estar intacto (ni vendido ni consumido después).
-        for (const batchId of producedBatchIds) {
-          const batch = await batchRepo.findOne({ where: { id: batchId } });
-          if (!batch) continue;
-          const usedElsewhere = await movementRepo
-            .createQueryBuilder('m')
-            .where('m.batch_id = :batchId', { batchId })
-            .andWhere('m.reference_id IS DISTINCT FROM :orderId', { orderId: order.id })
-            .getCount();
-          if (usedElsewhere > 0 || Number(batch.remainingQuantity) !== Number(batch.initialQuantity)) {
-            throw new BadRequestException(
-              `No se puede borrar la orden ${order.code}: el lote ${batch.code} ya se usó (venta u otra elaboración). Anulá primero ese movimiento.`,
-            );
-          }
-        }
-
-        // Devolver al stock lo que la orden consumió (leche/masa e insumos por FEFO).
-        for (const m of movements) {
-          if (m.type !== 'out') continue;
-          const batch = await batchRepo.findOne({ where: { id: m.batchId } });
-          if (!batch) continue;
-          batch.remainingQuantity = String(round3(Number(batch.remainingQuantity) + Number(m.quantity)));
-          if (batch.status === 'agotado' && Number(batch.remainingQuantity) > 0) batch.status = 'activo';
-          await batchRepo.save(batch);
-        }
-
-        if (movements.length > 0) await movementRepo.remove(movements);
-        if (producedBatchIds.length > 0) await batchRepo.delete(producedBatchIds);
+        await this.reverseClosedOrderEffects(manager, order);
         await orderRepo.remove(order);
         return { deleted: true as const, code: order.code };
       }
@@ -585,6 +599,54 @@ export class ProductionService {
       await orderRepo.remove(order);
       return { deleted: true as const, code: order.code };
     });
+  }
+
+  // Revierte el efecto en stock de una orden CERRADA: devuelve la leche/masa e insumos que
+  // consumió y elimina los lotes que produjo. NO toca la orden en sí — eso lo decide quien
+  // llama (borrar la elimina; editar la vuelve a cerrar con datos nuevos). Rechaza si lo
+  // producido ya se usó (venta u otra elaboración): revertir ahí rompería la trazabilidad y
+  // el costo encadenado de lo que vino después.
+  private async reverseClosedOrderEffects(
+    manager: import('typeorm').EntityManager,
+    order: ProductionOrderEntity,
+  ): Promise<void> {
+    const batchRepo = manager.getRepository(BatchEntity);
+    const movementRepo = manager.getRepository(InventoryMovementEntity);
+    const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+    const movements = await movementRepo.find({
+      where: { referenceType: 'production_order', referenceId: order.id },
+    });
+    const producedBatchIds = [...new Set(movements.filter((m) => m.type === 'in').map((m) => m.batchId))];
+
+    // Guardia: lo producido tiene que estar intacto (ni vendido ni consumido después).
+    for (const batchId of producedBatchIds) {
+      const batch = await batchRepo.findOne({ where: { id: batchId } });
+      if (!batch) continue;
+      const usedElsewhere = await movementRepo
+        .createQueryBuilder('m')
+        .where('m.batch_id = :batchId', { batchId })
+        .andWhere('m.reference_id IS DISTINCT FROM :orderId', { orderId: order.id })
+        .getCount();
+      if (usedElsewhere > 0 || Number(batch.remainingQuantity) !== Number(batch.initialQuantity)) {
+        throw new BadRequestException(
+          `No se puede modificar la orden ${order.code}: el lote ${batch.code} ya se usó (venta u otra elaboración). Anulá primero ese movimiento.`,
+        );
+      }
+    }
+
+    // Devolver al stock lo que la orden consumió (leche/masa e insumos por FEFO).
+    for (const m of movements) {
+      if (m.type !== 'out') continue;
+      const batch = await batchRepo.findOne({ where: { id: m.batchId } });
+      if (!batch) continue;
+      batch.remainingQuantity = String(round3(Number(batch.remainingQuantity) + Number(m.quantity)));
+      if (batch.status === 'agotado' && Number(batch.remainingQuantity) > 0) batch.status = 'activo';
+      await batchRepo.save(batch);
+    }
+
+    if (movements.length > 0) await movementRepo.remove(movements);
+    if (producedBatchIds.length > 0) await batchRepo.delete(producedBatchIds);
   }
 
   // Secuencia atómica por día con pg_advisory_xact_lock (mismo patrón que recepciones).

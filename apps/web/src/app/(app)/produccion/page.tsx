@@ -131,9 +131,18 @@ export default function ProductionPage() {
                       </Button>
                     </>
                   ) : o.status === 'closed' ? (
-                    <Button asChild size="sm" variant="ghost" onClick={(e) => e.stopPropagation()}>
-                      <Link href={`/produccion/${o.id}/cerrar`}>Ver costo</Link>
-                    </Button>
+                    <>
+                      {canDelete && (
+                        <Button asChild size="sm" variant="ghost" onClick={(e) => e.stopPropagation()}>
+                          <Link href={`/produccion/${o.id}/editar`} aria-label={`Editar orden ${o.code}`}>
+                            <Pencil className="h-4 w-4" /> Editar
+                          </Link>
+                        </Button>
+                      )}
+                      <Button asChild size="sm" variant="ghost" onClick={(e) => e.stopPropagation()}>
+                        <Link href={`/produccion/${o.id}/cerrar`}>Ver costo</Link>
+                      </Button>
+                    </>
                   ) : null}
                   {canDelete && (
                     <button

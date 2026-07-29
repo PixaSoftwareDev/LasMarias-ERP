@@ -180,8 +180,22 @@ export const productionApi = {
   get: (id: string) => api<ProductionOrder>(`/api/production-orders/${id}`),
   open: (input: { recipeId: string; operatorId: string; startedAt: string; milkInputs: { batchId: string; liters: number }[]; notes?: string }) =>
     api<ProductionOrder>('/api/production-orders/open', { method: 'POST', body: input }),
-  update: (id: string, input: { recipeId: string; operatorId: string; startedAt: string; milkInputs: { batchId: string; liters: number }[]; notes?: string }) =>
-    api<ProductionOrder>(`/api/production-orders/${id}`, { method: 'PATCH', body: input }),
+  // Editar. Para una orden ABIERTA alcanza con los campos de apertura. Para una CERRADA hay que
+  // mandar además la producción real (actualOutputs/warehouseId/expectedYieldKgPerLiter): el
+  // backend revierte el efecto anterior y la vuelve a cerrar recalculando el costo.
+  update: (
+    id: string,
+    input: {
+      recipeId: string;
+      operatorId: string;
+      startedAt: string;
+      milkInputs: { batchId: string; liters: number }[];
+      notes?: string;
+      actualOutputs?: { productId: string; quantity: number; isPrincipal: boolean }[];
+      warehouseId?: string;
+      expectedYieldKgPerLiter?: number;
+    },
+  ) => api<ProductionOrder>(`/api/production-orders/${id}`, { method: 'PATCH', body: input }),
   close: (id: string, input: { actualOutputs: { productId: string; quantity: number; isPrincipal: boolean }[]; warehouseId?: string; expectedYieldKgPerLiter?: number; notes?: string }) =>
     api<ProductionOrder>(`/api/production-orders/${id}/close`, { method: 'POST', body: input }),
   remove: (id: string) =>

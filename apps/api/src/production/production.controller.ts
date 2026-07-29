@@ -2,8 +2,10 @@ import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, UseGu
 import {
   closeProductionInputSchema,
   openProductionInputSchema,
+  updateProductionInputSchema,
   type CloseProductionInput,
   type OpenProductionInput,
+  type UpdateProductionInput,
 } from '@lasmarias/shared-schemas';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -34,12 +36,13 @@ export class ProductionController {
     return this.production.open(body);
   }
 
-  // Editar una orden abierta (por si se cargó algo mal antes de cerrarla). Misma entrada que abrir.
+  // Editar una orden (por si se cargó algo mal). Abierta: leche/receta/fecha/notas. Cerrada:
+  // además la producción real, y se recalcula el costo revirtiendo y volviendo a cerrar.
   @Patch(':id')
   @Roles('admin', 'gerente', 'operario')
   update(
     @Param('id', new ParseUUIDPipe()) id: string,
-    @Body(new ZodValidationPipe(openProductionInputSchema)) body: OpenProductionInput,
+    @Body(new ZodValidationPipe(updateProductionInputSchema)) body: UpdateProductionInput,
   ) {
     return this.production.update(id, body);
   }
