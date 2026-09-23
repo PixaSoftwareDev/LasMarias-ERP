@@ -209,6 +209,12 @@ function StockRow({
 }
 
 // --- Formulario de ingreso de stock (insumos/envases) ---
+// Fecha de hoy en formato YYYY-MM-DD según el reloj local (no UTC, que corre un día en Argentina).
+function todayLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHints: StockSummary[] }) {
   const queryClient = useQueryClient();
   const productsQuery = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
@@ -225,6 +231,9 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
   const [currency, setCurrency] = useState<Currency>('ARS');
   const [warehouseId, setWarehouseId] = useState('');
   const [supplierLot, setSupplierLot] = useState('');
+  // Fecha real del ingreso (queda como fecha del lote): hoy por defecto, editable.
+  const [entryDate, setEntryDate] = useState(todayLocal());
+  const entryDateFutura = entryDate > todayLocal();
 
   const entryProducts = useMemo(
     () => (productsQuery.data ?? []).filter((p) => p.isActive),
@@ -277,6 +286,8 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
         currency,
         warehouseId: warehouseId || undefined,
         supplierLotNumber: supplierLot.trim() || undefined,
+        // Mediodía local: evita que el huso horario corra la fecha al día anterior/siguiente.
+        entryDate: new Date(`${entryDate}T12:00:00`).toISOString(),
         confirmDuplicate,
       }),
     onSuccess: () => {
@@ -299,7 +310,7 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
   });
 
   const canSave =
-    !!productId && Number(quantity) > 0 && !save.isPending && (!lotRequired || supplierLot.trim() !== '');
+    !!productId && Number(quantity) > 0 && !save.isPending && (!lotRequired || supplierLot.trim() !== '') && !!entryDate && !entryDateFutura;
 
   return (
     <Card>
@@ -328,6 +339,15 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
                 </span>
               </p>
             )}
+          </Field>
+          <Field
+            label="Fecha del ingreso"
+            htmlFor="entry-date"
+            required
+            hint="Por defecto es hoy. Si estás cargando un ingreso de otro día, poné esa fecha."
+            error={entryDateFutura ? 'La fecha no puede ser futura.' : undefined}
+          >
+            <Input id="entry-date" type="date" value={entryDate} max={todayLocal()} onChange={(e) => setEntryDate(e.target.value)} />
           </Field>
           <Field label="Cantidad" htmlFor="entry-qty" required>
             <Input id="entry-qty" type="number" inputMode="decimal" step="0.01" min={0} placeholder="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} />

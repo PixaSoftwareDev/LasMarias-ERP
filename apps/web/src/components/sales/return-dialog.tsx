@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { Undo2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Field } from '@/components/ui/field';
 import { ApiError } from '@/lib/api-client';
 import { salesApi } from '@/features/api';
 import { formatMoney as money } from '@/lib/utils';
@@ -17,6 +18,11 @@ interface Props {
   onDone: () => void;
 }
 
+// Fecha (Date) → "aaaa-mm-dd" en hora local, para el <input type="date">.
+function aInputDate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // Devolución de un despacho (CLAUDE.md §4.6 — devoluciones con ajuste de stock y
 // nota de crédito). El usuario elige cuánto devolver de cada producto (hasta lo
 // despachado). El backend repone stock y acredita en cuenta corriente.
@@ -26,6 +32,13 @@ export function ReturnDialog({ order, onClose, onDone }: Props) {
   // Bultos a devolver por productId. Solo se pide en las líneas que salieron con bultos.
   const [bultos, setBultos] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState('');
+  // Fecha real de la devolución: hoy por defecto, editable (se cargan atrasadas). No puede
+  // ser futura ni anterior a la venta.
+  const hoy = aInputDate(new Date());
+  const diaVenta = aInputDate(new Date(order.dispatchedAt));
+  const [fecha, setFecha] = useState(hoy);
+  const fechaError =
+    fecha > hoy ? 'La fecha no puede ser futura.' : fecha < diaVenta ? 'No puede ser anterior a la venta.' : undefined;
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -67,6 +80,8 @@ export function ReturnDialog({ order, onClose, onDone }: Props) {
           };
         }),
         notes: notes || undefined,
+        // Mediodía local: evita que el huso horario corra la fecha al día anterior/siguiente.
+        occurredAt: new Date(`${fecha}T12:00:00`).toISOString(),
       }),
     onSuccess: (cn) => {
       toast.success(
@@ -78,7 +93,7 @@ export function ReturnDialog({ order, onClose, onDone }: Props) {
       toast.error(e instanceof ApiError ? e.message : 'No se pudo registrar la devolución. Probá de nuevo.'),
   });
 
-  const canSave = selected.length > 0 && !overMax && !mutation.isPending;
+  const canSave = selected.length > 0 && !overMax && !!fecha && !fechaError && !mutation.isPending;
 
   return (
     <div
@@ -167,6 +182,16 @@ export function ReturnDialog({ order, onClose, onDone }: Props) {
               </div>
             );
           })}
+
+          <Field
+            label="Fecha de la devolución"
+            htmlFor="return-date"
+            required
+            hint="Por defecto es hoy. Si estás pasando una devolución de otro día, poné esa fecha."
+            error={fechaError}
+          >
+            <Input id="return-date" type="date" value={fecha} min={diaVenta} max={hoy} onChange={(e) => setFecha(e.target.value)} />
+          </Field>
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="return-notes" className="text-sm font-medium text-foreground">

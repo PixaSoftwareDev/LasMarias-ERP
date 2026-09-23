@@ -202,3 +202,106 @@ describe('SalesService.updateOrderDate — corregir la fecha de una venta ya car
     ).rejects.toThrow(/no puede ser futura/);
   });
 });
+
+// FECHA REAL DE LA DEVOLUCIÓN (sep 2026): el crédito en la cuenta corriente queda con la
+// fecha elegida. No puede ser futura ni anterior a la venta.
+describe('SalesService.createReturn — fecha real de la devolución', () => {
+  const venta = new Date('2026-07-03T12:00:00-03:00');
+
+  function makeReturnService() {
+    const savedAccount: any[] = [];
+    const order = {
+      id: 'so-1',
+      code: 'DSP-000029',
+      clientId: 'cli-1',
+      dispatchedAt: venta,
+      lines: [{ productId: 'masa', productName: 'Masa', sku: 'MASA', quantity: 10, unitPrice: 1000, unit: 'kg', subtotal: 10000 }],
+    };
+    const orderRepo = { findOne: jest.fn().mockResolvedValue(order) };
+    const creditNoteRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      create: jest.fn((x: any) => x),
+      save: jest.fn((x: any) => Promise.resolve({ ...x, id: 'nc-1', createdAt: new Date() })),
+      createQueryBuilder: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ max: null }),
+      })),
+    };
+    const batch = { id: 'pp-1', status: 'agotado', remainingQuantity: '0', remainingBultos: null, unit: 'kg' };
+    const batchRepo = {
+      findOne: jest.fn().mockResolvedValue(batch),
+      save: jest.fn((b: any) => Promise.resolve(b)),
+    };
+    const movementRepo = {
+      find: jest.fn().mockResolvedValue([{ batchId: 'pp-1', quantity: '10', bultos: null }]),
+      create: jest.fn((x: any) => x),
+      save: jest.fn((x: any) => Promise.resolve(x)),
+    };
+    const accountRepo = {
+      create: jest.fn((x: any) => x),
+      save: jest.fn((x: any) => {
+        savedAccount.push(x);
+        return Promise.resolve(x);
+      }),
+    };
+    const manager = {
+      query: jest.fn().mockResolvedValue([]),
+      getRepository: jest.fn((entity: any) => {
+        const name = entity?.name ?? '';
+        if (name === 'CreditNoteEntity') return creditNoteRepo;
+        if (name === 'BatchEntity') return batchRepo;
+        if (name === 'InventoryMovementEntity') return movementRepo;
+        if (name === 'AccountMovementEntity') return accountRepo;
+        throw new Error(`repo no mockeado: ${name}`);
+      }),
+    };
+    const service = new SalesService(
+      orderRepo as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { transaction: jest.fn((cb: any) => cb(manager)) } as any,
+    );
+    return { service, savedAccount };
+  }
+
+  const devolver = (occurredAt?: string) => ({ lines: [{ productId: 'masa', quantity: 2 }], occurredAt });
+
+  it('el crédito en la cuenta queda con la fecha elegida', async () => {
+    const { service, savedAccount } = makeReturnService();
+    const fecha = '2026-07-10T12:00:00-03:00';
+
+    await service.createReturn('so-1', devolver(fecha) as any, 'user-1');
+
+    const credito = savedAccount.find((m) => m.kind === 'credit_note');
+    expect(credito.occurredAt.toISOString()).toBe(new Date(fecha).toISOString());
+    expect(credito.amount).toBe('2000'); // a mano: 2 kg × $1.000
+  });
+
+  it('sin fecha: el crédito queda con la fecha de ahora (como siempre)', async () => {
+    const { service, savedAccount } = makeReturnService();
+    const antes = Date.now();
+
+    await service.createReturn('so-1', devolver() as any, 'user-1');
+
+    expect(savedAccount[0].occurredAt.getTime()).toBeGreaterThanOrEqual(antes);
+  });
+
+  it('rechaza una devolución anterior a la venta', async () => {
+    const { service } = makeReturnService();
+
+    await expect(
+      service.createReturn('so-1', devolver('2026-06-20T12:00:00-03:00') as any, 'user-1'),
+    ).rejects.toThrow(/no puede ser anterior a la venta/);
+  });
+
+  it('rechaza una fecha futura', async () => {
+    const { service } = makeReturnService();
+    const futura = new Date(Date.now() + 40 * DIA).toISOString();
+
+    await expect(service.createReturn('so-1', devolver(futura) as any, 'user-1')).rejects.toThrow(
+      /no puede ser futura/,
+    );
+  });
+});

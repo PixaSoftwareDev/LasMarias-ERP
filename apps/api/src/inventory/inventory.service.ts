@@ -311,6 +311,11 @@ export class InventoryService {
         : currency === 'ARS'
           ? input.unitCost
           : Number(await this.exchangeRates.toArs(input.unitCost, currency, new Date()));
+    // Fecha real del ingreso (queda como fecha del lote): la elegida o ahora. No futura
+    // (margen de un día por husos horarios: el front manda el mediodía local).
+    const entryDate = input.entryDate ? new Date(input.entryDate) : new Date();
+    if (Number.isNaN(entryDate.getTime()) || entryDate.getTime() > Date.now() + 24 * 60 * 60 * 1000)
+      throw new BadRequestException('La fecha del ingreso no puede ser futura. Revisá el día, el mes y el año.');
     return this.dataSource.transaction(async (manager) => {
       // Serializa los ingresos IDÉNTICOS: si llegan dos juntos, el segundo espera y recién
       // ahí busca el duplicado (si no, ninguno ve al otro y entran los dos).
@@ -336,9 +341,9 @@ export class InventoryService {
         if (supplierLotNumber) {
           dup = await batchRepo.findOne({ where: { productId: product.id, supplierLotNumber } });
         } else {
-          const dayStart = new Date();
+          const dayStart = new Date(entryDate);
           dayStart.setHours(0, 0, 0, 0);
-          const dayEnd = new Date();
+          const dayEnd = new Date(entryDate);
           dayEnd.setHours(23, 59, 59, 999);
           const sameDay = await batchRepo.find({
             where: { productId: product.id, productionDate: Between(dayStart, dayEnd) },
@@ -352,7 +357,7 @@ export class InventoryService {
           throw new ConflictException(
             supplierLotNumber
               ? `Ya ingresaste ${product.name} con el lote de proveedor "${supplierLotNumber}" (${dup.code}). Si es otra compra real, confirmá para cargarla igual.`
-              : `Ya cargaste hoy un ingreso de ${product.name} por ${input.quantity} ${product.unit} (${dup.code}). Si es otra compra real, confirmá para cargarla igual.`,
+              : `Ya cargaste ese día un ingreso de ${product.name} por ${input.quantity} ${product.unit} (${dup.code}). Si es otra compra real, confirmá para cargarla igual.`,
           );
       }
 
@@ -361,7 +366,7 @@ export class InventoryService {
         manager.getRepository(BatchEntity).create({
           code,
           productId: product.id,
-          productionDate: new Date(),
+          productionDate: entryDate,
           initialQuantity: String(input.quantity),
           remainingQuantity: String(input.quantity),
           initialBultos: input.bultos ?? null,

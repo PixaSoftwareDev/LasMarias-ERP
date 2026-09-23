@@ -90,6 +90,9 @@ export const stockEntryInputSchema = z.object({
   quantity: z.number().positive('La cantidad tiene que ser mayor a 0'),
   // Bultos que entran (queso/masa/subproducto). Opcional.
   bultos: bultosSchema,
+  // Fecha real del ingreso (queda como fecha del lote). Se cargan atrasados muy seguido.
+  // No puede ser futura. Si se omite → ahora.
+  entryDate: isoDateTimeSchema.optional(),
   unitCost: z.number().nonnegative().optional(),
   // Moneda del costo cargado. Si es USD/EUR se convierte a $ con la cotización del día
   // y se congela en el lote (la calculadora siempre trabaja en pesos). Default ARS.

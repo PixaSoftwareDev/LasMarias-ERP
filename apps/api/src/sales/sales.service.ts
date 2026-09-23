@@ -22,12 +22,12 @@ import { allocateBultos, bultosForQuantity } from '../inventory/bultos-allocatio
 import { lockBatches, lockBatchesOfProduct, lockDuplicateSignature, lockRow } from '../common/locks';
 import type { Currency } from '@lasmarias/shared-schemas';
 
-// Un despacho no puede tener fecha futura (casi seguro un error de tipeo en el año o el mes).
+// Un despacho o una devolución no pueden tener fecha futura (casi seguro un error de tipeo en el año o el mes).
 // Margen de un día para no pelear con husos horarios: el front manda el mediodía local.
-function assertNotFuture(fecha: Date): void {
-  if (Number.isNaN(fecha.getTime())) throw new BadRequestException('La fecha del despacho no es válida.');
+function assertNotFuture(fecha: Date, de = 'del despacho'): void {
+  if (Number.isNaN(fecha.getTime())) throw new BadRequestException(`La fecha ${de} no es válida.`);
   if (fecha.getTime() > Date.now() + 24 * 60 * 60 * 1000)
-    throw new BadRequestException('La fecha del despacho no puede ser futura. Revisá el día, el mes y el año.');
+    throw new BadRequestException(`La fecha ${de} no puede ser futura. Revisá el día, el mes y el año.`);
 }
 
 // Asignación FEFO pura: dada la cantidad pedida y los lotes (ya ordenados por
@@ -238,6 +238,14 @@ export class SalesService {
   ): Promise<CreditNote> {
     const order = await this.orders.findOne({ where: { id: orderId } });
     if (!order) throw new NotFoundException(`Despacho ${orderId} no encontrado`);
+    // Fecha real de la devolución: no futura y no antes de la venta (margen de un día por
+    // husos horarios: el front manda el mediodía local).
+    const occurredAt = input.occurredAt ? new Date(input.occurredAt) : new Date();
+    assertNotFuture(occurredAt, 'de la devolución');
+    if (occurredAt.getTime() < order.dispatchedAt.getTime() - 24 * 60 * 60 * 1000)
+      throw new BadRequestException(
+        `La devolución no puede ser anterior a la venta ${order.code} (${order.dispatchedAt.toLocaleDateString('es-AR')}).`,
+      );
 
     return this.dataSource.transaction(async (manager) => {
       // Lo ya devuelto previamente por este despacho (para no exceder).
@@ -327,7 +335,7 @@ export class SalesService {
           amount: String(total),
           referenceType: 'credit_note',
           referenceId: note.id,
-          occurredAt: new Date(),
+          occurredAt,
           dueDate: null,
           notes: `Nota de crédito ${code} (devolución de ${order.code})`,
           createdById: userId,

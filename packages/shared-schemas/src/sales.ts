@@ -204,5 +204,8 @@ export const createReturnInputSchema = z.object({
     )
     .min(1, 'Cargá al menos un ítem a devolver'),
   notes: z.string().max(1000).optional(),
+  // Fecha real de la devolución (se cargan atrasadas). El crédito en la cuenta corriente
+  // queda con esta fecha. No puede ser futura ni anterior a la venta. Si se omite → ahora.
+  occurredAt: isoDateTimeSchema.optional(),
 });
 export type CreateReturnInput = z.infer<typeof createReturnInputSchema>;

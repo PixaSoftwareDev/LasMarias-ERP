@@ -70,7 +70,7 @@ function makeService(opts: { product?: any; existingBatches?: any[] } = {}) {
     dataSource as any,
   );
 
-  return { service, savedBatches };
+  return { service, savedBatches, batchRepo };
 }
 
 function inBatch(overrides: any = {}) {
@@ -105,7 +105,7 @@ describe('InventoryService.addStockEntry — aviso de doble carga', () => {
 
     await expect(
       service.addStockEntry({ productId: 'prod-masa', quantity: 1000 } as any, 'user-1'),
-    ).rejects.toThrow(/Ya cargaste hoy/);
+    ).rejects.toThrow(/Ya cargaste ese día/);
   });
 
   it('confirmDuplicate=true: se salta el aviso y carga el ingreso igual', async () => {
@@ -130,5 +130,48 @@ describe('InventoryService.addStockEntry — aviso de doble carga', () => {
     await service.addStockEntry({ productId: 'prod-masa', quantity: 750 } as any, 'user-1');
 
     expect(savedBatches).toHaveLength(1);
+  });
+});
+
+// FECHA REAL DEL INGRESO (sep 2026): se cargan atrasados; la fecha elegida queda como fecha
+// del lote, y el aviso de doble carga busca ese día (no hoy).
+describe('InventoryService.addStockEntry — fecha real del ingreso', () => {
+  it('la fecha elegida queda como fecha del lote', async () => {
+    const { service, savedBatches } = makeService();
+    const fecha = '2026-07-01T12:00:00-03:00';
+
+    await service.addStockEntry({ productId: 'prod-masa', quantity: 500, entryDate: fecha } as any, 'user-1');
+
+    expect(savedBatches[0].productionDate.toISOString()).toBe(new Date(fecha).toISOString());
+  });
+
+  it('sin fecha: el lote queda con la fecha de ahora (como siempre)', async () => {
+    const { service, savedBatches } = makeService();
+    const antes = Date.now();
+
+    await service.addStockEntry({ productId: 'prod-masa', quantity: 500 } as any, 'user-1');
+
+    expect(savedBatches[0].productionDate.getTime()).toBeGreaterThanOrEqual(antes);
+  });
+
+  it('el aviso de doble carga busca en el día elegido, no en hoy', async () => {
+    const { service, batchRepo } = makeService();
+    const fecha = '2026-07-01T12:00:00-03:00';
+
+    await service.addStockEntry({ productId: 'prod-masa', quantity: 500, entryDate: fecha } as any, 'user-1');
+
+    const [desde, hasta] = batchRepo.find.mock.calls[0][0].where.productionDate.value as [Date, Date];
+    expect(desde.getTime()).toBeLessThanOrEqual(new Date(fecha).getTime());
+    expect(hasta.getTime()).toBeGreaterThanOrEqual(new Date(fecha).getTime());
+    expect(hasta.getTime() - desde.getTime()).toBeLessThan(24 * 60 * 60 * 1000);
+  });
+
+  it('rechaza una fecha futura', async () => {
+    const { service } = makeService();
+    const futura = new Date(Date.now() + 40 * 24 * 60 * 60 * 1000).toISOString();
+
+    await expect(
+      service.addStockEntry({ productId: 'prod-masa', quantity: 500, entryDate: futura } as any, 'user-1'),
+    ).rejects.toThrow(/no puede ser futura/);
   });
 });
