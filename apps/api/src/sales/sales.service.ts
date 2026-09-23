@@ -8,6 +8,7 @@ import type {
   CreditNote,
   SalesOrder,
   SalesOrderLine,
+  UpdateSalesOrderDateInput,
 } from '@lasmarias/shared-schemas';
 import { SalesOrderEntity } from './sales-order.entity';
 import { AccountMovementEntity } from './account-movement.entity';
@@ -17,7 +18,17 @@ import { InventoryMovementEntity } from '../inventory/inventory-movement.entity'
 import { ClientsService } from '../clients/clients.service';
 import { ProductsService } from '../products/products.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
+import { allocateBultos, bultosForQuantity } from '../inventory/bultos-allocation';
+import { lockBatches, lockBatchesOfProduct, lockDuplicateSignature, lockRow } from '../common/locks';
 import type { Currency } from '@lasmarias/shared-schemas';
+
+// Un despacho no puede tener fecha futura (casi seguro un error de tipeo en el año o el mes).
+// Margen de un día para no pelear con husos horarios: el front manda el mediodía local.
+function assertNotFuture(fecha: Date): void {
+  if (Number.isNaN(fecha.getTime())) throw new BadRequestException('La fecha del despacho no es válida.');
+  if (fecha.getTime() > Date.now() + 24 * 60 * 60 * 1000)
+    throw new BadRequestException('La fecha del despacho no puede ser futura. Revisá el día, el mes y el año.');
+}
 
 // Asignación FEFO pura: dada la cantidad pedida y los lotes (ya ordenados por
 // vencimiento más próximo primero), devuelve cuánto tomar de cada lote y el faltante.
@@ -82,6 +93,9 @@ export class SalesService {
   // registra el cobro → saldo 0.
   async createOrder(input: CreateSalesOrderInput, userId: string): Promise<SalesOrder> {
     const client = await this.clients.get(input.clientId);
+    // Fecha real del despacho: la que eligieron (carga atrasada) o ahora.
+    const dispatchedAt = input.dispatchedAt ? new Date(input.dispatchedAt) : new Date();
+    assertNotFuture(dispatchedAt);
 
     // Moneda en que se cotizaron los precios + cotización del día (solo registro de
     // referencia; los importes de las líneas YA llegan convertidos a pesos del front).
@@ -89,18 +103,38 @@ export class SalesService {
     const exchangeRate = (await this.exchangeRates.rateToArs(orderCurrency, new Date())).toString();
 
     return this.dataSource.transaction(async (manager) => {
+      // Serializa los despachos IDÉNTICOS entre sí: sin esto, dos envíos simultáneos no se
+      // ven entre ellos y la guarda anti-duplicado de más abajo deja pasar los dos.
+      const firma = `venta:${input.clientId}:${input.lines
+        .map((l) => `${l.productId}:${l.quantity}:${l.unitPrice}`)
+        .sort()
+        .join('|')}`;
+      await lockDuplicateSignature(manager, firma);
+
       const lines: SalesOrderLine[] = [];
       let total = 0;
       for (const l of input.lines) {
         const product = await this.products.get(l.productId);
-        const subtotal = Math.round(l.unitPrice * l.quantity * 100) / 100;
+        // El precio se cotiza por kg/unidad o POR BULTO. El importe siempre termina en
+        // pesos; el basis queda congelado en la línea para que el remito y la nota de
+        // crédito muestren exactamente cómo se cobró (mismo criterio que la cotización).
+        const priceBasis = l.priceBasis ?? 'unidad';
+        if (priceBasis === 'bulto' && !(l.bultos && l.bultos > 0)) {
+          throw new BadRequestException(
+            `Cargaste el precio por bulto de ${product.name}, pero no pusiste cuántos bultos salen.`,
+          );
+        }
+        const cantidadCobrada = priceBasis === 'bulto' ? (l.bultos as number) : l.quantity;
+        const subtotal = Math.round(l.unitPrice * cantidadCobrada * 100) / 100;
         total += subtotal;
         lines.push({
           productId: product.id,
           productName: product.name,
           sku: product.sku,
           quantity: l.quantity,
+          bultos: l.bultos,
           unitPrice: l.unitPrice,
+          priceBasis,
           unit: product.unit,
           subtotal,
         });
@@ -111,9 +145,11 @@ export class SalesService {
       // minutos. No bloquea de una (podría ser otra venta real): frena y pide confirmar; el
       // front reenvía con confirmDuplicate=true al confirmar.
       if (!input.confirmDuplicate) {
+        // Por fecha de CARGA, no de despacho: con la fecha atrasada, un doble-click de hoy
+        // sobre un remito del día 3 tiene que seguir detectándose.
         const since = new Date(Date.now() - 10 * 60 * 1000);
         const recent = await manager.getRepository(SalesOrderEntity).find({
-          where: { clientId: client.id, dispatchedAt: MoreThanOrEqual(since) },
+          where: { clientId: client.id, createdAt: MoreThanOrEqual(since) },
         });
         const sig = (ls: { productId: string; quantity: number }[]) =>
           ls.map((l) => `${l.productId}:${l.quantity}`).sort().join('|');
@@ -125,7 +161,6 @@ export class SalesService {
           );
       }
 
-      const dispatchedAt = new Date();
       // Forma de pago efectiva: la elegida, o la del cliente (sin plazo = contado).
       const isContado =
         input.paymentMode === 'contado' ||
@@ -237,16 +272,35 @@ export class SalesService {
           );
         }
         // Reponer al mismo lote del que salió (movimientos sale de este despacho).
-        await this.restockToOriginBatches(manager, orderId, reqLine.productId, reqLine.quantity, userId, order.code);
+        await this.restockToOriginBatches(
+          manager,
+          orderId,
+          reqLine.productId,
+          reqLine.quantity,
+          userId,
+          order.code,
+          reqLine.bultos ?? null,
+        );
 
-        const subtotal = Math.round(orderLine.unitPrice * reqLine.quantity * 100) / 100;
+        // La NC respeta cómo se cobró el despacho original: si fue por bulto, se acredita
+        // por bulto. Si el basis era 'bulto' y no dicen cuántos vuelven, se prorratea.
+        const basis = orderLine.priceBasis ?? 'unidad';
+        const bultosDevueltos =
+          reqLine.bultos ??
+          (basis === 'bulto' && orderLine.bultos
+            ? Math.round((reqLine.quantity / orderLine.quantity) * orderLine.bultos)
+            : undefined);
+        const cantidadAcreditada = basis === 'bulto' ? (bultosDevueltos ?? 0) : reqLine.quantity;
+        const subtotal = Math.round(orderLine.unitPrice * cantidadAcreditada * 100) / 100;
         total += subtotal;
         ncLines.push({
           productId: orderLine.productId,
           productName: orderLine.productName,
           sku: orderLine.sku,
           quantity: reqLine.quantity,
+          bultos: bultosDevueltos,
           unitPrice: orderLine.unitPrice,
+          priceBasis: basis,
           unit: orderLine.unit,
           subtotal,
         });
@@ -294,6 +348,8 @@ export class SalesService {
     quantity: number,
     userId: string,
     orderCode: string,
+    // Bultos que vuelven. Si no se dicen, se reponen a prorrata de los kg devueltos.
+    bultos: number | null = null,
   ): Promise<void> {
     const saleMovements = await manager.getRepository(InventoryMovementEntity).find({
       where: { referenceType: 'sales_order', referenceId: orderId, productId, reason: 'sale' },
@@ -302,14 +358,31 @@ export class SalesService {
     if (saleMovements.length === 0) {
       throw new BadRequestException(`No se encontró el movimiento de salida para el despacho ${orderCode}`);
     }
+    // CANDADO sobre los lotes a los que se les va a devolver mercadería.
+    await lockBatches(manager, saleMovements.map((m) => m.batchId));
+    // Reparto de los bultos devueltos sobre los mismos lotes de los que salieron, sin
+    // devolver a un lote más bultos de los que ese lote entregó.
+    const reparto =
+      bultos != null
+        ? allocateBultos(
+            bultos,
+            // Tope por lote: no se devuelve a un lote más bultos de los que ese lote entregó.
+            saleMovements.map((mv) => ({ quantity: Number(mv.quantity), available: mv.bultos ?? 0 })),
+          ).bultos
+        : null;
     let pending = quantity;
-    for (const mv of saleMovements) {
+    for (const [idx, mv] of saleMovements.entries()) {
       if (pending <= 1e-9) break;
       const restore = Math.min(Number(mv.quantity), pending);
       pending -= restore;
       const batch = await manager.getRepository(BatchEntity).findOne({ where: { id: mv.batchId } });
       if (!batch) continue;
+      const bultosVuelven = reparto
+        ? (reparto[idx] ?? 0)
+        : bultosForQuantity(restore, Number(mv.quantity), mv.bultos);
       batch.remainingQuantity = String(Number(batch.remainingQuantity) + restore);
+      if (bultosVuelven != null && bultosVuelven > 0)
+        batch.remainingBultos = (batch.remainingBultos ?? 0) + bultosVuelven;
       if (batch.status === 'agotado') batch.status = 'activo';
       await manager.getRepository(BatchEntity).save(batch);
       await manager.getRepository(InventoryMovementEntity).save(
@@ -320,6 +393,7 @@ export class SalesService {
           reason: 'return',
           quantity: String(restore),
           unit: batch.unit,
+          bultos: bultosVuelven,
           referenceType: 'sales_order',
           referenceId: orderId,
           notes: `Devolución ${orderCode}`,
@@ -337,6 +411,9 @@ export class SalesService {
   // próximo primero) y registra un movimiento de salida por cada lote afectado.
   private async dischargeStock(manager: EntityManager, order: SalesOrderEntity): Promise<void> {
     for (const line of order.lines) {
+      // CANDADO sobre los lotes candidatos antes de mirar saldos: dos despachos del mismo
+      // producto a la vez no pueden llevarse el mismo lote (sobreventa / stock negativo).
+      await lockBatchesOfProduct(manager, line.productId);
       const batches = await manager.getRepository(BatchEntity).find({
         where: { productId: line.productId, status: 'activo' },
         order: { expirationDate: 'ASC' }, // FEFO
@@ -351,9 +428,30 @@ export class SalesService {
         );
       }
       const byId = new Map(batches.map((b) => [b.id, b]));
-      for (const alloc of plan.allocations) {
+
+      // Bultos: si el vendedor los cargó, se reparte ese número entre los lotes que tocó
+      // el FEFO (enteros, suma exacta). Si no los cargó, cada lote baja los suyos a
+      // prorrata para que el saldo no quede viejo. Los lotes sin bultos no se enteran.
+      // `available: 0` (no null) en los lotes que no llevan bultos: así no se les
+      // atribuyen bultos que nunca tuvieron, y el reparto cae en los que sí los tienen.
+      const shares = plan.allocations.map((a) => ({
+        quantity: a.take,
+        available: byId.get(a.batchId)?.remainingBultos ?? 0,
+      }));
+      const reparto = line.bultos != null ? allocateBultos(line.bultos, shares).bultos : null;
+
+      for (const [idx, alloc] of plan.allocations.entries()) {
         const batch = byId.get(alloc.batchId)!;
+        // Un lote sin bultos contados sigue sin ellos: no se le anota ni se le descuenta nada.
+        const bultosSalen =
+          batch.remainingBultos == null
+            ? null
+            : reparto
+              ? (reparto[idx] ?? 0)
+              : bultosForQuantity(alloc.take, Number(batch.remainingQuantity), batch.remainingBultos);
         batch.remainingQuantity = String(alloc.remainingAfter);
+        if (batch.remainingBultos != null && bultosSalen != null)
+          batch.remainingBultos = Math.max(0, batch.remainingBultos - bultosSalen);
         if (alloc.remainingAfter === 0) batch.status = 'agotado';
         await manager.getRepository(BatchEntity).save(batch);
         await manager.getRepository(InventoryMovementEntity).save(
@@ -364,6 +462,7 @@ export class SalesService {
             reason: 'sale',
             quantity: String(alloc.take),
             unit: batch.unit,
+            bultos: bultosSalen,
             referenceType: 'sales_order',
             referenceId: order.id,
             notes: `Despacho ${order.code}`,
@@ -379,11 +478,46 @@ export class SalesService {
   // corriente (y el cobro espejo si fue contado) y desaparece el remito. Solo se frena
   // si el despacho ya tiene devoluciones: ahí el stock ya se repuso en parte y borrar
   // encima duplicaría la reposición.
+  // Corrige la fecha de un despacho cargado con la fecha equivocada (típico: se pasaron los
+  // remitos de varios días juntos y quedaron todos con la fecha de carga). Mueve con ella el
+  // cargo de cuenta corriente (manteniendo el plazo del cliente) y el cobro al contado, que
+  // nacen con la misma fecha del despacho. Los cobros posteriores y el stock no se tocan.
+  async updateOrderDate(id: string, input: UpdateSalesOrderDateInput): Promise<SalesOrder> {
+    const nuevaFecha = new Date(input.dispatchedAt);
+    assertNotFuture(nuevaFecha);
+    return this.dataSource.transaction(async (manager) => {
+      await lockRow(manager, 'sales_orders', id);
+      const orderRepo = manager.getRepository(SalesOrderEntity);
+      const order = await orderRepo.findOne({ where: { id } });
+      if (!order) throw new NotFoundException(`Despacho ${id} no encontrado`);
+      const fechaVieja = order.dispatchedAt.getTime();
+
+      const accRepo = manager.getRepository(AccountMovementEntity);
+      const movs = await accRepo.find({ where: { referenceType: 'sales_order', referenceId: id } });
+      for (const m of movs) {
+        // Solo lo que nació junto con el despacho (misma fecha exacta): el cargo y, si fue
+        // contado, su cobro. Un cobro hecho otro día conserva su fecha.
+        if (m.occurredAt.getTime() !== fechaVieja) continue;
+        if (m.kind === 'charge' && m.dueDate)
+          m.dueDate = new Date(nuevaFecha.getTime() + (m.dueDate.getTime() - fechaVieja));
+        m.occurredAt = nuevaFecha;
+        await accRepo.save(m);
+      }
+
+      order.dispatchedAt = nuevaFecha;
+      await orderRepo.save(order);
+      const reloaded = await orderRepo.findOne({ where: { id }, relations: { client: true } });
+      return this.orderToDto(reloaded!);
+    });
+  }
+
   async removeOrder(id: string): Promise<{ deleted: true; code: string }> {
     return this.dataSource.transaction(async (manager) => {
       const orderRepo = manager.getRepository(SalesOrderEntity);
       const round3 = (n: number) => Math.round(n * 1000) / 1000;
 
+      // CANDADO sobre el despacho: dos borrados simultáneos devolverían el stock dos veces.
+      await lockRow(manager, 'sales_orders', id);
       const order = await orderRepo.findOne({ where: { id } });
       if (!order) throw new NotFoundException(`Despacho ${id} no encontrado`);
 
@@ -398,11 +532,14 @@ export class SalesService {
       const movements = await manager.getRepository(InventoryMovementEntity).find({
         where: { referenceType: 'sales_order', referenceId: id },
       });
+      await lockBatches(manager, movements.map((m) => m.batchId));
       for (const m of movements) {
         if (m.type !== 'out') continue;
         const batch = await manager.getRepository(BatchEntity).findOne({ where: { id: m.batchId } });
         if (!batch) continue;
         batch.remainingQuantity = String(round3(Number(batch.remainingQuantity) + Number(m.quantity)));
+        // Los bultos vuelven exactamente como salieron (los guarda el movimiento).
+        if (m.bultos != null) batch.remainingBultos = (batch.remainingBultos ?? 0) + m.bultos;
         if (batch.status === 'agotado' && Number(batch.remainingQuantity) > 0) batch.status = 'activo';
         await manager.getRepository(BatchEntity).save(batch);
       }

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isoDateTimeSchema, uuidSchema } from './common';
+import { bultosSchema, isoDateTimeSchema, uuidSchema } from './common';
 import { currencySchema } from './money';
 
 // CLAUDE.md §4.4 — Inventario por lote, FEFO, alertas.
@@ -46,6 +46,9 @@ export const inventoryMovementSchema = z.object({
   reason: movementReasonSchema,
   quantity: z.number(),
   unit: z.string(),
+  // Bultos que se movieron junto con la cantidad. null/undefined en todo lo anterior
+  // a los bultos y en lo que no se cuenta por bulto (leche, insumos a granel).
+  bultos: bultosSchema,
   warehouseId: uuidSchema.optional(),
   warehouseName: z.string().optional(),
   referenceType: z.string().optional(),
@@ -65,6 +68,9 @@ export const stockSummarySchema = z.object({
   // Categoría del producto para agrupar el inventario (materia_prima, intermedio, queso, etc.).
   category: z.string().optional(),
   totalQuantity: z.number(),
+  // Bultos en stock (suma de los lotes que los tienen contados). undefined = este
+  // producto no se maneja por bultos; el stock se sigue controlando por totalQuantity.
+  totalBultos: bultosSchema,
   batchCount: z.number().int(),
   nearestExpiration: isoDateTimeSchema.optional(),
   minStock: z.number().optional(),
@@ -82,6 +88,8 @@ export type StockSummary = z.infer<typeof stockSummarySchema>;
 export const stockEntryInputSchema = z.object({
   productId: uuidSchema,
   quantity: z.number().positive('La cantidad tiene que ser mayor a 0'),
+  // Bultos que entran (queso/masa/subproducto). Opcional.
+  bultos: bultosSchema,
   unitCost: z.number().nonnegative().optional(),
   // Moneda del costo cargado. Si es USD/EUR se convierte a $ con la cotización del día
   // y se congela en el lote (la calculadora siempre trabaja en pesos). Default ARS.
@@ -103,6 +111,8 @@ export type DiscardReason = z.infer<typeof discardReasonSchema>;
 export const discardStockInputSchema = z.object({
   productId: uuidSchema,
   quantity: z.number().positive('La cantidad tiene que ser mayor a 0'),
+  // Bultos que se dan de baja junto con la cantidad. Opcional.
+  bultos: bultosSchema,
   reason: discardReasonSchema,
   notes: z.string().max(1000).optional(),
 });
@@ -112,6 +122,9 @@ export type DiscardStockInput = z.infer<typeof discardStockInputSchema>;
 export const countAdjustInputSchema = z.object({
   productId: uuidSchema,
   countedQuantity: z.number().nonnegative('No puede ser negativo'),
+  // Bultos contados. Es la única forma de corregir el saldo de bultos si se desvía
+  // (en planta se cuentan bultos, no se pesa). Si se omite, los bultos no se tocan.
+  countedBultos: bultosSchema,
   notes: z.string().max(1000).optional(),
 });
 export type CountAdjustInput = z.infer<typeof countAdjustInputSchema>;

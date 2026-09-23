@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -19,6 +20,7 @@ import {
   PackageX,
   Plus,
   Trash2,
+  TriangleAlert,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -37,7 +39,7 @@ import { ApiError } from '@/lib/api-client';
 import { formatDateTime, formatMoney } from '@/lib/utils';
 import { labelOr, movementReasonLabel, movementTypeLabel } from '@/lib/labels';
 import { CURRENCY_OPTIONS, currencySymbol, equivalentArs } from '@/features/currency';
-import { ivaFactor, type StockSummary, type DiscardReason, type Currency, type InventoryMovement } from '@lasmarias/shared-schemas';
+import { ivaFactor, usaBultos, type StockSummary, type DiscardReason, type Currency, type InventoryMovement } from '@lasmarias/shared-schemas';
 import { useConfirm } from '@/hooks/use-confirm';
 
 type AdjustMode = 'discard' | 'count' | 'min';
@@ -173,10 +175,15 @@ function StockRow({
         </div>
       )}
 
-      {/* Cantidad */}
+      {/* Cantidad (+ bultos, si este producto se maneja embolsado) */}
       <div className="w-24 flex-shrink-0 text-right">
         <span className="font-display text-lg font-bold tracking-tight text-foreground">{num(s.totalQuantity)}</span>
         <span className="ml-1 text-xs text-foreground-muted">{s.unit}</span>
+        {s.totalBultos != null && (
+          <p className="text-xs text-foreground-muted">
+            {num(s.totalBultos)} {s.totalBultos === 1 ? 'bulto' : 'bultos'}
+          </p>
+        )}
       </div>
 
       {/* Estado */}
@@ -212,6 +219,7 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
 
   const [productId, setProductId] = useState('');
   const [quantity, setQuantity] = useState('');
+  const [entryBultos, setEntryBultos] = useState('');
   const [unitCost, setUnitCost] = useState('');
   const [costPrefilled, setCostPrefilled] = useState(false);
   const [currency, setCurrency] = useState<Currency>('ARS');
@@ -225,10 +233,20 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
 
   const selectedProduct = (productsQuery.data ?? []).find((p) => p.id === productId);
   const lotRequired = selectedProduct?.requiresLotNumber ?? false;
+  // Bultos solo en lo que se maneja embolsado/encajonado (masa, quesos, subproductos).
+  const entryConBultos = usaBultos(selectedProduct?.category);
+  // La leche cruda del silo entra SOLO por Recepción: los silos suman los lotes de las
+  // recepciones, así que una leche cargada acá no aparece en ningún silo (le pasó al dueño
+  // con el stock previo de julio: la cargó acá, "no sumaba", y terminó dándola de baja).
+  const esLeche =
+    selectedProduct != null &&
+    selectedProduct.unit === 'litro' &&
+    (selectedProduct.category === 'materia_prima' || /leche/i.test(selectedProduct.name));
 
   function handleProductChange(id: string) {
     setProductId(id);
     setSupplierLot('');
+    setEntryBultos('');
     // 1º) Costo de referencia del producto (dato maestro), con IVA aplicado si corresponde.
     const product = (productsQuery.data ?? []).find((p) => p.id === id);
     if (product?.defaultCost != null) {
@@ -254,6 +272,7 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
       inventoryApi.addStockEntry({
         productId,
         quantity: Number(quantity),
+        bultos: entryBultos !== '' ? Math.round(Number(entryBultos)) : undefined,
         unitCost: unitCost ? Number(unitCost) : undefined,
         currency,
         warehouseId: warehouseId || undefined,
@@ -299,10 +318,25 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
                 <option key={p.id} value={p.id}>{p.name} ({p.unit})</option>
               ))}
             </select>
+            {esLeche && (
+              <p role="alert" className="mt-2 flex gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground">
+                <TriangleAlert className="mt-0.5 h-4 w-4 flex-shrink-0 text-warning" aria-hidden="true" />
+                <span>
+                  La leche que va a los silos se carga en{' '}
+                  <Link href="/recepciones/nueva" className="font-medium underline">Recepción de leche</Link>. Si la cargás acá no
+                  suma en ningún silo.
+                </span>
+              </p>
+            )}
           </Field>
           <Field label="Cantidad" htmlFor="entry-qty" required>
             <Input id="entry-qty" type="number" inputMode="decimal" step="0.01" min={0} placeholder="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
           </Field>
+          {entryConBultos && (
+            <Field label="Bultos" htmlFor="entry-bultos" hint="Bolsas o cajas que entran. Opcional.">
+              <Input id="entry-bultos" type="number" inputMode="numeric" step="1" min={0} placeholder="0" value={entryBultos} onChange={(e) => setEntryBultos(e.target.value)} />
+            </Field>
+          )}
           <Field
             label="Costo unitario"
             htmlFor="entry-cost"
@@ -399,13 +433,29 @@ function AdjustDialog({ s, mode, onClose }: { s: StockSummary; mode: AdjustMode;
   const [counted, setCounted] = useState(String(s.totalQuantity));
   const [minVal, setMinVal] = useState(typeof s.minStock === 'number' && s.minStock > 0 ? String(s.minStock) : '');
   const [notes, setNotes] = useState('');
+  // Bultos: solo si este producto los lleva. En la baja, cuántos salen; en el conteo,
+  // cuántos se contaron (es la única forma de corregir el saldo de bultos si se desvió).
+  const llevaBultos = s.totalBultos != null;
+  const [bultos, setBultos] = useState('');
+  const [countedBultos, setCountedBultos] = useState(llevaBultos ? String(s.totalBultos) : '');
 
   const mut = useMutation({
     mutationFn: async () => {
       if (mode === 'discard') {
-        await inventoryApi.discardStock({ productId: s.productId, quantity: Number(quantity), reason, notes: notes || undefined });
+        await inventoryApi.discardStock({
+          productId: s.productId,
+          quantity: Number(quantity),
+          bultos: llevaBultos && bultos !== '' ? Math.round(Number(bultos)) : undefined,
+          reason,
+          notes: notes || undefined,
+        });
       } else if (mode === 'count') {
-        await inventoryApi.countAdjust({ productId: s.productId, countedQuantity: Number(counted), notes: notes || undefined });
+        await inventoryApi.countAdjust({
+          productId: s.productId,
+          countedQuantity: Number(counted),
+          countedBultos: llevaBultos && countedBultos !== '' ? Math.round(Number(countedBultos)) : undefined,
+          notes: notes || undefined,
+        });
       } else {
         // Aviso de stock bajo = mínimo del producto. 0 (o vacío) = sin aviso.
         await productsApi.update(s.productId, { minStockLevel: minVal === '' ? 0 : Number(minVal) });
@@ -451,6 +501,11 @@ function AdjustDialog({ s, mode, onClose }: { s: StockSummary; mode: AdjustMode;
               <Field label={`Cantidad a dar de baja (${s.unit})`} htmlFor="adj-qty" required>
                 <Input id="adj-qty" type="number" inputMode="decimal" step="0.01" min={0} max={s.totalQuantity} placeholder="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
               </Field>
+              {llevaBultos && (
+                <Field label="Bultos que se dan de baja" htmlFor="adj-bultos" hint={`Opcional. Hay ${num(s.totalBultos as number)} en stock.`}>
+                  <Input id="adj-bultos" type="number" inputMode="numeric" step="1" min={0} max={s.totalBultos} placeholder="0" value={bultos} onChange={(e) => setBultos(e.target.value)} />
+                </Field>
+              )}
               <Field label="Motivo" htmlFor="adj-reason" required>
                 <select id="adj-reason" className={SELECT_CLASS} value={reason} onChange={(e) => setReason(e.target.value as DiscardReason)}>
                   {DISCARD_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
@@ -462,6 +517,15 @@ function AdjustDialog({ s, mode, onClose }: { s: StockSummary; mode: AdjustMode;
               <Field label={`Cantidad contada (${s.unit})`} htmlFor="adj-counted" required hint="El sistema lleva el stock a este valor y registra la diferencia.">
                 <Input id="adj-counted" type="number" inputMode="decimal" step="0.01" min={0} value={counted} onChange={(e) => setCounted(e.target.value)} />
               </Field>
+              {llevaBultos && (
+                <Field
+                  label="Bultos contados"
+                  htmlFor="adj-counted-bultos"
+                  hint={`El sistema tiene ${num(s.totalBultos as number)}. Dejalo como está si no contaste bultos.`}
+                >
+                  <Input id="adj-counted-bultos" type="number" inputMode="numeric" step="1" min={0} value={countedBultos} onChange={(e) => setCountedBultos(e.target.value)} />
+                </Field>
+              )}
               {counted !== '' && Number.isFinite(Number(counted)) && (() => {
                 const diff = Number(counted) - s.totalQuantity;
                 if (Math.abs(diff) < 1e-9) {
@@ -496,6 +560,18 @@ function AdjustDialog({ s, mode, onClose }: { s: StockSummary; mode: AdjustMode;
 
 type QuickFilter = null | 'low' | 'expiring';
 
+// Lote cargado A MANO (ingreso LM-IN o sobrante de conteo LM-AJ): el único que se puede
+// eliminar desde la papelera. Se ofrece en su ingreso y en sus bajas/ajustes.
+function esLoteManual(m: InventoryMovement): boolean {
+  const code = m.batchCode ?? '';
+  if (!code.startsWith('LM-IN') && !code.startsWith('LM-AJ')) return false;
+  return (
+    (m.type === 'in' && m.reason === 'purchase') ||
+    m.reason === 'discard' ||
+    (m.reason === 'count' && Number(m.quantity) > 0)
+  );
+}
+
 export default function InventoryPage() {
   const [showEntry, setShowEntry] = useState(false);
   const [adjust, setAdjust] = useState<{ s: StockSummary; mode: AdjustMode } | null>(null);
@@ -510,24 +586,25 @@ export default function InventoryPage() {
   const queryClient = useQueryClient();
   const confirm = useConfirm();
 
-  // Papelera de ingresos: elimina un ingreso de stock cargado de más (lote + movimiento), sin
-  // dejar rastro de "baja". El backend solo lo permite si el ingreso está intacto.
+  // Papelera: elimina un lote cargado a mano por error (ingreso LM-IN o sobrante de conteo
+  // LM-AJ) con todos sus movimientos —incluida la baja que se le haya hecho para compensar—,
+  // sin dejar rastro. El backend lo rechaza si ese lote ya se usó en producción o se vendió.
   const deleteEntry = useMutation({
     mutationFn: (batchId: string) => inventoryApi.deleteStockEntry(batchId),
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ['stock'] });
       queryClient.invalidateQueries({ queryKey: ['inv-movements'] });
       queryClient.invalidateQueries({ queryKey: ['silos'] });
-      toast.success(`Ingreso del lote ${r.code} eliminado.`);
+      toast.success(`Lote ${r.code} eliminado: ya no figura ni su ingreso ni sus bajas.`);
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo eliminar el ingreso.'),
   });
 
   async function handleDeleteEntry(m: InventoryMovement) {
     const ok = await confirm({
-      title: 'Eliminar este ingreso de stock',
-      message: `Se va a eliminar el ingreso del lote ${m.batchCode ?? ''} (${m.productName ?? ''}, ${m.quantity} ${m.unit}) sin dejar rastro. Solo se puede si todavía no se usó nada de ese lote. Esta acción no se puede deshacer.`,
-      confirmLabel: 'Eliminar ingreso',
+      title: 'Eliminar este lote cargado por error',
+      message: `Se elimina el lote ${m.batchCode ?? ''} (${m.productName ?? ''}) con su ingreso y las bajas o ajustes que tenga, como si nunca se hubiera cargado. No se puede si ya se usó en producción o se vendió. Esta acción no se puede deshacer.`,
+      confirmLabel: 'Eliminar lote',
       cancelLabel: 'Cancelar',
       destructive: true,
     });
@@ -652,12 +729,14 @@ export default function InventoryPage() {
                 )},
                 { key: 'qty', header: 'Cantidad', render: (m) => `${m.quantity} ${m.unit}`, align: 'right', sortValue: (m) => Number(m.quantity) },
                 { key: 'reason', header: 'Motivo', render: (m) => labelOr(movementReasonLabel, m.reason) },
-                // Papelera: solo en ingresos de stock por compra (los que se pueden eliminar).
+                // Papelera: en los lotes cargados a mano (ingresos y sobrantes de conteo), tanto
+                // en la fila del ingreso como en la de su baja — el que la busca para borrar un
+                // "vencido" que nunca existió la encuentra donde mira.
                 { key: 'actions', header: '', align: 'right', render: (m) =>
-                  m.type === 'in' && m.reason === 'purchase' ? (
+                  esLoteManual(m) ? (
                     <button
                       type="button"
-                      aria-label={`Eliminar ingreso del lote ${m.batchCode ?? ''}`}
+                      aria-label={`Eliminar lote ${m.batchCode ?? ''} cargado por error`}
                       onClick={() => handleDeleteEntry(m)}
                       disabled={deleteEntry.isPending}
                       className="flex min-h-touch min-w-touch items-center justify-center rounded-md text-foreground-muted transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-30"

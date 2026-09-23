@@ -107,7 +107,7 @@ export default function NewProductionPage() {
   }
 
   const open = useMutation({
-    mutationFn: () =>
+    mutationFn: (confirmDuplicate?: boolean) =>
       productionApi.open({
         recipeId,
         operatorId: user!.id,
@@ -115,6 +115,7 @@ export default function NewProductionPage() {
         startedAt: new Date(`${startedDate}T12:00:00`).toISOString(),
         milkInputs: inputs.filter((i) => i.batchId && i.liters > 0),
         notes: notes || undefined,
+        confirmDuplicate,
       }),
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ['production-orders'] });
@@ -123,7 +124,18 @@ export default function NewProductionPage() {
       toast.success(`Orden ${r.code} abierta — ahora cargá la producción`);
       router.push(`/produccion/${r.id}/cerrar`);
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo abrir la orden. Probá de nuevo.'),
+    onError: (e) => {
+      // 409 = ya hay una orden igual (misma receta y mismos lotes) cargada recién: es casi
+      // seguro una doble carga. Avisamos y dejamos cargarla igual si es otra tina real.
+      if (e instanceof ApiError && e.status === 409) {
+        toast.warning(e.message, {
+          duration: 12000,
+          action: { label: 'Cargar igual', onClick: () => open.mutate(true) },
+        });
+        return;
+      }
+      toast.error(e instanceof ApiError ? e.message : 'No se pudo abrir la orden. Probá de nuevo.');
+    },
   });
 
   useEffect(() => {
@@ -256,7 +268,7 @@ export default function NewProductionPage() {
 
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={() => router.push('/produccion')}>Cancelar</Button>
-        <Button onClick={() => open.mutate()} loading={open.isPending} disabled={!recipeId || !startedDate || inputs.every((i) => !i.batchId)}>
+        <Button onClick={() => open.mutate(undefined)} loading={open.isPending} disabled={!recipeId || !startedDate || inputs.every((i) => !i.batchId)}>
           Abrir orden
         </Button>
       </div>

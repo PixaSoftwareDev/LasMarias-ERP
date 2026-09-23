@@ -67,6 +67,9 @@ function makeService(fx: Fixture) {
   };
 
   const manager = {
+    // query: lo usan los candados de base (locks.ts). En los tests no hay base real,
+    // así que devuelve vacío: lo que se verifica acá es la lógica, no el bloqueo.
+    query: jest.fn().mockResolvedValue([]),
     getRepository: jest.fn((entity: any) => {
       const name = entity?.name ?? '';
       if (name === 'SalesOrderEntity') return orderRepo;
@@ -142,5 +145,49 @@ describe('SalesService.removeOrder', () => {
 
     expect(batchesById.size).toBe(0);
     expect(removedOrders).toHaveLength(1);
+  });
+
+  it('los BULTOS vuelven al lote exactamente como salieron', async () => {
+    // La venta se llevó 30 kg en 2 bultos y dejó el lote en 0/0. Al borrar vuelve todo.
+    const { service, batchesById } = makeService({
+      orders: [{ id: 'so-1', code: 'DSP-000001', paymentMode: 'contado' }],
+      batches: [
+        {
+          id: 'pp-1',
+          code: 'LM-PP-1',
+          status: 'agotado',
+          remainingQuantity: '0',
+          remainingBultos: 0,
+          productId: 'mozza',
+        },
+      ],
+      movements: [
+        {
+          id: 'm-1',
+          batchId: 'pp-1',
+          type: 'out',
+          quantity: '30',
+          bultos: 2,
+          referenceType: 'sales_order',
+          referenceId: 'so-1',
+        },
+      ],
+      accountMovements: [],
+    });
+
+    await service.removeOrder('so-1');
+
+    const batch = batchesById.get('pp-1');
+    expect(batch.remainingQuantity).toBe('30');
+    expect(batch.remainingBultos).toBe(2);
+  });
+
+  it('un despacho viejo (sin bultos) no inventa bultos al borrarse', async () => {
+    const { service, batchesById } = fixture();
+
+    await service.removeOrder('so-1');
+
+    // El movimiento no tiene bultos → el lote sigue sin saldo de bultos.
+    expect(batchesById.get('pp-1').remainingBultos).toBeUndefined();
   });
 });

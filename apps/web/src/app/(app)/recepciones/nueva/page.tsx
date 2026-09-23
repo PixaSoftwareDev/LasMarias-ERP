@@ -80,7 +80,7 @@ export default function NewReceptionPage() {
     mode: 'onBlur',
     defaultValues: {
       receivedAt: '',
-      // Una descarga puede traer leche de hasta 4 tambos (pedido #17).
+      // Una descarga puede traer leche de varios tambos, sin tope (pedido #17).
       producers: [{ producerId: '', liters: undefined as unknown as number, declaredLiters: undefined }],
       // La leche normalmente pasa la prueba de alcohol; el operario la desmarca sólo si falló.
       // Evita bloquear toda recepción por defecto (el back trata false como rechazo).
@@ -291,7 +291,7 @@ export default function NewReceptionPage() {
           </CardContent>
         </Card>
 
-        {/* Tambos de la descarga: hasta 4, cada uno con sus litros (pedido #17). */}
+        {/* Tambos de la descarga: sin tope, cada uno con sus litros (pedido #17). */}
         <Card>
           <CardHeader>
             <CardTitle>Tambos de la descarga</CardTitle>
@@ -425,17 +425,15 @@ export default function NewReceptionPage() {
               })}
             </div>
 
-            {producerLines.fields.length < 4 && (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="self-start"
-                onClick={() => producerLines.append({ producerId: '', liters: undefined as unknown as number, declaredLiters: undefined })}
-              >
-                <Plus className="h-4 w-4" /> Agregar tambo
-              </Button>
-            )}
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="self-start"
+              onClick={() => producerLines.append({ producerId: '', liters: undefined as unknown as number, declaredLiters: undefined })}
+            >
+              <Plus className="h-4 w-4" /> Agregar tambo
+            </Button>
 
             {/* Totales + diferencia de litros EN VIVO (CLAUDE.md §5.1). */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-border-subtle bg-surface-subtle/40 px-4 py-3">

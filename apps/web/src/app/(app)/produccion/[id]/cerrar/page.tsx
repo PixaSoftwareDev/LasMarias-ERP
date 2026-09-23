@@ -12,12 +12,88 @@ import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/page-header';
 import { ProductionCostPanel } from '@/components/production-cost-panel';
-import { productionApi, inventoryApi } from '@/features/api';
+import { productionApi, inventoryApi, productsApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
-import type { ProductionOrder } from '@lasmarias/shared-schemas';
+import { usaBultos, type ProductionOrder } from '@lasmarias/shared-schemas';
 
 // Pantalla de cierre de orden (CLAUDE.md §4.3): se cargan las salidas reales por producto
 // y al cerrar se muestra el panel de costo. El cierre es definitivo.
+
+// Kilos + bultos de una salida de la orden. Los bultos solo aparecen en lo que se maneja
+// embolsado/encajonado (masa, quesos, subproductos): en el resto no molestan.
+function OutputFields({
+  output,
+  product,
+  kg,
+  bultos,
+  placeholder,
+  onKg,
+  onBultos,
+}: {
+  output: { productId: string; productName: string; quantity: number; unit: string };
+  product?: { category: string; kgPorBulto?: number };
+  kg?: number;
+  bultos?: number;
+  placeholder: string;
+  onKg: (v: number | undefined) => void;
+  onBultos: (v: number | undefined) => void;
+}) {
+  const conBultos = usaBultos(product?.category);
+  const kgPorBulto = product?.kgPorBulto;
+  // Sugerencia y aviso suave: si la ficha dice cuánto pesa un bulto, cuántos deberían salir.
+  const sugeridos = kgPorBulto && kg && kg > 0 ? Math.round(kg / kgPorBulto) : null;
+  const desvia = sugeridos != null && bultos != null && bultos > 0 && Math.abs(bultos - sugeridos) > 1;
+
+  return (
+    <div className={conBultos ? 'grid grid-cols-1 gap-4 sm:grid-cols-[1fr,160px]' : ''}>
+      <Field
+        label={`${output.productName} — ${output.unit === 'kg' ? 'kg producidos' : `${output.unit} obtenidos`}`}
+        htmlFor={`out-${output.productId}`}
+        hint={
+          output.quantity > 0
+            ? `Esperado: ${output.quantity.toLocaleString('es-AR', { maximumFractionDigits: 1 })} ${output.unit}`
+            : undefined
+        }
+      >
+        <Input
+          id={`out-${output.productId}`}
+          type="number"
+          inputMode="decimal"
+          step="0.1"
+          min={0}
+          placeholder={placeholder}
+          value={kg ?? ''}
+          onChange={(e) => onKg(e.target.value === '' ? undefined : Number(e.target.value))}
+        />
+      </Field>
+
+      {conBultos && (
+        <Field
+          label="Bultos"
+          htmlFor={`bultos-${output.productId}`}
+          hint={
+            desvia
+              ? `Con ${kgPorBulto} kg por bulto darían ~${sugeridos}`
+              : sugeridos != null
+                ? `Serían ~${sugeridos}`
+                : 'Bolsas o cajas. Opcional.'
+          }
+        >
+          <Input
+            id={`bultos-${output.productId}`}
+            type="number"
+            inputMode="numeric"
+            step="1"
+            min={0}
+            placeholder="Ej: 98"
+            value={bultos ?? ''}
+            onChange={(e) => onBultos(e.target.value === '' ? undefined : Math.round(Number(e.target.value)))}
+          />
+        </Field>
+      )}
+    </div>
+  );
+}
 
 export default function CloseProductionPage({ params }: { params: { id: string } }) {
   const { id } = params;
@@ -35,8 +111,17 @@ export default function CloseProductionPage({ params }: { params: { id: string }
     queryFn: () => inventoryApi.listWarehouses(),
   });
 
+  // Ficha de cada producto: define si se cuenta por bultos y cuántos kg trae uno.
+  const productsQuery = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
+  const productById = useMemo(
+    () => new Map((productsQuery.data ?? []).map((p) => [p.id, p])),
+    [productsQuery.data],
+  );
+
   // Cantidad real por producto (kg). La indexamos por productId.
   const [quantities, setQuantities] = useState<Record<string, number | undefined>>({});
+  // Bultos (bolsas/cajas) por producto. Opcional: si no se cargan, el lote va sin bultos.
+  const [bultos, setBultos] = useState<Record<string, number | undefined>>({});
   // Cámara/sector destino de los lotes de producto generados al cerrar (opcional).
   const [warehouseId, setWarehouseId] = useState<string>('');
   // Rendimiento ESPERADO (kg/litro) cargado a mano al cerrar (opcional). Si se carga,
@@ -58,6 +143,7 @@ export default function CloseProductionPage({ params }: { params: { id: string }
         actualOutputs: (order?.expectedOutputs ?? []).map((o) => ({
           productId: o.productId,
           quantity: Number(quantities[o.productId] ?? 0),
+          bultos: bultos[o.productId] != null ? Number(bultos[o.productId]) : undefined,
           isPrincipal: o.isPrincipal,
         })),
         warehouseId: warehouseId || undefined,
@@ -194,27 +280,16 @@ export default function CloseProductionPage({ params }: { params: { id: string }
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           {principal.map((o) => (
-            <Field
+            <OutputFields
               key={o.productId}
-              label={`${o.productName} — kg producidos`}
-              htmlFor={`out-${o.productId}`}
-              hint={o.quantity > 0 ? `Esperado: ${o.quantity.toLocaleString('es-AR', { maximumFractionDigits: 1 })} ${o.unit}` : undefined}
-            >
-              <Input
-                type="number"
-                inputMode="decimal"
-                step="0.1"
-                min={0}
-                placeholder="Ej: 120"
-                value={quantities[o.productId] ?? ''}
-                onChange={(e) =>
-                  setQuantities((q) => ({
-                    ...q,
-                    [o.productId]: e.target.value === '' ? undefined : Number(e.target.value),
-                  }))
-                }
-              />
-            </Field>
+              output={o}
+              product={productById.get(o.productId)}
+              kg={quantities[o.productId]}
+              bultos={bultos[o.productId]}
+              placeholder="Ej: 120"
+              onKg={(v) => setQuantities((q) => ({ ...q, [o.productId]: v }))}
+              onBultos={(v) => setBultos((b) => ({ ...b, [o.productId]: v }))}
+            />
           ))}
         </CardContent>
       </Card>
@@ -229,27 +304,16 @@ export default function CloseProductionPage({ params }: { params: { id: string }
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             {byproducts.map((o) => (
-              <Field
+              <OutputFields
                 key={o.productId}
-                label={`${o.productName} — ${o.unit} obtenidos`}
-                htmlFor={`out-${o.productId}`}
-                hint={o.quantity > 0 ? `Esperado: ${o.quantity.toLocaleString('es-AR', { maximumFractionDigits: 1 })} ${o.unit}` : undefined}
-              >
-                <Input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.1"
-                  min={0}
-                  placeholder="Ej: 15"
-                  value={quantities[o.productId] ?? ''}
-                  onChange={(e) =>
-                    setQuantities((q) => ({
-                      ...q,
-                      [o.productId]: e.target.value === '' ? undefined : Number(e.target.value),
-                    }))
-                  }
-                />
-              </Field>
+                output={o}
+                product={productById.get(o.productId)}
+                kg={quantities[o.productId]}
+                bultos={bultos[o.productId]}
+                placeholder="Ej: 15"
+                onKg={(v) => setQuantities((q) => ({ ...q, [o.productId]: v }))}
+                onBultos={(v) => setBultos((b) => ({ ...b, [o.productId]: v }))}
+              />
             ))}
           </CardContent>
         </Card>

@@ -34,6 +34,16 @@ export const decimalSchema = z
   .transform((v) => (typeof v === 'string' ? Number(v) : v))
   .refine((n) => !Number.isNaN(n) && Number.isFinite(n), 'Número inválido');
 
+// BULTOS — cuenta de bolsas/cajas que viaja en paralelo a los kg (pedido del dueño,
+// jul 2026). Siempre ENTERO y opcional: null/undefined = "no se contaron bultos", que es
+// el caso de todo lo cargado antes de esta función y de la leche a granel. El kg sigue
+// siendo la unidad de control (stock, FEFO, costo); el bulto es una cuenta paralela.
+export const bultosSchema = z
+  .number()
+  .int('Los bultos se cuentan enteros')
+  .nonnegative('Los bultos no pueden ser negativos')
+  .optional();
+
 // Paginación común
 export const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),

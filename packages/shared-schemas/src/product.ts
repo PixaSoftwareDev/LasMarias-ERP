@@ -17,6 +17,13 @@ export const productCategorySchema = z.enum([
 ]);
 export type ProductCategory = z.infer<typeof productCategorySchema>;
 
+// Categorías que se manejan por BULTOS (bolsas de masa, cajas de queso): lo que se
+// produce y se despacha. Quedan afuera envases e insumos —ya se cuentan en 'unidad',
+// y un segundo contador sobre lo mismo solo confunde— y la materia prima, que es granel.
+export const CATEGORIAS_CON_BULTOS: ProductCategory[] = ['queso', 'intermedio', 'subproducto'];
+export const usaBultos = (category?: string | null): boolean =>
+  CATEGORIAS_CON_BULTOS.includes(category as ProductCategory);
+
 export const productSchema = z.object({
   id: uuidSchema,
   sku: z.string().min(1).max(50),
@@ -31,6 +38,10 @@ export const productSchema = z.object({
   defaultCost: z.number().nonnegative().optional(),
   defaultCostCurrency: currencySchema.optional(),
   costIvaMode: ivaModeSchema.optional(),
+  // Kg que trae un bulto (bolsa/caja) de este producto. Es solo REFERENCIA: sugiere los
+  // bultos al cargar producción y avisa si el número no cierra. El valor real de cada
+  // lote es el que carga el operario (una bolsa de masa no pesa siempre lo mismo).
+  kgPorBulto: z.number().positive().optional(),
   // Insumo trazable: exige N° de lote del proveedor al ingresar stock (bromatología).
   requiresLotNumber: z.boolean().optional(),
   isActive: z.boolean(),

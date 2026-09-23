@@ -41,6 +41,7 @@ export class PricingService {
             clientType: input.clientType,
             productId: item.productId,
             unitPrice: String(item.unitPrice),
+            priceBasis: item.priceBasis ?? 'unidad',
             currency,
             isActive: true,
           }),
@@ -106,6 +107,7 @@ export class PricingService {
       sku: e.product?.sku ?? '',
       unit: e.product?.unit ?? '',
       unitPrice: Number(e.unitPrice),
+      priceBasis: e.priceBasis === 'bulto' ? 'bulto' : 'unidad',
       currency: (e.currency as PriceListItem['currency']) ?? 'ARS',
       isActive: e.isActive,
     };

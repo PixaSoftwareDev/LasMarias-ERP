@@ -87,8 +87,18 @@ export default function EditProductionPage() {
 
   const availableBatches = source === 'leche' ? milkBatchesFromReceptions : doughBatches;
 
-  // Los lotes que la orden ya tiene reservados están "en proceso" y NO aparecen en la lista de
-  // disponibles (que solo trae los "activos"). Los sumamos como opción para poder mantenerlos.
+  // Los lotes de la orden que NO están en la lista de disponibles se agregan igual, para
+  // poder verlos y cambiarlos. Pero hay dos motivos muy distintos por los que un lote no
+  // aparece, y confundirlos fue lo que hizo perder tiempo con la orden OP-20260729-0002:
+  //
+  //   a) esta orden lo reservó → su leche está descontada y guardada para ella. Todo bien.
+  //   b) el lote quedó en CERO porque se lo llevó OTRA orden → esa leche ya no existe y la
+  //      orden no va a poder cerrar hasta que se elija otro lote.
+  //
+  // La diferencia la da `milkReserved` (si la orden tiene o no su salida de leche registrada).
+  // Antes se mostraba siempre "reservado en esta orden", que en el caso (b) es mentira y
+  // tapaba justamente el problema que había que ver.
+  const reservada = orderQuery.data?.milkReserved !== false;
   const milkBatches: MilkBatch[] = useMemo(() => {
     const merged = [...availableBatches];
     for (const mi of orderQuery.data?.milkInputs ?? []) {
@@ -98,11 +108,22 @@ export default function EditProductionPage() {
         id: mi.batchId,
         code: mi.batchCode,
         remainingQuantity: mi.liters,
-        label: `${mi.batchCode} (reservado en esta orden)`,
+        label: reservada
+          ? `${mi.batchCode} (reservado en esta orden)`
+          : `${mi.batchCode} — SIN LECHE: se la llevó otra orden`,
       });
     }
     return merged;
-  }, [availableBatches, orderQuery.data, source]);
+  }, [availableBatches, orderQuery.data, source, reservada]);
+
+  // Lotes de la orden que quedaron sin leche por culpa de otra orden: hay que avisarlo
+  // arriba de todo, porque si no el operario guarda igual y el error recién aparece al cerrar.
+  const lotesSinLeche = useMemo(() => {
+    if (reservada) return [];
+    return (orderQuery.data?.milkInputs ?? []).filter(
+      (mi) => !availableBatches.some((b) => b.id === mi.batchId),
+    );
+  }, [availableBatches, orderQuery.data, reservada]);
 
   const [recipeId, setRecipeId] = useState('');
   const [startedDate, setStartedDate] = useState('');
@@ -237,10 +258,28 @@ export default function EditProductionPage() {
         description={
           wasClosed
             ? 'Esta orden está cerrada. Al guardar se revierte su stock y se vuelve a cerrar recalculando el costo.'
-            : 'Corregí lo que se haya cargado mal. La orden sigue abierta: no se consumió stock todavía.'
+            : reservada
+              ? 'Corregí lo que se haya cargado mal. La leche de esta orden ya está reservada: si cambiás de lote, vuelve al silo la vieja y se descuenta la nueva.'
+              : 'Corregí lo que se haya cargado mal. Ojo: esta orden todavía no tiene la leche reservada.'
         }
         action={<Button asChild variant="ghost"><Link href="/produccion"><ArrowLeft className="h-4 w-4" /> Volver</Link></Button>}
       />
+
+      {/* Aviso claro cuando los lotes de la orden se quedaron sin leche: es el caso que hacía
+          que la orden no cerrara y que antes no se veía por ningún lado. */}
+      {lotesSinLeche.length > 0 && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <p className="font-medium">
+            Esta orden no va a poder cerrarse: {lotesSinLeche.length === 1 ? 'uno de sus lotes' : `${lotesSinLeche.length} de sus lotes`} ya no tiene leche.
+          </p>
+          <p className="mt-1">
+            {lotesSinLeche.map((mi) => `${mi.batchCode} (pide ${mi.liters.toLocaleString('es-AR')} L)`).join(' · ')}
+          </p>
+          <p className="mt-1">
+            Esa leche la consumió otra orden. Elegí un lote que tenga saldo y guardá.
+          </p>
+        </div>
+      )}
 
       {wasClosed && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">

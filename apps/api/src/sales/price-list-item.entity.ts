@@ -20,6 +20,10 @@ export class PriceListItemEntity extends BaseEntity {
   @Column({ type: 'numeric', precision: 14, scale: 2, name: 'unit_price' })
   unitPrice!: string;
 
+  // ¿El precio es por kg/unidad o por bulto? Las listas viejas quedan en 'unidad'.
+  @Column({ type: 'varchar', length: 12, name: 'price_basis', default: 'unidad' })
+  priceBasis!: string;
+
   // Moneda en que está cargado el precio (ARS/USD/EUR). Default ARS.
   @Column({ type: 'varchar', length: 3, default: 'ARS' })
   currency!: string;

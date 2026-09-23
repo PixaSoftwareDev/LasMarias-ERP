@@ -35,6 +35,7 @@ export class ProductsService {
       defaultCostCurrency: input.defaultCostCurrency ?? 'ARS',
       costIvaMode: input.costIvaMode ?? 'sin_iva',
       requiresLotNumber: input.requiresLotNumber ?? false,
+      kgPorBulto: input.kgPorBulto != null ? String(input.kgPorBulto) : null,
       isActive: true,
     });
     return this.toDto(await this.repo.save(entity));
@@ -59,6 +60,9 @@ export class ProductsService {
       ...(input.defaultCostCurrency !== undefined && { defaultCostCurrency: input.defaultCostCurrency }),
       ...(input.costIvaMode !== undefined && { costIvaMode: input.costIvaMode }),
       ...(input.requiresLotNumber !== undefined && { requiresLotNumber: input.requiresLotNumber }),
+      ...(input.kgPorBulto !== undefined && {
+        kgPorBulto: input.kgPorBulto != null ? String(input.kgPorBulto) : null,
+      }),
       ...(input.isActive !== undefined && { isActive: input.isActive }),
     });
     return this.toDto(await this.repo.save(p));
@@ -78,6 +82,7 @@ export class ProductsService {
       defaultCostCurrency: (e.defaultCostCurrency as Product['defaultCostCurrency']) ?? 'ARS',
       costIvaMode: (e.costIvaMode as Product['costIvaMode']) ?? 'sin_iva',
       requiresLotNumber: e.requiresLotNumber,
+      kgPorBulto: e.kgPorBulto != null ? Number(e.kgPorBulto) : undefined,
       isActive: e.isActive,
       createdAt: e.createdAt.toISOString(),
       updatedAt: e.updatedAt.toISOString(),

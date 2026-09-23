@@ -119,6 +119,9 @@ function makeService(
   };
 
   const manager = {
+    // query: lo usan los candados de base (locks.ts). En los tests no hay base real,
+    // así que devuelve vacío: lo que se verifica acá es la lógica, no el bloqueo.
+    query: jest.fn().mockResolvedValue([]),
     getRepository: jest.fn((entity: any) => {
       const name = entity?.name ?? '';
       if (name === 'BatchEntity') return batchRepo;
@@ -357,5 +360,76 @@ describe('ProductionService.close', () => {
     // USD 0,30 × $1000 = $300/litro → leche $10000 + 1000×$300 = $300000 → $310000/100 = $3100/kg.
     expect(exchangeRates.toArs).toHaveBeenCalledWith('0.3', 'USD', expect.any(Date));
     expect(getOrder().costBreakdown.real.costoPorKg).toBe('3100.0000');
+  });
+
+  // --- BULTOS (pedido del dueño, jul 2026): se cargan junto a los kg, acumulan y restan.
+  // Regla que no se negocia: los bultos NO tocan la calculadora de costo (CLAUDE.md §5).
+
+  it('sella los bultos en el lote de producto y en su movimiento de entrada', async () => {
+    const { service, savedBatches, savedMovements, getOrder } = makeService();
+
+    // El caso real del audio: 1392,7 kg de masa en 98 bultos (bolsas).
+    await service.close('order-1', {
+      actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 1392.7, bultos: 98, isPrincipal: true }],
+    } as any);
+
+    const producto = savedBatches.find((b) => b.code?.startsWith('LM-PP'));
+    expect(producto.initialQuantity).toBe('1392.7');
+    expect(producto.initialBultos).toBe(98);
+    expect(producto.remainingBultos).toBe(98);
+
+    const entrada = savedMovements.find((m) => m.type === 'in' && m.reason === 'production');
+    expect(entrada.bultos).toBe(98);
+
+    // Y quedan guardados en la orden, para verlos después en la pantalla.
+    expect(getOrder().actualOutputs[0].bultos).toBe(98);
+  });
+
+  it('los bultos NO cambian el costo: con y sin bultos el costo/kg es idéntico', async () => {
+    const sinBultos = makeService();
+    await sinBultos.service.close('order-1', {
+      actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true }],
+    } as any);
+
+    const conBultos = makeService();
+    await conBultos.service.close('order-1', {
+      actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 100, bultos: 7, isPrincipal: true }],
+    } as any);
+
+    expect(conBultos.getOrder().costBreakdown.real.costoPorKg).toBe(
+      sinBultos.getOrder().costBreakdown.real.costoPorKg,
+    );
+    expect(conBultos.getOrder().costBreakdown.real.costoNeto).toBe(
+      sinBultos.getOrder().costBreakdown.real.costoNeto,
+    );
+  });
+
+  it('cerrar sin cargar bultos deja el lote sin bultos y no rompe nada', async () => {
+    const { service, savedBatches, savedMovements } = makeService();
+
+    await service.close('order-1', {
+      actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true }],
+    } as any);
+
+    const producto = savedBatches.find((b) => b.code?.startsWith('LM-PP'));
+    expect(producto.initialBultos).toBeNull();
+    expect(producto.remainingBultos).toBeNull();
+    const entrada = savedMovements.find((m) => m.type === 'in' && m.reason === 'production');
+    expect(entrada.bultos).toBeNull();
+  });
+
+  it('consumir masa embolsada descuenta también sus bultos (RETROCOMPAT: descuento al cerrar)', async () => {
+    // Lote de masa con 40 bultos para 1000 kg; la orden se lleva los 1000 kg → los 40 bultos.
+    const { service, milkBatch, savedBatches, savedMovements } = makeService({ milkAlreadyReserved: false });
+    milkBatch.remainingBultos = 40;
+
+    await service.close('order-1', {
+      actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true }],
+    } as any);
+
+    const consumido = savedBatches.find((b) => b.id === 'milk-1');
+    expect(consumido.remainingBultos).toBe(0);
+    const salida = savedMovements.find((m) => m.type === 'out' && m.reason === 'production');
+    expect(salida.bultos).toBe(40);
   });
 });

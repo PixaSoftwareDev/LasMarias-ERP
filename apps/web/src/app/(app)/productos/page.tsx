@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { ArrowLeft, Package, Pencil, Plus, Power } from 'lucide-react';
-import { createProductInputSchema, type CreateProductInput, type Product } from '@lasmarias/shared-schemas';
+import { createProductInputSchema, usaBultos, type CreateProductInput, type Product } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -55,6 +55,8 @@ export default function ProductsPage() {
   // su costo no se calcula sino que es un dato maestro).
   const watchCategory = form.watch('category');
   const showCostFields = ['insumo', 'envase', 'materia_prima'].includes(watchCategory);
+  // Los bultos (bolsas/cajas) solo aplican a lo que se produce y se despacha.
+  const showBultoFields = usaBultos(watchCategory);
   // La masa (intermedio) tiene un "precio de masa" a mano: se usa para valuar la masa
   // cuando se consume en producción (sea propia o comprada). Pedidos #14/#15.
   const isMasa = watchCategory === 'intermedio';
@@ -75,6 +77,7 @@ export default function ProductsPage() {
         costIvaMode: editing.costIvaMode ?? 'sin_iva',
         // Sin esto, la casilla "Insumo trazable" se destildaba al editar y se perdía la marca.
         requiresLotNumber: editing.requiresLotNumber ?? false,
+        kgPorBulto: editing.kgPorBulto,
       });
     }
   }, [editing, form]);
@@ -185,6 +188,24 @@ export default function ProductsPage() {
                   {...form.register('minStockLevel', { setValueAs: (v) => (v === '' || v === null || Number.isNaN(Number(v)) ? undefined : Number(v)) })}
                 />
               </Field>
+              {showBultoFields && (
+                <Field
+                  label="Kg por bulto"
+                  htmlFor="kgPorBulto"
+                  error={form.formState.errors.kgPorBulto?.message}
+                  hint="Opcional. Cuánto pesa una bolsa o caja de este producto. Sirve para sugerir los bultos al cargar la producción; el número real lo pone el operario."
+                >
+                  <Input
+                    id="kgPorBulto"
+                    type="number"
+                    inputMode="decimal"
+                    step="0.01"
+                    min={0}
+                    placeholder="Ej: 14"
+                    {...form.register('kgPorBulto', { setValueAs: (v) => (v === '' || v === null || Number.isNaN(Number(v)) ? undefined : Number(v)) })}
+                  />
+                </Field>
+              )}
               {showCostFields && (
                 <Field
                   label="Costo de referencia"

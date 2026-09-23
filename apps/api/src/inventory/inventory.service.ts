@@ -31,6 +31,8 @@ import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import type { Currency } from '@lasmarias/shared-schemas';
 import { resolveAlertLevel } from './stock-alert';
+import { allocateBultos, bultosForQuantity } from './bultos-allocation';
+import { lockBatches, lockBatchesOfProduct, lockDuplicateSignature } from '../common/locks';
 import { siloFillPercent } from './silo.helpers';
 import {
   buildBackwardTrace,
@@ -127,6 +129,9 @@ export class InventoryService {
       .addSelect('p.category', 'category')
       .addSelect('p.min_stock_level', 'minStockLevel')
       .addSelect('SUM(b.remaining_quantity)', 'totalQuantity')
+      // Bultos en stock. NULL si ningún lote del producto los lleva contados: ahí la
+      // pantalla no muestra bultos en vez de mostrar un 0 que parecería "no queda nada".
+      .addSelect('SUM(b.remaining_bultos)', 'totalBultos')
       .addSelect('COUNT(*)', 'batchCount')
       .addSelect('MIN(b.expiration_date)', 'nearestExpiration')
       // Cámaras distintas (no nulas) donde hay lotes del producto.
@@ -163,6 +168,7 @@ export class InventoryService {
         unit: r.unit as string,
         category: (r.category as string) ?? undefined,
         totalQuantity,
+        totalBultos: r.totalBultos != null ? Number(r.totalBultos) : undefined,
         batchCount: Number(r.batchCount),
         nearestExpiration: nearest?.toISOString(),
         minStock: minStock ?? undefined,
@@ -236,34 +242,55 @@ export class InventoryService {
     return summary;
   }
 
-  // Elimina un INGRESO de stock cargado de más (la papelera de inventario): borra el lote y su
-  // movimiento de entrada, sin dejar rastro de "baja/vencido". Solo aplica a ingresos manuales
-  // (LM-IN) que estén INTACTOS: si ya se consumió, vendió o ajustó parte, se rechaza con aviso
-  // (en ese caso hay que darlo de baja, no borrarlo). Los lotes de producción, leche y ajustes
-  // se manejan desde sus propias pantallas.
+  // Elimina un lote CARGADO A MANO por error (la papelera de inventario): borra el lote y todos
+  // sus movimientos, sin dejar rastro, como si nunca se hubiera cargado. Aplica a:
+  //  - ingresos de stock (LM-IN), y
+  //  - lotes que creó un conteo físico al sobrar mercadería (LM-AJ).
+  // Se permite aunque después se le haya hecho una BAJA o un ajuste por conteo: es justo el
+  // caso real (sep 2026) de una leche ingresada por error y después dada de baja como
+  // "vencida" para compensar — quedaba un vencimiento que nunca existió. Lo que NO se permite
+  // es borrarlo si se usó en producción o se vendió: eso ya generó costo, lotes y remitos.
   async deleteStockEntry(batchId: string): Promise<{ deleted: true; code: string }> {
     return this.dataSource.transaction(async (manager) => {
       const batchRepo = manager.getRepository(BatchEntity);
       const movementRepo = manager.getRepository(InventoryMovementEntity);
 
+      await lockBatches(manager, [batchId]);
       const batch = await batchRepo.findOne({ where: { id: batchId } });
       if (!batch) throw new NotFoundException(`Lote ${batchId} no encontrado`);
 
       const movements = await movementRepo.find({ where: { batchId } });
-      const isStockEntry =
-        batch.code.startsWith('LM-IN') && movements.some((m) => m.type === 'in' && m.referenceType === 'stock_entry');
-      if (!isStockEntry)
+      // El movimiento que dio origen al lote: el ingreso (LM-IN) o el sobrante del conteo (LM-AJ).
+      const esEntrada = (m: InventoryMovementEntity) =>
+        (batch.code.startsWith('LM-IN') && m.type === 'in' && m.referenceType === 'stock_entry') ||
+        (batch.code.startsWith('LM-AJ') &&
+          m.type === 'adjustment' &&
+          m.referenceType === 'stock_count' &&
+          Number(m.quantity) > 0);
+      if (!movements.some(esEntrada))
         throw new BadRequestException(
-          `El lote ${batch.code} no es un ingreso de stock: se maneja desde su propia pantalla (producción, recepción o ajuste).`,
+          `El lote ${batch.code} no se cargó a mano: se maneja desde su propia pantalla (producción o recepción).`,
         );
 
-      // Guarda: el ingreso tiene que estar intacto. Si tiene salidas/ajustes o el saldo bajó,
-      // significa que ya se usó parte → no se borra (se da de baja lo que quede).
-      const yaUsado =
-        movements.some((m) => m.type !== 'in') || Number(batch.remainingQuantity) !== Number(batch.initialQuantity);
-      if (yaUsado)
+      // Lo único que se tolera además de la entrada: bajas y ajustes por conteo, que son
+      // correcciones hechas sobre este mismo lote. Cualquier otra cosa (producción, venta,
+      // devolución) significa que la mercadería se usó de verdad.
+      const resto = movements.filter((m) => !esEntrada(m));
+      const correcciones = new Set(['stock_adjustment', 'stock_count']);
+      if (resto.some((m) => !correcciones.has(m.referenceType ?? '')))
         throw new BadRequestException(
-          `No se puede eliminar el lote ${batch.code}: ya se usó o se ajustó parte. Dalo de baja en su lugar.`,
+          `No se puede eliminar el lote ${batch.code}: ya se usó en producción o se vendió. Dalo de baja en su lugar.`,
+        );
+
+      // Control de coherencia: el saldo tiene que ser exactamente lo que entró menos las
+      // bajas registradas. Si no cierra, algo lo tocó por fuera y no se borra a ciegas.
+      const bajas = resto
+        .filter((m) => m.referenceType === 'stock_adjustment')
+        .reduce((acc, m) => acc + Number(m.quantity), 0);
+      const esperado = Number(batch.initialQuantity) - bajas;
+      if (Math.abs(Number(batch.remainingQuantity) - esperado) > 1e-6)
+        throw new BadRequestException(
+          `No se puede eliminar el lote ${batch.code}: su saldo no coincide con sus movimientos. Dalo de baja en su lugar.`,
         );
 
       await movementRepo.remove(movements);
@@ -285,6 +312,12 @@ export class InventoryService {
           ? input.unitCost
           : Number(await this.exchangeRates.toArs(input.unitCost, currency, new Date()));
     return this.dataSource.transaction(async (manager) => {
+      // Serializa los ingresos IDÉNTICOS: si llegan dos juntos, el segundo espera y recién
+      // ahí busca el duplicado (si no, ninguno ve al otro y entran los dos).
+      await lockDuplicateSignature(
+        manager,
+        `ingreso:${input.productId}:${input.quantity}:${input.supplierLotNumber ?? ''}`,
+      );
       const product = await manager.getRepository(ProductEntity).findOne({ where: { id: input.productId } });
       if (!product) throw new NotFoundException(`Producto ${input.productId} no encontrado`);
       // Insumos trazables: el N° de lote del proveedor es obligatorio (bromatología).
@@ -331,6 +364,8 @@ export class InventoryService {
           productionDate: new Date(),
           initialQuantity: String(input.quantity),
           remainingQuantity: String(input.quantity),
+          initialBultos: input.bultos ?? null,
+          remainingBultos: input.bultos ?? null,
           unit: product.unit,
           status: 'activo',
           warehouseId: input.warehouseId ?? null,
@@ -347,6 +382,7 @@ export class InventoryService {
           reason: 'purchase',
           quantity: String(input.quantity),
           unit: product.unit,
+          bultos: input.bultos ?? null,
           warehouseId: input.warehouseId ?? null,
           referenceType: 'stock_entry',
           createdById: userId,
@@ -366,18 +402,51 @@ export class InventoryService {
     type: 'out' | 'adjustment',
     notes: string | null,
     userId: string,
+    // Bultos que el usuario dice que salen. Si viene, se reparte ese número entre los
+    // lotes tocados; si no, cada lote baja sus bultos a prorrata de los kg que entrega.
+    bultosPedidos: number | null = null,
   ): Promise<number> {
+    // CANDADO sobre los lotes del producto antes de leer sus saldos: dos bajas o dos
+    // ajustes simultáneos no pueden descontar el mismo lote dos veces.
+    await lockBatchesOfProduct(manager, productId);
     const lots = await manager.getRepository(BatchEntity).find({
       where: { productId, status: 'activo' },
       order: { expirationDate: 'ASC' },
     });
-    let toConsume = quantity;
+
+    // Primero se decide de qué lote sale cuánto (sin tocar nada), para poder repartir
+    // los bultos enteros sobre esa foto y que la suma cierre exacta.
+    const plan: Array<{ lot: BatchEntity; take: number; avail: number }> = [];
+    let pending = quantity;
     for (const lot of lots) {
-      if (toConsume <= 0) break;
+      if (pending <= 0) break;
       const avail = Number(lot.remainingQuantity);
-      const take = Math.min(avail, toConsume);
+      const take = Math.min(avail, pending);
       if (take <= 0) continue;
+      plan.push({ lot, take, avail });
+      pending -= take;
+    }
+    const repartoBultos =
+      bultosPedidos != null
+        ? allocateBultos(
+            bultosPedidos,
+            // 0 (no null) en lotes sin bultos: el reparto va a los que sí los llevan.
+            plan.map((p) => ({ quantity: p.take, available: p.lot.remainingBultos ?? 0 })),
+          ).bultos
+        : null;
+
+    let toConsume = quantity;
+    for (const [idx, { lot, take, avail }] of plan.entries()) {
+      // Los bultos bajan a prorrata de lo que sale, salvo que el usuario los haya dicho.
+      const bultosTomados =
+        lot.remainingBultos == null
+          ? null
+          : repartoBultos
+            ? (repartoBultos[idx] ?? 0)
+            : bultosForQuantity(take, avail, lot.remainingBultos);
       lot.remainingQuantity = String(avail - take);
+      if (lot.remainingBultos != null && bultosTomados != null)
+        lot.remainingBultos = lot.remainingBultos - bultosTomados;
       if (Number(lot.remainingQuantity) <= 0) lot.status = 'agotado';
       await manager.getRepository(BatchEntity).save(lot);
       await manager.getRepository(InventoryMovementEntity).save(
@@ -388,6 +457,7 @@ export class InventoryService {
           reason,
           quantity: String(take),
           unit: lot.unit,
+          bultos: bultosTomados,
           referenceType: 'stock_adjustment',
           notes,
           createdById: userId,
@@ -404,7 +474,16 @@ export class InventoryService {
       const product = await manager.getRepository(ProductEntity).findOne({ where: { id: input.productId } });
       if (!product) throw new NotFoundException(`Producto ${input.productId} no encontrado`);
       const notes = `Baja: ${input.reason}${input.notes ? ` — ${input.notes}` : ''}`;
-      const discarded = await this.discardFefo(manager, input.productId, input.quantity, 'discard', 'out', notes, userId);
+      const discarded = await this.discardFefo(
+        manager,
+        input.productId,
+        input.quantity,
+        'discard',
+        'out',
+        notes,
+        userId,
+        input.bultos ?? null,
+      );
       return { discarded };
     });
   }
@@ -414,11 +493,17 @@ export class InventoryService {
     return this.dataSource.transaction(async (manager) => {
       const product = await manager.getRepository(ProductEntity).findOne({ where: { id: input.productId } });
       if (!product) throw new NotFoundException(`Producto ${input.productId} no encontrado`);
+      // CANDADO: el conteo lee el stock actual y lo lleva a lo contado; si otra operación
+      // descuenta en el medio, el ajuste se calcularía sobre un número viejo.
+      await lockBatchesOfProduct(manager, input.productId);
       const lots = await manager.getRepository(BatchEntity).find({ where: { productId: input.productId, status: 'activo' } });
       const current = lots.reduce((a, l) => a + Number(l.remainingQuantity), 0);
       const diff = input.countedQuantity - current;
       const notes = `Conteo físico${input.notes ? ` — ${input.notes}` : ''}`;
-      if (Math.abs(diff) < 1e-9) return { adjusted: 0 };
+      if (Math.abs(diff) < 1e-9) {
+        await this.adjustBultosToCount(manager, input.productId, input.countedBultos, notes, userId);
+        return { adjusted: 0 };
+      }
       if (diff < 0) {
         await this.discardFefo(manager, input.productId, -diff, 'count', 'adjustment', notes, userId);
       } else {
@@ -449,8 +534,71 @@ export class InventoryService {
           }),
         );
       }
+      // Recién ahora, con los kg ya ajustados, se lleva el saldo de bultos a lo contado.
+      await this.adjustBultosToCount(manager, input.productId, input.countedBultos, notes, userId);
       return { adjusted: diff };
     });
+  }
+
+  // Lleva el saldo de BULTOS del producto a lo que se contó en planta. Es la válvula de
+  // escape del sistema: en la práctica se cuentan bultos, no se pesa, así que si el saldo
+  // se desvió (bolsa rota, un despacho cargado sin bultos) esta es la forma de corregirlo.
+  // Si no se contaron bultos (undefined), no toca nada.
+  private async adjustBultosToCount(
+    manager: EntityManager,
+    productId: string,
+    countedBultos: number | undefined,
+    notes: string,
+    userId: string,
+  ): Promise<void> {
+    if (countedBultos == null) return;
+    await lockBatchesOfProduct(manager, productId);
+    const batchRepo = manager.getRepository(BatchEntity);
+    const lots = await batchRepo.find({
+      where: { productId, status: 'activo' },
+      order: { expirationDate: 'ASC' },
+    });
+    if (lots.length === 0) return;
+    const current = lots.reduce((a, l) => a + (l.remainingBultos ?? 0), 0);
+    let diff = countedBultos - current;
+    if (diff === 0) return;
+
+    if (diff < 0) {
+      // Faltan bultos: se sacan siguiendo el mismo orden FEFO que el resto del sistema.
+      let toRemove = -diff;
+      for (const lot of lots) {
+        if (toRemove <= 0) break;
+        const have = lot.remainingBultos ?? 0;
+        const take = Math.min(have, toRemove);
+        if (take <= 0) continue;
+        lot.remainingBultos = have - take;
+        await batchRepo.save(lot);
+        toRemove -= take;
+      }
+      diff = -(-diff - toRemove); // lo que realmente se pudo sacar
+    } else {
+      // Sobran bultos: se suman al lote más nuevo (el que se está por contar de nuevo).
+      const target = lots[lots.length - 1]!;
+      target.remainingBultos = (target.remainingBultos ?? 0) + diff;
+      await batchRepo.save(target);
+    }
+    if (diff === 0) return;
+
+    const first = lots[0]!;
+    await manager.getRepository(InventoryMovementEntity).save(
+      manager.getRepository(InventoryMovementEntity).create({
+        batchId: first.id,
+        productId,
+        type: 'adjustment',
+        reason: 'count',
+        quantity: '0', // ajuste solo de bultos: los kg no cambian
+        unit: first.unit,
+        bultos: diff, // con signo: + entraron, − salieron
+        referenceType: 'stock_count',
+        notes: `${notes} — bultos: ${diff > 0 ? '+' : ''}${diff}`,
+        createdById: userId,
+      }),
+    );
   }
 
   // Lotes disponibles para consumir en producción (CLAUDE.md §4.3 — apertura de orden).
@@ -778,6 +926,7 @@ export class InventoryService {
       reason: m.reason,
       quantity: Number(m.quantity),
       unit: m.unit,
+      bultos: m.bultos ?? undefined,
       warehouseId: m.warehouseId ?? undefined,
       warehouseName: m.warehouse?.name,
       referenceType: m.referenceType ?? undefined,

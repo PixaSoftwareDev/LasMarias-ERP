@@ -39,6 +39,11 @@ export class InventoryMovementEntity {
   @Column({ type: 'varchar', length: 16 })
   unit!: string;
 
+  // Bultos movidos junto con la cantidad. Null = movimiento sin bultos. Son la fuente de
+  // verdad para revertir: borrar una venta o una orden devuelve exactamente estos bultos.
+  @Column({ type: 'integer', nullable: true })
+  bultos!: number | null;
+
   @Column({ type: 'uuid', name: 'warehouse_id', nullable: true })
   warehouseId!: string | null;
 

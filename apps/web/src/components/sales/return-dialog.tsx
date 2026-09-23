@@ -23,6 +23,8 @@ interface Props {
 export function ReturnDialog({ order, onClose, onDone }: Props) {
   // qty a devolver por productId (string para input controlado).
   const [qty, setQty] = useState<Record<string, string>>({});
+  // Bultos a devolver por productId. Solo se pide en las líneas que salieron con bultos.
+  const [bultos, setBultos] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState('');
 
   useEffect(() => {
@@ -46,12 +48,24 @@ export function ReturnDialog({ order, onClose, onDone }: Props) {
 
   const selected = lines.filter((l) => l.quantity > 0);
   const overMax = lines.some((l) => l.quantity > l.line.quantity);
-  const refundTotal = selected.reduce((acc, l) => acc + l.quantity * l.line.unitPrice, 0);
+  // Si la línea se cobró por bulto, se acredita por bulto devuelto; si no, por kg.
+  const refundTotal = selected.reduce((acc, l) => {
+    const b = Number(bultos[l.line.productId] ?? '');
+    const cantidad = l.line.priceBasis === 'bulto' ? (Number.isFinite(b) ? b : 0) : l.quantity;
+    return acc + cantidad * l.line.unitPrice;
+  }, 0);
 
   const mutation = useMutation({
     mutationFn: () =>
       salesApi.createReturn(order.id, {
-        lines: selected.map((l) => ({ productId: l.line.productId, quantity: l.quantity })),
+        lines: selected.map((l) => {
+          const b = bultos[l.line.productId];
+          return {
+            productId: l.line.productId,
+            quantity: l.quantity,
+            bultos: b != null && b !== '' ? Math.round(Number(b)) : undefined,
+          };
+        }),
         notes: notes || undefined,
       }),
     onSuccess: (cn) => {
@@ -125,6 +139,28 @@ export function ReturnDialog({ order, onClose, onDone }: Props) {
                     />
                   </div>
                 </div>
+                {line.bultos != null && (
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <p className="text-xs text-foreground-muted">
+                      Salieron {line.bultos} {line.bultos === 1 ? 'bulto' : 'bultos'}
+                      {line.priceBasis === 'bulto' ? ' · se cobró por bulto' : ''}
+                    </p>
+                    <div className="w-28 flex-shrink-0">
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        step="1"
+                        min={0}
+                        max={line.bultos}
+                        aria-label={`Bultos a devolver de ${line.productName}`}
+                        suffix="bultos"
+                        placeholder="0"
+                        value={bultos[line.productId] ?? ''}
+                        onChange={(e) => setBultos((cur) => ({ ...cur, [line.productId]: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                )}
                 {over && (
                   <p className="mt-1 text-xs text-danger">No podés devolver más de lo despachado.</p>
                 )}

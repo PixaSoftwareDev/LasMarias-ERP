@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ShoppingCart, Plus, Trash2, Truck, FileText, Undo2, TriangleAlert, PackageCheck } from 'lucide-react';
+import { ShoppingCart, Plus, Trash2, Truck, FileText, Undo2, TriangleAlert, PackageCheck, CalendarDays } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -14,6 +14,7 @@ import { DataTable } from '@/components/ui/data-table';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { ReturnDialog } from '@/components/sales/return-dialog';
+import { ChangeDateDialog } from '@/components/sales/change-date-dialog';
 import { clientsApi, inventoryApi, productsApi, salesApi, exchangeRatesApi, settingsApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
@@ -22,7 +23,7 @@ import { formatMoney as money, formatDate } from '@/lib/utils';
 import { rateForCurrency } from '@/features/currency';
 import { DateRangeFilter } from '@/components/ui/date-range';
 import { TableSkeleton } from '@/components/ui/skeleton';
-import { ivaFactor, type SalesOrder, type Currency } from '@lasmarias/shared-schemas';
+import { ivaFactor, usaBultos, type SalesOrder, type Currency, type PriceBasis } from '@lasmarias/shared-schemas';
 
 // Condición de pago del despacho. El tipo vive en el schema como enum inline de
 // createSalesOrderInput; lo reflejamos acá para el selector.
@@ -31,12 +32,25 @@ type PaymentMode = 'contado' | 'cuenta_corriente';
 interface Line {
   productId: string;
   quantity: number;
+  // Bultos (bolsas/cajas) que salen. Opcional salvo que el precio sea por bulto.
+  bultos?: number;
   unitPrice: number;
+  // Cómo se cotiza el precio de esta línea: por kg/unidad o por bulto.
+  priceBasis: PriceBasis;
 }
 
-const EMPTY_LINE: Line = { productId: '', quantity: 1, unitPrice: 0 };
+const EMPTY_LINE: Line = { productId: '', quantity: 1, unitPrice: 0, priceBasis: 'unidad' };
+
+// Lo que se cobra en una línea: por bulto se multiplica por bultos, si no por kg.
+const lineQty = (l: Line) => (l.priceBasis === 'bulto' ? (l.bultos ?? 0) : l.quantity);
 
 const fefoDate = (iso?: string) => (iso ? formatDate(iso) : null);
+
+// Fecha de hoy en formato YYYY-MM-DD según el reloj local (no UTC, que corre un día en Argentina).
+function todayLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 // Preview FEFO por línea (CLAUDE.md §4.4). Solo informativo: muestra de qué lote/s
 // saldrá la mercadería; el descuento real lo hace el backend al despachar.
@@ -114,7 +128,10 @@ export default function SalesPage() {
   const [lines, setLines] = useState<Line[]>([{ ...EMPTY_LINE }]);
   const [notes, setNotes] = useState('');
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('contado');
+  // Fecha real del despacho: por defecto hoy, editable para pasar remitos de otros días.
+  const [dispatchDate, setDispatchDate] = useState(todayLocal());
   const [returnOrder, setReturnOrder] = useState<SalesOrder | null>(null);
+  const [dateOrder, setDateOrder] = useState<SalesOrder | null>(null);
   // Filtro de fechas de la lista de despachos.
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -173,6 +190,13 @@ export default function SalesPage() {
     return m;
   }, [priceListQuery.data, clientPricesQuery.data, listCurrency, listRate, selectedClient, ivaRate]);
 
+  // Cómo se cobra cada producto según la lista del cliente (por kg/unidad o por bulto).
+  const basisByProduct = useMemo(() => {
+    const m = new Map<string, PriceBasis>();
+    for (const p of priceListQuery.data ?? []) m.set(p.productId, p.priceBasis ?? 'unidad');
+    return m;
+  }, [priceListQuery.data]);
+
   // Al elegir cliente: condición de pago default (sin plazo = contado) y prellenado
   // de precios cuando llega la lista. El precio sigue editable a mano (CLAUDE.md §4.6).
   useEffect(() => {
@@ -198,7 +222,7 @@ export default function SalesPage() {
   );
 
   const total = useMemo(
-    () => validLines.reduce((acc, l) => acc + l.quantity * l.unitPrice, 0),
+    () => validLines.reduce((acc, l) => acc + lineQty(l) * l.unitPrice, 0),
     [validLines],
   );
 
@@ -208,15 +232,24 @@ export default function SalesPage() {
     setLines([{ ...EMPTY_LINE }]);
     setNotes('');
     setPaymentMode('contado');
+    setDispatchDate(todayLocal());
   }
 
   const create = useMutation({
     mutationFn: (confirmDuplicate?: boolean) =>
       salesApi.createOrder({
         clientId,
-        lines: validLines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitPrice: l.unitPrice })),
+        lines: validLines.map((l) => ({
+          productId: l.productId,
+          quantity: l.quantity,
+          bultos: l.bultos,
+          unitPrice: l.unitPrice,
+          priceBasis: l.priceBasis,
+        })),
         notes: notes || undefined,
         paymentMode,
+        // Mediodía local: evita que el huso horario corra la fecha al día anterior/siguiente.
+        dispatchedAt: new Date(`${dispatchDate}T12:00:00`).toISOString(),
         currency: listCurrency,
         confirmDuplicate,
       }),
@@ -278,6 +311,8 @@ export default function SalesPage() {
         if (patch.productId && priceByProduct.has(patch.productId)) {
           next.unitPrice = priceByProduct.get(patch.productId)!;
         }
+        // La lista manda cómo se cobra ese producto (por kg o por bulto).
+        if (patch.productId) next.priceBasis = basisByProduct.get(patch.productId) ?? 'unidad';
         return next;
       }),
     );
@@ -295,7 +330,10 @@ export default function SalesPage() {
     }
   }
 
-  const canSave = !!clientId && validLines.length > 0 && !create.isPending && !needsRate;
+  // Cobrar por bulto exige saber cuántos bultos salen (si no, el importe sería 0).
+  const bultosFaltantes = validLines.some((l) => l.priceBasis === 'bulto' && !(l.bultos && l.bultos > 0));
+  const canSave =
+    !!clientId && validLines.length > 0 && !create.isPending && !needsRate && !bultosFaltantes && !!dispatchDate && dispatchDate <= todayLocal();
 
   // ¿Alguna línea pide más de lo que hay en stock? (venta quedaría con stock negativo)
   const hasOverStock = useMemo(
@@ -382,6 +420,22 @@ export default function SalesPage() {
               </Field>
 
               <Field
+                label="Fecha del despacho"
+                htmlFor="dispatchDate"
+                required
+                hint="Por defecto es hoy. Si estás pasando un remito de otro día, poné la fecha del remito."
+                error={dispatchDate > todayLocal() ? 'La fecha no puede ser futura.' : undefined}
+              >
+                <Input
+                  id="dispatchDate"
+                  type="date"
+                  value={dispatchDate}
+                  max={todayLocal()}
+                  onChange={(e) => setDispatchDate(e.target.value)}
+                />
+              </Field>
+
+              <Field
                 label="Condición de pago"
                 htmlFor="paymentMode"
                 hint={
@@ -427,9 +481,12 @@ export default function SalesPage() {
             <CardContent className="space-y-3">
               {lines.map((row, idx) => {
                 const stock = row.productId ? stockByProduct.get(row.productId) : undefined;
+                const product = row.productId ? productsQuery.data?.find((p) => p.id === row.productId) : undefined;
                 const overStock = stock != null && row.quantity > stock.totalQuantity;
-                const lineTotal = row.quantity * row.unitPrice;
+                const lineTotal = lineQty(row) * row.unitPrice;
                 const lineUnit = stock?.unit ?? '';
+                // Bultos solo en lo que se despacha embolsado (masa, quesos, subproductos).
+                const conBultos = usaBultos(product?.category);
                 return (
                   <div key={idx} className="rounded-lg border border-border-subtle p-3">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,90px,110px,auto]">
@@ -472,6 +529,41 @@ export default function SalesPage() {
                         <Trash2 className="h-4 w-4" aria-hidden="true" />
                       </button>
                     </div>
+                    {/* Bultos + base del precio: solo en productos que van embolsados. */}
+                    {conBultos && (
+                      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[120px,1fr]">
+                        <Input
+                          type="number"
+                          inputMode="numeric"
+                          step="1"
+                          min={0}
+                          aria-label="Bultos"
+                          suffix="bultos"
+                          placeholder="0"
+                          value={row.bultos ?? ''}
+                          onChange={(e) =>
+                            updateLine(idx, {
+                              bultos: e.target.value === '' ? undefined : Math.round(Number(e.target.value)),
+                            })
+                          }
+                        />
+                        <select
+                          aria-label="Cómo se cobra"
+                          className="min-h-touch rounded-md border border-border bg-surface-elevated px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                          value={row.priceBasis}
+                          onChange={(e) => updateLine(idx, { priceBasis: e.target.value as PriceBasis })}
+                        >
+                          <option value="unidad">Precio por {lineUnit || 'unidad'}</option>
+                          <option value="bulto">Precio por bulto</option>
+                        </select>
+                      </div>
+                    )}
+                    {row.priceBasis === 'bulto' && !(row.bultos && row.bultos > 0) && (
+                      <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-amber-600">
+                        <TriangleAlert className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                        Cargá cuántos bultos salen para poder cobrar por bulto.
+                      </p>
+                    )}
                     {row.productId && (
                       <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs">
                         <span className={`flex items-center gap-1.5 ${overStock ? 'font-medium text-amber-600' : 'text-foreground-muted'}`}>
@@ -580,12 +672,25 @@ export default function SalesPage() {
                 header: '',
                 align: 'right',
                 render: (o: SalesOrder) => (
-                  <div className="flex items-center justify-end gap-1">
+                  <div className="flex flex-wrap items-center justify-end gap-1">
                     <Button asChild variant="ghost" size="sm">
                       <Link href={`/ventas/${o.id}/comprobante`} onClick={(e) => e.stopPropagation()}>
                         <FileText className="h-4 w-4" /> Ver remito
                       </Link>
                     </Button>
+                    {canDelete && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Cambiar fecha de la venta ${o.code}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDateOrder(o);
+                        }}
+                      >
+                        <CalendarDays className="h-4 w-4" /> Fecha
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -617,6 +722,19 @@ export default function SalesPage() {
           />
           </>
         )
+      )}
+
+      {dateOrder && (
+        <ChangeDateDialog
+          order={dateOrder}
+          onClose={() => setDateOrder(null)}
+          onDone={() => {
+            queryClient.invalidateQueries({ queryKey: ['sales-orders'] });
+            queryClient.invalidateQueries({ queryKey: ['accounts'] });
+            queryClient.invalidateQueries({ queryKey: ['home'] });
+            setDateOrder(null);
+          }}
+        />
       )}
 
       {returnOrder && (

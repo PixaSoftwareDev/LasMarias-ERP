@@ -53,7 +53,7 @@ export const milkReceptionStatusSchema = z.enum([
 ]);
 export type MilkReceptionStatus = z.infer<typeof milkReceptionStatusSchema>;
 
-// Una descarga puede traer leche de varios tambos (hasta 4): cada tambo con sus
+// Una descarga puede traer leche de varios tambos (sin tope): cada tambo con sus
 // litros, para luego pagarle a cada productor por separado (pedido #17).
 export const milkReceptionLineSchema = z.object({
   producerId: uuidSchema,
@@ -99,7 +99,8 @@ export type MilkReception = z.infer<typeof milkReceptionSchema>;
 // estado y batch.
 export const createMilkReceptionInputSchema = z.object({
   receivedAt: isoDateTimeSchema,
-  // Tambos de la descarga: 1 (single) hasta 4. Cada uno con sus litros (y declarados).
+  // Tambos de la descarga: 1 o más, sin tope (un remito puede traer 6-7 tamboreros).
+  // Cada uno con sus litros (y declarados).
   producers: z
     .array(
       z.object({
@@ -110,8 +111,7 @@ export const createMilkReceptionInputSchema = z.object({
         declaredLiters: z.number().nonnegative().optional(),
       }),
     )
-    .min(1, 'Cargá al menos un tambo')
-    .max(4, 'Hasta 4 tambos por descarga'),
+    .min(1, 'Cargá al menos un tambo'),
   vehiclePlate: z.string().max(20).optional(),
   driverName: z.string().max(120).optional(),
   remito: z.string().max(50).optional(),

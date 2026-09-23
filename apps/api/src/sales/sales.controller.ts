@@ -5,6 +5,7 @@ import {
   Get,
   Header,
   Param,
+  Patch,
   ParseUUIDPipe,
   Post,
   Put,
@@ -18,11 +19,13 @@ import {
   createReturnInputSchema,
   createSalesOrderInputSchema,
   registerPaymentInputSchema,
+  updateSalesOrderDateInputSchema,
   upsertPriceListInputSchema,
   type ClientType,
   type CreateReturnInput,
   type CreateSalesOrderInput,
   type RegisterPaymentInput,
+  type UpdateSalesOrderDateInput,
   type UpsertPriceListInput,
 } from '@lasmarias/shared-schemas';
 import { z } from 'zod';
@@ -66,6 +69,16 @@ export class SalesController {
     @CurrentUser() user: JwtUserPayload,
   ) {
     return this.sales.createOrder(body, user.sub);
+  }
+
+  // Corregir la fecha de un despacho ya cargado (mueve también su cargo/cobro en cuenta).
+  @Patch('orders/:id/date')
+  @Roles('admin', 'gerente', 'vendedor')
+  updateOrderDate(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(updateSalesOrderDateInputSchema)) body: UpdateSalesOrderDateInput,
+  ) {
+    return this.sales.updateOrderDate(id, body);
   }
 
   // Borrado con reversa total: stock a los lotes de origen + cargo de cuenta corriente.

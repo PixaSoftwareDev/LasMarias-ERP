@@ -41,6 +41,11 @@ export class ProductEntity extends BaseEntity {
   @Column({ type: 'varchar', length: 8, name: 'cost_iva_mode', default: 'sin_iva' })
   costIvaMode!: string;
 
+  // Kg de referencia que trae un bulto (bolsa de masa, caja de queso). Solo sugiere y
+  // avisa al cargar bultos; el número real de cada lote lo pone el operario. Null = sin dato.
+  @Column({ type: 'numeric', precision: 10, scale: 3, name: 'kg_por_bulto', nullable: true })
+  kgPorBulto!: string | null;
+
   // Insumo trazable (fermento, calcio, cuajo…): exige cargar el N° de lote del proveedor
   // al ingresar stock. Requerido por bromatología.
   @Column({ type: 'boolean', name: 'requires_lot_number', default: false })

@@ -35,6 +35,15 @@ export class BatchEntity extends BaseEntity {
   @Column({ type: 'varchar', length: 16 })
   unit!: 'kg' | 'litro' | 'unidad';
 
+  // BULTOS del lote (bolsas/cajas), en paralelo a la cantidad. Enteros y nullable:
+  // null = este lote no se cuenta por bultos (leche, insumos, y todo lo cargado antes).
+  // El kg sigue mandando: stock, FEFO, costo y alertas nunca miran estos campos.
+  @Column({ type: 'integer', name: 'initial_bultos', nullable: true })
+  initialBultos!: number | null;
+
+  @Column({ type: 'integer', name: 'remaining_bultos', nullable: true })
+  remainingBultos!: number | null;
+
   // Costo unitario al que entró/se produjo el lote ($/litro la leche, $/kg la masa/producto).
   // Habilita el costeo encadenado: un lote intermedio (masa) hereda su costo al siguiente paso.
   @Column({ type: 'numeric', precision: 12, scale: 4, name: 'unit_cost', nullable: true })

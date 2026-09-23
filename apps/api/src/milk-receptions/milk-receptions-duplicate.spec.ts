@@ -2,8 +2,12 @@ import { MilkReceptionsService } from './milk-receptions.service';
 
 // Tests del aviso de DOBLE CARGA en la recepción de leche: mismo tambo, mismo día y mismos
 // litros → frena y pide confirmar (puede ser otra descarga real). Con confirmDuplicate=true
-// se salta el chequeo. Para aislar la lógica del chequeo (que corre ANTES de la transacción),
-// la transacción rechaza con un centinela: si el flujo llega ahí, el chequeo lo dejó pasar.
+// se salta el chequeo.
+//
+// IMPORTANTE (jul 2026): el chequeo corre DENTRO de la transacción y detrás de un candado
+// por firma. Antes corría afuera, y por eso dos cargas simultáneas no se veían entre sí y
+// entraban las dos (probado contra la base: +1.000 L de leche que nunca entró). El centinela
+// marca el punto en que el chequeo ya lo dejó pasar y sigue el alta real.
 
 jest.mock('../batches/batch.entity', () => ({ BatchEntity: { name: 'BatchEntity' } }));
 jest.mock('../inventory/inventory-movement.entity', () => ({
@@ -28,8 +32,20 @@ function makeService(sameDayReceptions: any[]) {
     getIvaRate: jest.fn().mockResolvedValue(21),
   };
   const exchangeRates = { toArs: jest.fn() };
-  // Si el flujo pasa el chequeo de duplicado, entra a la transacción → rechazamos con centinela.
-  const dataSource = { transaction: jest.fn(() => Promise.reject(new Error(TX_SENTINEL))) };
+  // La transacción SÍ corre (el chequeo vive adentro). El manager simulado responde el
+  // candado y la búsqueda de duplicados; si el chequeo deja pasar, cortamos con el centinela.
+  const manager = {
+    query: jest.fn().mockResolvedValue([]), // candados: sin base real, no hacen nada
+    getRepository: jest.fn(() => ({
+      find: jest.fn().mockResolvedValue(sameDayReceptions),
+      // Lo primero que hace el alta real después del chequeo es numerar el lote: si el
+      // flujo llega acá, es que el chequeo de duplicado lo dejó pasar.
+      createQueryBuilder: jest.fn(() => {
+        throw new Error(TX_SENTINEL);
+      }),
+    })),
+  };
+  const dataSource = { transaction: jest.fn(async (cb: any) => cb(manager)) };
 
   const service = new MilkReceptionsService(
     receptionRepo as any,
@@ -38,7 +54,7 @@ function makeService(sameDayReceptions: any[]) {
     exchangeRates as any,
     dataSource as any,
   );
-  return { service };
+  return { service, manager };
 }
 
 function input(overrides: any = {}) {
@@ -59,6 +75,17 @@ describe('MilkReceptionsService.create — aviso de doble carga', () => {
     const { service } = makeService([reception('5000')]);
 
     await expect(service.create(input() as any, 'user-1')).rejects.toThrow(/Ya cargaste una recepción/);
+  });
+
+  it('el chequeo corre DENTRO de la transacción, detrás del candado por firma', async () => {
+    // Si volviera a correr afuera, dos cargas simultáneas no se verían y entrarían las dos.
+    const { service, manager } = makeService([reception('5000')]);
+
+    await expect(service.create(input() as any, 'user-1')).rejects.toThrow(/Ya cargaste una recepción/);
+    expect(manager.query).toHaveBeenCalledWith(
+      'SELECT pg_advisory_xact_lock(1, hashtext($1))',
+      ['recepcion:tambo-1:5000'],
+    );
   });
 
   it('confirmDuplicate=true: se salta el aviso (llega a la transacción)', async () => {

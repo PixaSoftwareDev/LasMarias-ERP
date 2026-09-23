@@ -46,6 +46,9 @@ function makeService(opts: { product?: any; existingBatches?: any[] } = {}) {
   };
 
   const manager = {
+    // query: lo usan los candados de base (locks.ts). En los tests no hay base real,
+    // así que devuelve vacío: lo que se verifica acá es la lógica, no el bloqueo.
+    query: jest.fn().mockResolvedValue([]),
     getRepository: jest.fn((entity: any) => {
       const name = entity?.name ?? '';
       if (name === 'ProductEntity') return productRepo;

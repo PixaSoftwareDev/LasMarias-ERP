@@ -9,6 +9,7 @@ import type {
   CreateRecipeInput,
   CreateRecipeVersionInput,
   CreateSalesOrderInput,
+  UpdateSalesOrderDateInput,
   UpdateClientInput,
   UpdateProductInput,
   InventoryMovement,
@@ -178,7 +179,7 @@ export const recipesApi = {
 export const productionApi = {
   list: () => api<ProductionOrder[]>('/api/production-orders'),
   get: (id: string) => api<ProductionOrder>(`/api/production-orders/${id}`),
-  open: (input: { recipeId: string; operatorId: string; startedAt: string; milkInputs: { batchId: string; liters: number }[]; notes?: string }) =>
+  open: (input: { recipeId: string; operatorId: string; startedAt: string; milkInputs: { batchId: string; liters: number }[]; notes?: string; confirmDuplicate?: boolean }) =>
     api<ProductionOrder>('/api/production-orders/open', { method: 'POST', body: input }),
   // Editar. Para una orden ABIERTA alcanza con los campos de apertura. Para una CERRADA hay que
   // mandar además la producción real (actualOutputs/warehouseId/expectedYieldKgPerLiter): el
@@ -339,6 +340,9 @@ export const salesApi = {
     api<SalesOrder>('/api/sales/orders', { method: 'POST', body: input }),
   removeOrder: (id: string) =>
     api<{ deleted: true; code: string }>(`/api/sales/orders/${id}`, { method: 'DELETE' }),
+  // Corregir la fecha de una venta ya cargada (mueve también su cargo/cobro en cuenta).
+  updateOrderDate: (id: string, input: UpdateSalesOrderDateInput) =>
+    api<SalesOrder>(`/api/sales/orders/${id}/date`, { method: 'PATCH', body: input }),
   // Listas de precio por tipo de cliente (editable a mano).
   priceList: (clientType: ClientType) =>
     api<PriceListItem[]>(`/api/sales/price-list?clientType=${encodeURIComponent(clientType)}`),

@@ -15,7 +15,7 @@ import { productsApi, salesApi, exchangeRatesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { formatMoney } from '@/lib/utils';
 import { CURRENCY_OPTIONS, currencySymbol, equivalentArs } from '@/features/currency';
-import type { ClientType, Currency } from '@lasmarias/shared-schemas';
+import type { ClientType, Currency, PriceBasis } from '@lasmarias/shared-schemas';
 
 const CLIENT_TYPES: { value: ClientType; label: string }[] = [
   { value: 'minorista', label: 'Minorista' },
@@ -29,6 +29,8 @@ export default function PreciosPage() {
   const [clientType, setClientType] = useState<ClientType>('minorista');
   // precio por productId (string para input controlado).
   const [prices, setPrices] = useState<Record<string, string>>({});
+  // Cómo se cobra cada producto en esta lista: por kg/unidad o por bulto.
+  const [basis, setBasis] = useState<Record<string, PriceBasis>>({});
   // Moneda de toda la lista (ej: la lista mayorista en USD).
   const [currency, setCurrency] = useState<Currency>('ARS');
 
@@ -53,8 +55,13 @@ export default function PreciosPage() {
   useEffect(() => {
     if (!priceListQuery.data) return;
     const map: Record<string, string> = {};
-    for (const item of priceListQuery.data) map[item.productId] = String(item.unitPrice);
+    const basisMap: Record<string, PriceBasis> = {};
+    for (const item of priceListQuery.data) {
+      map[item.productId] = String(item.unitPrice);
+      basisMap[item.productId] = item.priceBasis ?? 'unidad';
+    }
     setPrices(map);
+    setBasis(basisMap);
     // La moneda de la lista la toma del primer ítem cargado (toda la lista comparte moneda).
     setCurrency(priceListQuery.data[0]?.currency ?? 'ARS');
   }, [priceListQuery.data]);
@@ -62,7 +69,7 @@ export default function PreciosPage() {
   const save = useMutation({
     mutationFn: () => {
       const items = sellableProducts
-        .map((p) => ({ productId: p.id, unitPrice: Number(prices[p.id]) }))
+        .map((p) => ({ productId: p.id, unitPrice: Number(prices[p.id]), priceBasis: basis[p.id] ?? 'unidad' }))
         .filter((i) => Number.isFinite(i.unitPrice) && i.unitPrice >= 0 && (prices[i.productId] ?? '') !== '');
       return salesApi.upsertPriceList({ clientType, currency, items });
     },
@@ -175,6 +182,15 @@ export default function PreciosPage() {
                         onChange={(e) => setPrices((cur) => ({ ...cur, [p.id]: e.target.value }))}
                       />
                     </div>
+                    <select
+                      aria-label={`Cómo se cobra ${p.name}`}
+                      className="mt-1 min-h-touch w-28 rounded-md border border-border bg-surface-elevated px-2 text-xs sm:w-36 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                      value={basis[p.id] ?? 'unidad'}
+                      onChange={(e) => setBasis((cur) => ({ ...cur, [p.id]: e.target.value as PriceBasis }))}
+                    >
+                      <option value="unidad">por {p.unit}</option>
+                      <option value="bulto">por bulto</option>
+                    </select>
                     {(() => {
                       const eq = equivalentArs(prices[p.id] ?? '', currency, latestRate.data ?? undefined);
                       if (eq != null) return <p className="mt-1 text-xs text-foreground-muted">≈ {formatMoney(eq)}</p>;

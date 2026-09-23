@@ -13,6 +13,7 @@ import { BatchEntity } from '../batches/batch.entity';
 import { InventoryMovementEntity } from '../inventory/inventory-movement.entity';
 import { WarehouseEntity } from '../inventory/warehouse.entity';
 import { siloHasRoomFor } from '../inventory/silo.helpers';
+import { lockBatches, lockDuplicateSignature, lockRow } from '../common/locks';
 import { ProducersService } from '../producers/producers.service';
 import { evaluateMilkQuality } from './milk-quality-limits';
 import { formatMilkBatchCode } from './batch-code';
@@ -133,25 +134,34 @@ export class MilkReceptionsService {
       lines.length > 1 ? `${primary.producerName} +${lines.length - 1} tambo(s)` : primary.producerName;
     const litersStr = totalLiters.toString();
 
-    // Aviso de posible doble carga: misma recepción del mismo tambo, el mismo día y por los
-    // mismos litros. No bloquea de una (puede haber dos descargas reales): frena y pide
-    // confirmar. Al confirmar, el front reenvía con confirmDuplicate=true y se salta el chequeo.
-    if (!input.confirmDuplicate) {
-      const dayStart = new Date(receivedAt);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(receivedAt);
-      dayEnd.setHours(23, 59, 59, 999);
-      const sameDay = await this.repo.find({
-        where: { producerId: primary.producerId, receivedAt: Between(dayStart, dayEnd) },
-      });
-      const dup = sameDay.find((r) => Number(r.liters) === Number(litersStr));
-      if (dup)
-        throw new ConflictException(
-          `Ya cargaste una recepción de ${primary.producerName} el ${dayStart.toLocaleDateString('es-AR')} por ${litersStr} litros (${dup.code}). Si es otra descarga real, confirmá para cargarla igual.`,
-        );
-    }
-
     return this.dataSource.transaction(async (manager) => {
+      // Serializa las recepciones IDÉNTICAS: antes este chequeo corría FUERA de la
+      // transacción, así que dos cargas simultáneas no se veían y entraban las dos
+      // (probado: +1.000 L de leche que nunca entró a la planta).
+      await lockDuplicateSignature(manager, `recepcion:${primary.producerId}:${litersStr}`);
+      // Además, el candado del silo: la validación de capacidad de más abajo lee el nivel
+      // actual, así que dos descargas al mismo silo no pueden pasarse de capacidad entre las dos.
+      for (const s of input.silos ?? []) await lockRow(manager, 'warehouses', s.warehouseId);
+      if (input.warehouseId) await lockRow(manager, 'warehouses', input.warehouseId);
+
+      // Aviso de posible doble carga: misma recepción del mismo tambo, el mismo día y por los
+      // mismos litros. No bloquea de una (puede haber dos descargas reales): frena y pide
+      // confirmar. Al confirmar, el front reenvía con confirmDuplicate=true y se salta el chequeo.
+      if (!input.confirmDuplicate) {
+        const dayStart = new Date(receivedAt);
+        dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(receivedAt);
+        dayEnd.setHours(23, 59, 59, 999);
+        const sameDay = await manager.getRepository(MilkReceptionEntity).find({
+          where: { producerId: primary.producerId, receivedAt: Between(dayStart, dayEnd) },
+        });
+        const dup = sameDay.find((r) => Number(r.liters) === Number(litersStr));
+        if (dup)
+          throw new ConflictException(
+            `Ya cargaste una recepción de ${primary.producerName} el ${dayStart.toLocaleDateString('es-AR')} por ${litersStr} litros (${dup.code}). Si es otra descarga real, confirmá para cargarla igual.`,
+          );
+      }
+
       const code = await this.nextBatchCode(manager, receivedAt);
 
       let batchId: string | null = null;
@@ -270,6 +280,10 @@ export class MilkReceptionsService {
           : reception.batchId
             ? [reception.batchId]
             : [];
+
+      // CANDADO sobre los lotes de la recepción: si una orden los está tomando en este
+      // mismo momento, esperamos y recién ahí evaluamos la guardia de abajo con el estado real.
+      await lockBatches(manager, batchIds);
 
       // Guardia: la leche no tiene que haberse usado en ninguna elaboración.
       for (const batchId of batchIds) {

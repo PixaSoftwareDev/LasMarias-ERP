@@ -1,6 +1,12 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, MoreThanOrEqual, Repository } from 'typeorm';
 import type {
   CloseProductionInput,
   Currency,
@@ -25,10 +31,19 @@ import {
 } from './elaboration-cost';
 import { UsersService } from '../users/users.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
+import { bultosForQuantity } from '../inventory/bultos-allocation';
+import { lockBatches, lockBatchesOfProduct, lockDuplicateSignature, lockRow } from '../common/locks';
 
 // Leche (o masa) descontada al reservar una orden. Con estos datos el que abre/edita la orden
 // registra el movimiento de salida una vez que ya tiene el id de la orden.
-type MilkConsumption = { batchId: string; productId: string | null; unit: 'kg' | 'litro' | 'unidad'; liters: number };
+// `bultos` solo aplica cuando el input es masa embolsada; en leche a granel es null.
+type MilkConsumption = {
+  batchId: string;
+  productId: string | null;
+  unit: 'kg' | 'litro' | 'unidad';
+  liters: number;
+  bultos: number | null;
+};
 
 @Injectable()
 export class ProductionService {
@@ -56,7 +71,13 @@ export class ProductionService {
       relations: { recipe: true, operator: true },
     });
     if (!r) throw new NotFoundException(`Orden de producción ${id} no encontrada`);
-    return this.toDto(r);
+    // ¿Esta orden tiene realmente descontada su leche? Lo dicen sus movimientos de salida.
+    // Sin esto, la pantalla de edición no puede distinguir un lote que ESTA orden reservó
+    // de uno que quedó en cero porque se lo llevó otra (y mostraba un cartel equivocado).
+    const salidas = await this.dataSource.getRepository(InventoryMovementEntity).count({
+      where: { referenceType: 'production_order', referenceId: r.id, type: 'out' },
+    });
+    return { ...this.toDto(r), milkReserved: salidas > 0 };
   }
 
   // Reserva los lotes de materia prima (leche o masa) y calcula las salidas esperadas con la
@@ -77,6 +98,12 @@ export class ProductionService {
     // Como ahora la reserva descuenta el saldo real, el disponible es directamente
     // batch.remainingQuantity: lo que otras órdenes ya reservaron ya está descontado, así que no
     // hace falta la vieja cuenta de "comprometido por otras órdenes abiertas".
+    // CANDADO: se toman todos los lotes de la orden ANTES de leer un solo saldo. Sin esto,
+    // dos aperturas simultáneas leen el mismo saldo y la segunda pisa a la primera (probado:
+    // 8 órdenes se llevaron 8.000 L de un lote de 5.000). Con el candado, la segunda espera
+    // y lee el saldo ya descontado, así el "no tiene suficiente" de abajo funciona de verdad.
+    await lockBatches(manager, input.milkInputs.map((m) => m.batchId));
+
     const milkInputs: ProductionMilkInput[] = [];
     const consumed: MilkConsumption[] = [];
     let totalLiters = 0;
@@ -91,12 +118,23 @@ export class ProductionService {
           `El lote ${batch.code} no tiene suficiente: pide ${mi.liters}, queda ${batch.remainingQuantity}`,
         );
       milkInputs.push({ batchId: batch.id, batchCode: batch.code, liters: mi.liters });
-      consumed.push({ batchId: batch.id, productId: batch.productId, unit: batch.unit, liters: mi.liters });
+      // Si el input viene embolsado (masa), se consumen también sus bultos, a prorrata de
+      // lo que se toma. La leche a granel no tiene bultos → null y esto no hace nada.
+      const bultosTomados = bultosForQuantity(mi.liters, available, batch.remainingBultos);
+      consumed.push({
+        batchId: batch.id,
+        productId: batch.productId,
+        unit: batch.unit,
+        liters: mi.liters,
+        bultos: bultosTomados,
+      });
       totalLiters += mi.liters;
       // Descontar el stock del silo YA (reserva = consumo): baja el saldo y marca en_proceso
       // mientras la orden esté abierta; agotado si el lote quedó en cero.
       const remaining = Math.round((available - mi.liters) * 1000) / 1000;
       batch.remainingQuantity = String(remaining);
+      if (batch.remainingBultos != null && bultosTomados != null)
+        batch.remainingBultos = batch.remainingBultos - bultosTomados;
       batch.status = remaining === 0 ? 'agotado' : 'en_proceso';
       await manager.getRepository(BatchEntity).save(batch);
     }
@@ -156,6 +194,7 @@ export class ProductionService {
           reason: 'production',
           quantity: String(c.liters),
           unit: c.unit,
+          bultos: c.bultos,
           referenceType: 'production_order',
           referenceId: order.id,
           createdById: order.operatorId,
@@ -177,10 +216,14 @@ export class ProductionService {
     const movements = await movementRepo.find({
       where: { referenceType: 'production_order', referenceId: order.id, type: 'out' },
     });
+    // CANDADO antes de devolver saldo: si otra operación está tocando estos lotes, esperamos.
+    await lockBatches(manager, movements.map((m) => m.batchId));
     for (const m of movements) {
       const batch = await batchRepo.findOne({ where: { id: m.batchId } });
       if (!batch) continue;
       batch.remainingQuantity = String(round3(Number(batch.remainingQuantity) + Number(m.quantity)));
+      // Los bultos vuelven exactamente como salieron (los guarda el movimiento).
+      if (m.bultos != null) batch.remainingBultos = (batch.remainingBultos ?? 0) + m.bultos;
       if (Number(batch.remainingQuantity) > 0 && (batch.status === 'agotado' || batch.status === 'en_proceso'))
         batch.status = 'activo';
       await batchRepo.save(batch);
@@ -188,10 +231,48 @@ export class ProductionService {
     if (movements.length > 0) await movementRepo.remove(movements);
   }
 
+  // Firma de una orden para detectar la doble carga: misma receta + mismos lotes con los
+  // mismos litros. La fecha no entra: cargar dos veces la elaboración del mismo día es
+  // justamente el error que queremos frenar.
+  private static firmaOrden(input: OpenProductionInput): string {
+    const lotes = input.milkInputs
+      .map((m) => `${m.batchId}:${m.liters}`)
+      .sort()
+      .join('|');
+    return `produccion:${input.recipeId}:${lotes}`;
+  }
+
   async open(input: OpenProductionInput): Promise<ProductionOrder> {
     const operator = await this.users.findById(input.operatorId);
 
     return this.dataSource.transaction(async (manager) => {
+      // Serializa las aperturas IDÉNTICAS: si entran dos juntas, la segunda espera y recién
+      // ahí busca el duplicado (si no, ninguna ve a la otra y se cargan las dos).
+      await lockDuplicateSignature(manager, ProductionService.firmaOrden(input));
+
+      // Aviso de doble carga: la misma elaboración (receta + lotes + litros) cargada hace
+      // pocos minutos. No bloquea de una —puede ser una segunda tina real—: frena y pide
+      // confirmar, igual que ventas y recepciones.
+      if (!input.confirmDuplicate) {
+        const desde = new Date(Date.now() - 15 * 60 * 1000);
+        const recientes = await manager.getRepository(ProductionOrderEntity).find({
+          where: { recipeId: input.recipeId, createdAt: MoreThanOrEqual(desde) },
+        });
+        const mia = ProductionService.firmaOrden(input);
+        const dup = recientes.find(
+          (o) =>
+            ProductionService.firmaOrden({
+              recipeId: o.recipeId,
+              milkInputs: o.milkInputs.map((m) => ({ batchId: m.batchId, liters: m.liters })),
+            } as OpenProductionInput) === mia,
+        );
+        if (dup)
+          throw new ConflictException(
+            `Recién cargaste esta misma elaboración (${dup.code}): misma receta y los mismos lotes de leche. ` +
+              `Si es otra elaboración real, confirmá para cargarla igual.`,
+          );
+      }
+
       const plan = await this.reserveMilkAndPlan(manager, input);
 
       // Generar código de orden de producción: OP-YYYYMMDD-NNNN
@@ -236,6 +317,8 @@ export class ProductionService {
     return this.dataSource.transaction(async (manager) => {
       const orderRepo = manager.getRepository(ProductionOrderEntity);
 
+      // CANDADO: editar y cerrar/borrar la misma orden a la vez se serializa.
+      await lockRow(manager, 'production_orders', id);
       const order = await orderRepo.findOne({ where: { id } });
       if (!order) throw new NotFoundException(`Orden de producción ${id} no encontrada`);
       if (order.status === 'cancelled')
@@ -306,6 +389,10 @@ export class ProductionService {
 
   async close(orderId: string, input: CloseProductionInput): Promise<ProductionOrder> {
     return this.dataSource.transaction(async (manager) => {
+      // CANDADO sobre la orden: si llegan dos cierres juntos, el segundo espera y recién
+      // entonces lee el estado ya cerrado, así avisa "ya está cerrada" en vez de duplicar
+      // el lote de producto o morir con un error genérico.
+      await lockRow(manager, 'production_orders', orderId);
       const order = await manager.getRepository(ProductionOrderEntity).findOne({
         where: { id: orderId },
         relations: { recipe: true, operator: true, recipeVersion: true },
@@ -340,6 +427,9 @@ export class ProductionService {
       // En leche→masa son litros de leche ($/litro); en masa→mozzarella son kg de masa
       // ($/kg) heredados del cierre de la orden anterior vía batch.unitCost.
       const primaryInputs: PrimaryInput[] = [];
+      // CANDADO sobre los lotes consumidos: el cierre de una orden vieja todavía puede
+      // descontar leche (retrocompat), y nadie más puede tocarlos mientras tanto.
+      await lockBatches(manager, order.milkInputs.map((m) => m.batchId));
       for (const mi of order.milkInputs) {
         const batch = await manager.getRepository(BatchEntity).findOneByOrFail({ id: mi.batchId });
         // Por defecto, el costo del input es el congelado en el lote ($/litro de leche o
@@ -371,10 +461,18 @@ export class ProductionService {
         if (yaDescontada === 0) {
           if (Number(batch.remainingQuantity) < mi.liters)
             throw new BadRequestException(
-              `El lote ${batch.code} no alcanza para cerrar la orden ${order.code}: pide ${mi.liters} y quedan ${batch.remainingQuantity}. Puede que otra orden ya lo haya consumido.`,
+              `El lote ${batch.code} no alcanza para cerrar la orden ${order.code}: pide ${mi.liters} y quedan ${batch.remainingQuantity}. ` +
+                `Puede que otra orden ya lo haya consumido. Editá la orden y elegí un lote con saldo.`,
             );
+          const bultosTomados = bultosForQuantity(
+            mi.liters,
+            Number(batch.remainingQuantity),
+            batch.remainingBultos,
+          );
           const remaining = Math.round((Number(batch.remainingQuantity) - mi.liters) * 1000) / 1000;
           batch.remainingQuantity = String(remaining);
+          if (batch.remainingBultos != null && bultosTomados != null)
+            batch.remainingBultos = batch.remainingBultos - bultosTomados;
           batch.status = remaining === 0 ? 'agotado' : 'activo';
           await manager.getRepository(BatchEntity).save(batch);
           await manager.getRepository(InventoryMovementEntity).save(
@@ -385,6 +483,7 @@ export class ProductionService {
               reason: 'production',
               quantity: String(mi.liters),
               unit: batch.unit,
+              bultos: bultosTomados,
               referenceType: 'production_order',
               referenceId: order.id,
               createdById: order.operatorId,
@@ -494,6 +593,9 @@ export class ProductionService {
       }
 
       // --- 4. Crear el lote de producto, sellando su costo/kg (encadena los dos pasos) ---
+      // Bultos del producto principal (bolsas de masa / cajas de queso). Opcional: si el
+      // operario no los cargó, el lote queda sin bultos y todo funciona igual que antes.
+      const principalBultos = principalOutput.bultos ?? null;
       const productionBatch = await manager.getRepository(BatchEntity).save(
         manager.getRepository(BatchEntity).create({
           code: `LM-PP-${order.code.replace('OP-', '')}`,
@@ -503,6 +605,8 @@ export class ProductionService {
           productionDate: order.startedAt,
           initialQuantity: String(principalOutput.quantity),
           remainingQuantity: String(principalOutput.quantity),
+          initialBultos: principalBultos,
+          remainingBultos: principalBultos,
           unit: 'kg',
           status: 'activo',
           parentBatchId: order.milkInputs[0]?.batchId ?? null,
@@ -519,6 +623,7 @@ export class ProductionService {
           reason: 'production',
           quantity: String(principalOutput.quantity),
           unit: 'kg',
+          bultos: principalBultos,
           referenceType: 'production_order',
           referenceId: order.id,
           createdById: order.operatorId,
@@ -541,6 +646,8 @@ export class ProductionService {
             productionDate: order.startedAt,
             initialQuantity: String(o.quantity),
             remainingQuantity: String(o.quantity),
+            initialBultos: o.bultos ?? null,
+            remainingBultos: o.bultos ?? null,
             unit: bpProduct.unit,
             status: 'activo',
             parentBatchId: productionBatch.id,
@@ -557,6 +664,7 @@ export class ProductionService {
             reason: 'production',
             quantity: String(o.quantity),
             unit: bpProduct.unit,
+            bultos: o.bultos ?? null,
             referenceType: 'production_order',
             referenceId: order.id,
             createdById: order.operatorId,
@@ -567,6 +675,12 @@ export class ProductionService {
 
       // --- 4c. Descontar insumos del stock por FEFO. No bloquea si falta (solo descuenta lo
       // disponible); los insumos sin stock trackeado (ej. mano de obra, energía) se ignoran. ---
+      // Los insumos se bloquean TODOS JUNTOS y siempre en el mismo orden (por id). Si cada
+      // cierre los tomara en el orden de su receta, dos cierres con los mismos insumos en
+      // distinto orden se trabarían mutuamente (deadlock) y Postgres abortaría uno.
+      const idsInsumos = [...new Set(version.ingredients.map((i) => i.productId).filter(Boolean))].sort();
+      for (const productId of idsInsumos) await lockBatchesOfProduct(manager, productId as string);
+
       for (const ing of version.ingredients) {
         const consumed =
           ing.basis === 'per_liter_milk'
@@ -617,6 +731,7 @@ export class ProductionService {
           productId: o.productId,
           productName: exp?.productName ?? '',
           quantity: o.quantity,
+          bultos: o.bultos,
           unit: exp?.unit ?? 'kg',
           isPrincipal: o.isPrincipal,
           batchId: batch?.id,
@@ -646,6 +761,8 @@ export class ProductionService {
     return this.dataSource.transaction(async (manager) => {
       const orderRepo = manager.getRepository(ProductionOrderEntity);
 
+      // CANDADO: dos borrados simultáneos no pueden devolver el stock dos veces.
+      await lockRow(manager, 'production_orders', id);
       const order = await orderRepo.findOne({ where: { id } });
       if (!order) throw new NotFoundException(`Orden de producción ${id} no encontrada`);
 
@@ -684,6 +801,8 @@ export class ProductionService {
     const movements = await movementRepo.find({
       where: { referenceType: 'production_order', referenceId: order.id },
     });
+    // CANDADO sobre todo lo que esta orden tocó (consumido y producido) antes de revertir.
+    await lockBatches(manager, movements.map((m) => m.batchId));
     const producedBatchIds = [...new Set(movements.filter((m) => m.type === 'in').map((m) => m.batchId))];
 
     // Guardia: lo producido tiene que estar intacto (ni vendido ni consumido después).
@@ -708,6 +827,7 @@ export class ProductionService {
       const batch = await batchRepo.findOne({ where: { id: m.batchId } });
       if (!batch) continue;
       batch.remainingQuantity = String(round3(Number(batch.remainingQuantity) + Number(m.quantity)));
+      if (m.bultos != null) batch.remainingBultos = (batch.remainingBultos ?? 0) + m.bultos;
       if (batch.status === 'agotado' && Number(batch.remainingQuantity) > 0) batch.status = 'activo';
       await batchRepo.save(batch);
     }

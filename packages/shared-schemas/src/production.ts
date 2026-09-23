@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isoDateTimeSchema, uuidSchema } from './common';
+import { bultosSchema, isoDateTimeSchema, uuidSchema } from './common';
 
 // CLAUDE.md §4.3 — Producción es el núcleo del sistema.
 
@@ -18,6 +18,10 @@ export const productionOutputSchema = z.object({
   productName: z.string(),
   quantity: z.number().nonnegative(),
   unit: z.enum(['kg', 'litro', 'unidad']),
+  // Cantidad de BULTOS (bolsas/cajas) que salieron, además de los kg. Es una cuenta
+  // paralela: el kg sigue siendo la unidad de control (stock, FEFO, costo). Entero y
+  // opcional — los lotes cargados antes de esto no lo tienen.
+  bultos: bultosSchema,
   batchId: uuidSchema.optional(),
   batchCode: z.string().optional(),
   isPrincipal: z.boolean(),
@@ -81,6 +85,12 @@ export const productionOrderSchema = z.object({
   operatorId: uuidSchema,
   operatorName: z.string(),
   milkInputs: z.array(productionMilkInputSchema),
+  // ¿La leche de esta orden está realmente descontada del silo (reservada por ELLA)?
+  // false = la orden quedó abierta sin reservar (viene de antes de "reservar = consumir"),
+  // así que si sus lotes están en cero, la leche se la llevó OTRA orden. La pantalla de
+  // edición lo necesita para no decir "reservado en esta orden" cuando no es cierto.
+  // Solo viene en el detalle de una orden; en los listados no.
+  milkReserved: z.boolean().optional(),
   expectedOutputs: z.array(productionOutputSchema),
   actualOutputs: z.array(productionOutputSchema),
   totalMilkLiters: z.number(),
@@ -102,6 +112,10 @@ export const openProductionInputSchema = z.object({
     .array(z.object({ batchId: uuidSchema, liters: z.number().positive() }))
     .min(1, 'Tenés que elegir al menos un lote de leche'),
   notes: z.string().max(2000).optional(),
+  // Si el sistema detecta una orden igual (misma receta y mismos lotes) abierta hace pocos
+  // minutos, frena y avisa: es casi seguro una doble carga. El front reenvía con este flag
+  // en true cuando el usuario confirma que es otra elaboración real.
+  confirmDuplicate: z.boolean().optional(),
 });
 export type OpenProductionInput = z.infer<typeof openProductionInputSchema>;
 
@@ -114,6 +128,7 @@ export const updateProductionInputSchema = openProductionInputSchema.extend({
       z.object({
         productId: uuidSchema,
         quantity: z.number().nonnegative(),
+        bultos: bultosSchema,
         isPrincipal: z.boolean(),
       }),
     )
@@ -128,6 +143,8 @@ export const closeProductionInputSchema = z.object({
     z.object({
       productId: uuidSchema,
       quantity: z.number().nonnegative(),
+      // Bultos (bolsas/cajas) realmente obtenidos. Opcional: no afecta el costo.
+      bultos: bultosSchema,
       isPrincipal: z.boolean(),
     }),
   ),

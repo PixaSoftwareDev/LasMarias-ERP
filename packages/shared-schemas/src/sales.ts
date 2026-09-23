@@ -1,7 +1,14 @@
 import { z } from 'zod';
-import { isoDateTimeSchema, uuidSchema } from './common';
+import { bultosSchema, isoDateTimeSchema, uuidSchema } from './common';
 import { clientTypeSchema } from './client';
 import { currencySchema } from './money';
+
+// Base sobre la que se cotiza un precio: por kg (o la unidad del producto) o por BULTO.
+// El importe siempre termina en pesos; esto es cómo se tipeó el precio, y queda congelado
+// en la línea igual que la cotización del dólar (así el remito y la nota de crédito
+// reproducen exactamente lo que se cobró).
+export const priceBasisSchema = z.enum(['unidad', 'bulto']);
+export type PriceBasis = z.infer<typeof priceBasisSchema>;
 
 // Fase comercial — Despacho de mercadería: cliente + líneas con precio (lista por
 // tipo de cliente, editable a mano) → baja de stock + cargo en cuenta corriente.
@@ -11,7 +18,11 @@ export const salesOrderLineSchema = z.object({
   productName: z.string(),
   sku: z.string(),
   quantity: z.number().positive(),
+  // Bultos despachados en esta línea (opcional). Baja el saldo de bultos de los lotes.
+  bultos: bultosSchema,
   unitPrice: z.number().nonnegative(),
+  // Cómo se cotizó el unitPrice. Ausente en ventas viejas = 'unidad' (por kg).
+  priceBasis: priceBasisSchema.optional(),
   unit: z.string(),
   subtotal: z.number().nonnegative(),
 });
@@ -47,7 +58,10 @@ export const createSalesOrderInputSchema = z.object({
       z.object({
         productId: uuidSchema,
         quantity: z.number().positive('La cantidad tiene que ser mayor a 0'),
+        bultos: bultosSchema,
         unitPrice: z.number().nonnegative('El precio no puede ser negativo'),
+        // Por bulto: el importe es bultos × precio (exige bultos > 0). Por defecto 'unidad'.
+        priceBasis: priceBasisSchema.optional(),
       }),
     )
     .min(1, 'Cargá al menos un ítem'),
@@ -58,11 +72,22 @@ export const createSalesOrderInputSchema = z.object({
   // Moneda en que se cotizaron los precios (los unitPrice ya llegan en pesos convertidos).
   // El backend registra la cotización del día. Si se omite → ARS.
   currency: currencySchema.optional(),
+  // Fecha real del despacho. Por defecto hoy, pero se carga atrasado muy seguido (se pasan
+  // los remitos de varios días juntos): de esta fecha salen el remito, el vencimiento de la
+  // cuenta corriente y los reportes de ventas por período. Si se omite → ahora.
+  dispatchedAt: isoDateTimeSchema.optional(),
   // Si el sistema detecta un despacho igual al mismo cliente hace pocos minutos (posible
   // doble-click) frena y avisa. El front reenvía con este flag cuando el usuario confirma.
   confirmDuplicate: z.boolean().optional(),
 });
 export type CreateSalesOrderInput = z.infer<typeof createSalesOrderInputSchema>;
+
+// Corregir la fecha de un despacho ya cargado (se cargó con la fecha del día y era de otro).
+// Mueve con ella el cargo de cuenta corriente, su vencimiento y el cobro al contado.
+export const updateSalesOrderDateInputSchema = z.object({
+  dispatchedAt: isoDateTimeSchema,
+});
+export type UpdateSalesOrderDateInput = z.infer<typeof updateSalesOrderDateInputSchema>;
 
 // --- Listas de precio por tipo de cliente (editable a mano) ---
 // Un precio por (tipo de cliente, producto). Sin vigencias: la fila vigente es is_active.
@@ -74,6 +99,8 @@ export const priceListItemSchema = z.object({
   sku: z.string(),
   unit: z.string(),
   unitPrice: z.number().nonnegative(),
+  // ¿El precio es por kg/unidad o por bulto? Ausente en listas viejas = 'unidad'.
+  priceBasis: priceBasisSchema.optional(),
   // Moneda en que está cargado el precio de la lista. Default ARS.
   currency: currencySchema.optional(),
   isActive: z.boolean(),
@@ -90,6 +117,7 @@ export const upsertPriceListInputSchema = z.object({
       z.object({
         productId: uuidSchema,
         unitPrice: z.number().nonnegative('El precio no puede ser negativo'),
+        priceBasis: priceBasisSchema.optional(),
       }),
     )
     .min(1, 'Cargá al menos un precio'),
@@ -170,6 +198,8 @@ export const createReturnInputSchema = z.object({
       z.object({
         productId: uuidSchema,
         quantity: z.number().positive('La cantidad tiene que ser mayor a 0'),
+        // Bultos que vuelven. Opcional; si se omite se reponen solo los kg.
+        bultos: bultosSchema,
       }),
     )
     .min(1, 'Cargá al menos un ítem a devolver'),
