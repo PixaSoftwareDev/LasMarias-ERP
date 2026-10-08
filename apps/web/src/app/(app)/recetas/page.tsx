@@ -1,9 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
-import { ChefHat, Pencil, Plus } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { ChefHat, Pencil, Plus, Power } from 'lucide-react';
+import type { Recipe } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
+import { RowActions } from '@/components/ui/row-actions';
+import { useConfirm } from '@/hooks/use-confirm';
+import { ApiError } from '@/lib/api-client';
 import { DataTable } from '@/components/ui/data-table';
 import { TableSkeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -11,7 +16,30 @@ import { PageHeader } from '@/components/page-header';
 import { recipesApi } from '@/features/api';
 
 export default function RecipesPage() {
-  const { data = [], isLoading } = useQuery({ queryKey: ['recipes'], queryFn: () => recipesApi.list() });
+  const queryClient = useQueryClient();
+  const confirm = useConfirm();
+  const { data: all = [], isLoading } = useQuery({ queryKey: ['recipes'], queryFn: () => recipesApi.list() });
+  // Las dadas de baja no se muestran: sus versiones y lotes viejos siguen en la trazabilidad.
+  const data = all.filter((r) => r.isActive);
+
+  const deactivate = useMutation({
+    mutationFn: (id: string) => recipesApi.update(id, { isActive: false }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['recipes'] });
+      toast.success('Receta dada de baja');
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo dar de baja la receta. Probá de nuevo.'),
+  });
+
+  async function onDeactivate(r: Recipe) {
+    const ok = await confirm({
+      title: `Dar de baja ${r.name}`,
+      message: 'Deja de aparecer en Recetas y en Producción. Los lotes ya elaborados con ella conservan su costo e historial.',
+      confirmLabel: 'Dar de baja',
+      destructive: true,
+    });
+    if (ok) deactivate.mutate(r.id);
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -55,9 +83,15 @@ export default function RecipesPage() {
               header: '',
               align: 'right',
               render: (r) => (
-                <Button asChild size="sm" variant="secondary">
-                  <Link href={`/recetas/${r.id}/nueva-version`}><Pencil className="h-4 w-4" /> Modificar</Link>
-                </Button>
+                <div className="flex items-center justify-end gap-1">
+                  <Button asChild size="sm" variant="secondary">
+                    <Link href={`/recetas/${r.id}/nueva-version`}><Pencil className="h-4 w-4" /> Modificar</Link>
+                  </Button>
+                  <RowActions
+                    label={`Acciones de ${r.name}`}
+                    actions={[{ label: 'Dar de baja', icon: Power, onClick: () => onDeactivate(r), destructive: true }]}
+                  />
+                </div>
               ),
             },
           ]}

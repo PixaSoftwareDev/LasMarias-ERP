@@ -7,6 +7,7 @@ import type {
   UpsertClientPricesInput,
   CreateProductInput,
   CreateRecipeInput,
+  UpdateRecipeInput,
   CreateRecipeVersionInput,
   CreateSalesOrderInput,
   UpdateSalesOrderDateInput,
@@ -170,6 +171,7 @@ export const recipesApi = {
   list: () => api<Recipe[]>('/api/recipes'),
   get: (id: string) => api<Recipe>(`/api/recipes/${id}`),
   create: (input: CreateRecipeInput) => api<Recipe>('/api/recipes', { method: 'POST', body: input }),
+  update: (id: string, input: UpdateRecipeInput) => api<Recipe>(`/api/recipes/${id}`, { method: 'PATCH', body: input }),
   createVersion: (id: string, input: CreateRecipeVersionInput) =>
     api<RecipeVersion>(`/api/recipes/${id}/versions`, { method: 'POST', body: input }),
   simulate: (input: SimulateRecipeInput) =>

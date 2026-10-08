@@ -8,8 +8,10 @@ import type {
   RecipeSimulationResult,
   RecipeVersion,
   SimulateRecipeInput,
+  UpdateRecipeInput,
 } from '@lasmarias/shared-schemas';
 import { RecipeEntity, RecipeVersionEntity } from './recipe.entity';
+import { ProductionOrderEntity } from '../production/production-order.entity';
 import { ProductsService } from '../products/products.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import type { Currency } from '@lasmarias/shared-schemas';
@@ -87,6 +89,33 @@ export class RecipesService {
       });
       return this.toDto(reloaded!);
     });
+  }
+
+  // Corrige nombre/descripción o da de baja la receta. Dar de baja NO borra nada: las versiones
+  // y los lotes ya elaborados conservan su historial; la receta solo deja de ofrecerse.
+  async update(id: string, input: UpdateRecipeInput): Promise<Recipe> {
+    const recipe = await this.recipes.findOne({ where: { id } });
+    if (!recipe) throw new NotFoundException(`Receta ${id} no encontrada`);
+
+    if (input.isActive === false && recipe.isActive) {
+      const abiertas = await this.dataSource.getRepository(ProductionOrderEntity).count({
+        where: [
+          { recipeId: id, status: 'open' },
+          { recipeId: id, status: 'in_progress' },
+        ],
+      });
+      if (abiertas > 0) {
+        throw new BadRequestException(
+          `La receta "${recipe.name}" tiene ${abiertas} orden(es) de producción sin cerrar. Cerralas o anulalas antes de darla de baja.`,
+        );
+      }
+    }
+
+    if (input.name !== undefined) recipe.name = input.name.trim();
+    if (input.description !== undefined) recipe.description = input.description?.trim() || null;
+    if (input.isActive !== undefined) recipe.isActive = input.isActive;
+    await this.recipes.save(recipe);
+    return this.get(id);
   }
 
   // Crea una versión nueva y desactiva las anteriores (mantiene historial).

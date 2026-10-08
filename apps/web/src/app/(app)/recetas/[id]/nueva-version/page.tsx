@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Boxes, Gauge, History, NotebookPen, Plus, Recycle, Trash2 } from 'lucide-react';
+import { Boxes, FileText, Gauge, History, NotebookPen, Plus, Recycle, Trash2 } from 'lucide-react';
 import type { IngredientBasis, ByproductDestination, Currency, Product } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,6 +21,8 @@ import { currencySymbol, equivalentArs } from '@/features/currency';
 import { NewIngredientDialog } from '@/components/recipes/new-ingredient-dialog';
 
 interface FormValues {
+  name: string;
+  description?: string;
   baseYieldKgPerLiter?: number;
   baselineFatPercent: number;
   baselineProteinPercent: number;
@@ -113,6 +115,8 @@ export default function NewRecipeVersionPage() {
   useEffect(() => {
     if (!active || prefilled) return;
     form.reset({
+      name: recipe.data?.name ?? '',
+      description: recipe.data?.description ?? '',
       baseYieldKgPerLiter: active.baseYieldKgPerLiter ?? undefined,
       baselineFatPercent: active.baselineFatPercent,
       baselineProteinPercent: active.baselineProteinPercent,
@@ -146,13 +150,19 @@ export default function NewRecipeVersionPage() {
       })),
     );
     setPrefilled(true);
-  }, [active, prefilled, form]);
+  }, [active, prefilled, form, recipe.data]);
 
   const ingredientProducts = products.data?.filter((p) => INGREDIENT_CATEGORIES.includes(p.category)) ?? [];
 
   const save = useMutation({
-    mutationFn: (i: FormValues) =>
-      recipesApi.createVersion(recipeId, {
+    mutationFn: async (i: FormValues) => {
+      // Si corrigió el nombre o la descripción, se guarda en la receta (no en la versión).
+      const name = i.name.trim();
+      const description = i.description?.trim() ?? '';
+      if (name !== (recipe.data?.name ?? '') || description !== (recipe.data?.description ?? '')) {
+        await recipesApi.update(recipeId, { name, description: description || null });
+      }
+      return recipesApi.createVersion(recipeId, {
         baseYieldKgPerLiter: Number(i.baseYieldKgPerLiter) > 0 ? Number(i.baseYieldKgPerLiter) : null,
         baselineFatPercent: Number(i.baselineFatPercent),
         baselineProteinPercent: Number(i.baselineProteinPercent),
@@ -182,17 +192,19 @@ export default function NewRecipeVersionPage() {
           destination: r.destination,
           referenceValuePerUnit: r.referenceValuePerUnit === '' ? undefined : Number(r.referenceValuePerUnit),
         })),
-      }),
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['recipes'] });
       queryClient.invalidateQueries({ queryKey: ['recipe', recipeId] });
-      toast.success('Nueva versión guardada. La anterior quedó archivada.');
+      toast.success('Receta guardada. La versión anterior quedó archivada.');
       router.push('/recetas');
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar la versión. Probá de nuevo.'),
   });
 
   function validateAndSubmit(v: FormValues) {
+    if (!v.name.trim()) { toast.error('Ingresá el nombre de la receta'); return; }
     for (const [idx, r] of ingredients.entries()) {
       if (!r.productId) { toast.error(`Insumo ${idx + 1}: elegí el producto`); return; }
       if (!(Number(r.quantity) > 0)) { toast.error(`Insumo ${idx + 1}: la cantidad tiene que ser mayor a 0`); return; }
@@ -260,6 +272,21 @@ export default function NewRecipeVersionPage() {
         description="Editá lo que cambia y guardá. El cambio se guarda como una versión nueva: la anterior queda archivada y los lotes ya producidos conservan la versión con la que se hicieron."      />
 
       <form onSubmit={form.handleSubmit(validateAndSubmit)} className="flex flex-col gap-5">
+        <Card>
+          <CardHeader><CardTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-primary-700" aria-hidden="true" />Datos generales</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            <Field label="Nombre de la receta" htmlFor="name" required error={form.formState.errors.name?.message}>
+              <Input id="name" {...form.register('name', { required: 'Ingresá el nombre de la receta' })} />
+            </Field>
+            <Field label="Producto principal" htmlFor="productName" hint="No se puede cambiar: los lotes ya elaborados dependen de él. Si está mal, dá de baja esta receta y creá una nueva.">
+              <Input id="productName" value={recipe.data.productName} readOnly disabled />
+            </Field>
+            <Field label="Descripción" htmlFor="description" className="sm:col-span-2">
+              <Input id="description" placeholder="Opcional" {...form.register('description')} />
+            </Field>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2"><Gauge className="h-5 w-5 text-primary-700" aria-hidden="true" />Parámetros de cálculo (opcional)</CardTitle></CardHeader>
           <CardContent className="grid grid-cols-1 gap-5 sm:grid-cols-2">

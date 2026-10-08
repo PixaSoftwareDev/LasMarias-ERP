@@ -38,7 +38,7 @@ export default function SimulatorPage() {
           <Field label="Receta" htmlFor="recipeId" required>
             <select className="flex min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-1" value={recipeId} onChange={(e) => setRecipeId(e.target.value)}>
               <option value="">Elegí una receta</option>
-              {recipes.data?.filter((r) => r.activeVersion).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              {recipes.data?.filter((r) => r.isActive && r.activeVersion).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           </Field>
           <Field label="Litros de leche" htmlFor="liters" required>

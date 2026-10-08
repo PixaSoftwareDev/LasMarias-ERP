@@ -102,6 +102,15 @@ export const createRecipeInputSchema = z.object({
 });
 export type CreateRecipeInput = z.infer<typeof createRecipeInputSchema>;
 
+// Corregir nombre/descripción o dar de baja una receta. El producto principal NO se cambia:
+// los lotes ya producidos dependen de él (si está mal, se da de baja y se crea bien).
+export const updateRecipeInputSchema = z.object({
+  name: z.string().min(1, 'Ingresá el nombre de la receta').max(200).optional(),
+  description: z.string().max(2000).nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+export type UpdateRecipeInput = z.infer<typeof updateRecipeInputSchema>;
+
 export const simulateRecipeInputSchema = z.object({
   recipeId: uuidSchema,
   liters: z.number().positive(),

@@ -1,11 +1,13 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import {
   createRecipeInputSchema,
   createRecipeVersionInputSchema,
   simulateRecipeInputSchema,
+  updateRecipeInputSchema,
   type CreateRecipeInput,
   type CreateRecipeVersionInput,
   type SimulateRecipeInput,
+  type UpdateRecipeInput,
 } from '@lasmarias/shared-schemas';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -34,6 +36,15 @@ export class RecipesController {
   @Roles('admin', 'gerente')
   create(@Body(new ZodValidationPipe(createRecipeInputSchema)) body: CreateRecipeInput) {
     return this.recipes.create(body);
+  }
+
+  @Patch(':id')
+  @Roles('admin', 'gerente')
+  update(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(updateRecipeInputSchema)) body: UpdateRecipeInput,
+  ) {
+    return this.recipes.update(id, body);
   }
 
   @Post(':id/versions')

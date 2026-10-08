@@ -309,7 +309,7 @@ export default function EditProductionPage() {
           <Field label="Receta" htmlFor="recipe" required>
             <select className={SELECT_CLASS} value={recipeId} onChange={(e) => setRecipeId(e.target.value)}>
               <option value="">Elegí una receta</option>
-              {recipes.data?.filter((r) => r.activeVersion).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              {recipes.data?.filter((r) => (r.isActive || r.id === recipeId) && r.activeVersion).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           </Field>
 
