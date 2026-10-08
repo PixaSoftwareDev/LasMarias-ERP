@@ -16,9 +16,10 @@ import { PageHeader } from '@/components/page-header';
 import type { Product } from '@lasmarias/shared-schemas';
 import { productsApi, recipesApi, exchangeRatesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
-import { formatMoney } from '@/lib/utils';
+import { formatDate, formatMoney } from '@/lib/utils';
 import { currencySymbol, equivalentArs } from '@/features/currency';
 import { NewIngredientDialog } from '@/components/recipes/new-ingredient-dialog';
+import { ExchangeRateDialog } from '@/components/recipes/exchange-rate-dialog';
 
 interface FormValues {
   productId: string;
@@ -98,6 +99,8 @@ export default function NewRecipePage() {
   const [byproducts, setByproducts] = useState<ByproductRow[]>([]);
   // Fila de insumo que abrió el modal "Nuevo insumo" (para auto-seleccionar el creado en ella).
   const [newInsumoForRow, setNewInsumoForRow] = useState<number | null>(null);
+  // Diálogo para cargar la cotización de hoy sin salir de la receta.
+  const [rateDialogOpen, setRateDialogOpen] = useState(false);
   // Campos de filas dinámicas que el usuario ya visitó (para validar en vivo, no recién al guardar).
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const touch = (key: string) => setTouched((s) => (s.has(key) ? s : new Set(s).add(key)));
@@ -399,8 +402,22 @@ export default function NewRecipePage() {
                         {fichaCost != null && currency !== 'ARS' && (() => {
                           const eq = equivalentArs(String(fichaCost), currency, latestRate.data ?? undefined);
                           if (eq != null)
-                            return <p className="mt-1 text-xs text-foreground-muted">≈ {formatMoney(eq)} /{p?.unit} (cotización del día)</p>;
-                          return <p className="mt-1 text-xs text-warning">Cargá la cotización del día para ver el equivalente en pesos.</p>;
+                            return (
+                              <p className="mt-1 text-xs text-foreground-muted">
+                                ≈ {formatMoney(eq)} /{p?.unit} (cotización del {formatDate(latestRate.data!.date)}) ·{' '}
+                                <button type="button" onClick={() => setRateDialogOpen(true)} className="font-medium text-primary-700 underline">
+                                  Actualizar
+                                </button>
+                              </p>
+                            );
+                          return (
+                            <p className="mt-1 text-xs text-warning">
+                              Falta la cotización del día para ver el equivalente en pesos.{' '}
+                              <button type="button" onClick={() => setRateDialogOpen(true)} className="font-medium text-primary-700 underline">
+                                Cargarla ahora
+                              </button>
+                            </p>
+                          );
                         })()}
                       </Field>
                     );
@@ -514,6 +531,7 @@ export default function NewRecipePage() {
       </form>
 
       {/* Crear un insumo sin salir de la receta: al crearlo queda seleccionado en la fila que lo pidió. */}
+      <ExchangeRateDialog open={rateDialogOpen} onClose={() => setRateDialogOpen(false)} current={latestRate.data} />
       <NewIngredientDialog
         open={newInsumoForRow !== null}
         onClose={() => setNewInsumoForRow(null)}

@@ -35,7 +35,14 @@ export function formatSignedMoney(n: number): string {
 
 // Fecha corta dd/mm/aaaa (ej: "02/06/2026"). Único formato de fecha sin hora.
 export function formatDate(input: string | Date): string {
-  const d = typeof input === 'string' ? new Date(input) : input;
+  // Una fecha sin hora ("2026-10-08") se interpreta como día LOCAL: con `new Date` sería
+  // medianoche UTC y en Argentina se mostraría el día anterior.
+  const d =
+    typeof input === 'string'
+      ? /^\d{4}-\d{2}-\d{2}$/.test(input)
+        ? new Date(Number(input.slice(0, 4)), Number(input.slice(5, 7)) - 1, Number(input.slice(8, 10)))
+        : new Date(input)
+      : input;
   return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
