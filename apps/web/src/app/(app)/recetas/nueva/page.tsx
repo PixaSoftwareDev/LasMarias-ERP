@@ -20,6 +20,7 @@ import { formatDate, formatMoney } from '@/lib/utils';
 import { currencySymbol, equivalentArs } from '@/features/currency';
 import { NewIngredientDialog } from '@/components/recipes/new-ingredient-dialog';
 import { ExchangeRateDialog } from '@/components/recipes/exchange-rate-dialog';
+import { CATEGORIAS_DE_ORIGEN, insumosDuplicados } from '@/lib/doble-costo';
 
 interface FormValues {
   productId: string;
@@ -35,7 +36,7 @@ interface FormValues {
 const INGREDIENT_CATEGORIES = ['materia_prima', 'insumo', 'envase', 'intermedio'];
 
 const BASIS_OPTIONS: { value: IngredientBasis; label: string }[] = [
-  { value: 'per_liter_milk', label: 'por litro de leche' },
+  { value: 'per_liter_milk', label: 'por litro (o kg) de lo que entra: leche, masa o crema' },
   { value: 'per_1000_liters_milk', label: 'por cada 1.000 litros' },
   { value: 'per_kg_product', label: 'por kg de producto' },
   { value: 'fixed_per_order', label: 'fijo por orden' },
@@ -281,7 +282,7 @@ export default function NewRecipePage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <p className="text-xs text-foreground-muted">
-              Cargá fermento, cuajo, sal, mano de obra, energía, envase… El precio de cada insumo se toma de su <strong>ficha en Productos</strong>: actualizalo ahí y las próximas elaboraciones lo usan solas. La leche (o la masa) que consume la orden <strong>no va acá</strong>: su costo se toma solo del lote al elaborar.
+              Cargá fermento, cuajo, sal, mano de obra, energía, envase… El precio de cada insumo se toma de su <strong>ficha en Productos</strong>: actualizalo ahí y las próximas elaboraciones lo usan solas. Lo que se elabora —leche, masa, crema o queso para reproceso— <strong>no va acá</strong>: se elige al abrir la orden y su costo se toma solo del lote.
             </p>
             {ingredients.length === 0 && (
               <p className="rounded-md bg-surface-subtle px-3 py-2 text-xs text-foreground-muted">
@@ -297,14 +298,23 @@ export default function NewRecipePage() {
                   </Button>
                 </div>
                 {(() => {
-                  // La leche/masa que consume la orden ya se cuesta sola desde el lote:
-                  // cargarla también como insumo la cobraría DOS veces (aviso, no bloqueo).
-                  const p = ingredientProducts.find((x) => x.id === row.productId);
-                  if (!p || (p.category !== 'materia_prima' && p.category !== 'intermedio')) return null;
+                  // Lo que se elabora (leche, masa, crema, queso) ya se cuesta solo desde el lote de
+                  // origen: cargarlo también como insumo lo cobraría DOS veces (aviso, no bloqueo).
+                  // También se detecta un insumo "disfrazado" (ej. CREMA DE LECHE PARA PASTEURIZAR).
+                  if (!row.productId) return null;
+                  const todos = products.data ?? [];
+                  const propio = form.watch('productId');
+                  const [dup] = insumosDuplicados(
+                    [{ productId: row.productId, productName: '' }],
+                    todos,
+                    todos.filter((x) => CATEGORIAS_DE_ORIGEN.includes(x.category) && x.id !== propio),
+                  );
+                  if (!dup) return null;
                   return (
                     <div className="mb-3 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-foreground">
-                      Ojo: la leche o la masa que consume la orden ya se cuesta sola, con el costo del lote.
-                      Si además la cargás acá como insumo, ese costo se cuenta <strong>dos veces</strong> y el lote va a dar más caro de lo real.
+                      Ojo: <strong>{dup.insumo}</strong>{dup.contra ? <> parece ser lo mismo que <strong>{dup.contra}</strong></> : null}.
+                      Lo que se elabora (leche, masa, crema o queso) no va como insumo: se elige al abrir la orden y su costo
+                      entra solo desde el lote. Si además lo cargás acá, se cuenta <strong>dos veces</strong> y el lote va a dar más caro de lo real.
                     </div>
                   );
                 })()}

@@ -10,6 +10,9 @@ export const productionMilkInputSchema = z.object({
   batchId: uuidSchema,
   batchCode: z.string(),
   liters: z.number().positive(),
+  // Categoría del producto del lote (vacío = leche cruda). Solo viene en el detalle de una
+  // orden: la pantalla de edición la usa para saber si el lote es masa, reproceso o crema.
+  category: z.string().optional(),
 });
 export type ProductionMilkInput = z.infer<typeof productionMilkInputSchema>;
 

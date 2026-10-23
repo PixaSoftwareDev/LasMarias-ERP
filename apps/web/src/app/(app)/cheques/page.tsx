@@ -362,7 +362,7 @@ function NewChequeForm({ onDone }: { onDone: () => void }) {
         <CardTitle>Nuevo cheque</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Tipo" htmlFor="ch-kind" required hint="Recibido (de un cliente) o propio (emitido).">
             <select id="ch-kind" className={SELECT_CLASS} value={kind} onChange={(e) => setKind(e.target.value as ChequeKind)}>
               <option value="recibido">Recibido</option>

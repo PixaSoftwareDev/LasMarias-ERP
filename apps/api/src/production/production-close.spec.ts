@@ -29,6 +29,10 @@ function makeService(
     // false = orden VIEJA que quedó abierta antes del cambio (no descontó la leche al abrir);
     // por defecto true = orden nueva (ya descontada al reservar).
     milkAlreadyReserved?: boolean;
+    // Costo propio del lote consumido. null = lote cargado a mano sin costo (stock inicial).
+    milkUnitCost?: string | null;
+    // Último lote PRODUCIDO (con costo) del mismo producto que el lote de origen.
+    lastProducedLot?: { unitCost: string; code: string } | null;
   } = {},
 ) {
   // Producto de cada input (para valuar masa a precio manual). Por defecto la leche es
@@ -78,7 +82,7 @@ function makeService(
     remainingQuantity: opts.milkRemaining ?? '1000',
     status: 'en_proceso',
     unit: 'litro',
-    unitCost: '10', // $10/litro (costo del lote)
+    unitCost: opts.milkUnitCost === undefined ? '10' : opts.milkUnitCost, // $10/litro (costo del lote)
   };
 
   const savedBatches: any[] = [];
@@ -87,6 +91,8 @@ function makeService(
 
   const batchRepo = {
     findOneByOrFail: jest.fn().mockResolvedValue(milkBatch),
+    // Último lote producido del producto de origen (respaldo de costo).
+    findOne: jest.fn().mockResolvedValue(opts.lastProducedLot ?? null),
     create: jest.fn().mockImplementation((b) => ({ ...b, id: 'prod-batch-1' })),
     save: jest.fn().mockImplementation((b) => {
       savedBatches.push(b);
@@ -267,6 +273,84 @@ describe('ProductionService.close', () => {
     //  → $25500 / 100 kg = $255/kg.
     const productBatch = savedBatches.find((b) => b.productId === PRINCIPAL_PRODUCT_ID);
     expect(productBatch.unitCost).toBe('255.0000');
+  });
+
+  // REPROCESO y CREMA (audios del dueño, 20-21/10/2026): el origen de una orden puede ser un
+  // lote de queso que vuelve a fundirse o la crema cruda. Esos lotes muchas veces se cargaron a
+  // mano como stock inicial, SIN costo. Sin costo propio, se usa el costo de referencia de la
+  // ficha del producto; si tampoco hay, entra a $0 (como hasta hoy) y la pantalla lo avisa.
+  describe('lote de origen sin costo propio (stock inicial de crema o queso para reprocesar)', () => {
+    const close = (service: ProductionService) =>
+      service.close('order-1', {
+        actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true }],
+      } as any);
+    const productBatchOf = (saved: any[]) => saved.find((b) => b.productId === PRINCIPAL_PRODUCT_ID);
+
+    it('usa el costo de referencia de la ficha: 1000 × $4 + insumo $500 = $4500 / 100 kg = $45/kg', async () => {
+      const { service, savedBatches } = makeService({
+        milkUnitCost: null,
+        milkProductId: 'prod-crema',
+        products: { 'prod-crema': { id: 'prod-crema', category: 'subproducto', defaultCost: '4' } },
+      });
+      await close(service);
+      expect(productBatchOf(savedBatches).unitCost).toBe('45.0000');
+    });
+
+    it('costo de referencia en USD: se convierte a pesos del día (1 USD = $1000 en el mock)', async () => {
+      const { service, savedBatches } = makeService({
+        milkUnitCost: null,
+        milkProductId: 'prod-crema',
+        products: {
+          'prod-crema': { id: 'prod-crema', category: 'subproducto', defaultCost: '0.004', defaultCostCurrency: 'USD' },
+        },
+      });
+      await close(service);
+      // 1000 × (0,004 × 1000 = $4) + $500 = $4500 / 100 kg.
+      expect(productBatchOf(savedBatches).unitCost).toBe('45.0000');
+    });
+
+    it('sin costo propio ni de referencia entra a $0: solo cuenta el insumo ($500 / 100 kg = $5/kg)', async () => {
+      const { service, savedBatches } = makeService({
+        milkUnitCost: null,
+        milkProductId: 'prod-queso',
+        products: { 'prod-queso': { id: 'prod-queso', category: 'queso', defaultCost: null } },
+      });
+      await close(service);
+      expect(productBatchOf(savedBatches).unitCost).toBe('5.0000');
+    });
+
+    it('sin ficha, usa el costo del último lote PRODUCIDO de ese producto: 1000 × $7 + $500 = $75/kg', async () => {
+      const { service, savedBatches } = makeService({
+        milkUnitCost: null,
+        milkProductId: 'prod-queso',
+        products: { 'prod-queso': { id: 'prod-queso', category: 'queso', defaultCost: null } },
+        lastProducedLot: { unitCost: '7', code: 'LM-PP-20261021-0002' },
+      });
+      await close(service);
+      expect(productBatchOf(savedBatches).unitCost).toBe('75.0000');
+    });
+
+    it('la ficha manda sobre el último lote producido', async () => {
+      const { service, savedBatches } = makeService({
+        milkUnitCost: null,
+        milkProductId: 'prod-queso',
+        products: { 'prod-queso': { id: 'prod-queso', category: 'queso', defaultCost: '4' } },
+        lastProducedLot: { unitCost: '7', code: 'LM-PP-X' },
+      });
+      await close(service);
+      expect(productBatchOf(savedBatches).unitCost).toBe('45.0000');
+    });
+
+    it('un lote de queso CON costo propio (reproceso de un lote producido) usa SU costo, no el de la ficha', async () => {
+      const { service, savedBatches } = makeService({
+        milkUnitCost: '10',
+        milkProductId: 'prod-queso',
+        products: { 'prod-queso': { id: 'prod-queso', category: 'queso', defaultCost: '99' } },
+      });
+      await close(service);
+      // 1000 × $10 + $500 = $10500 / 100 kg = $105/kg (la ficha de $99 no pisa el costo real del lote).
+      expect(productBatchOf(savedBatches).unitCost).toBe('105.0000');
+    });
   });
 
   it('sin rendimiento esperado: muestra solo el costo real, sin estándar ni variación (#12)', async () => {

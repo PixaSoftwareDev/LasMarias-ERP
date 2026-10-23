@@ -44,6 +44,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
         else if (Array.isArray(r.message)) message = r.message.join('. ');
         if (r.errors) errors = r.errors;
       }
+    } else if ((exception as { driverError?: { code?: string } })?.driverError?.code === '23505') {
+      // Dato repetido que ningún servicio validó antes (índice único de Postgres): mejor un
+      // mensaje que diga qué pasa que "error inesperado", que invita a reintentar igual.
+      status = HttpStatus.CONFLICT;
+      message = 'Ese dato ya está cargado en otro lado (está repetido). Revisá el código, el CUIT o el número.';
+      this.logger.warn((exception as Error).message);
     } else if (exception instanceof Error) {
       this.logger.error(exception.message, exception.stack);
     } else {

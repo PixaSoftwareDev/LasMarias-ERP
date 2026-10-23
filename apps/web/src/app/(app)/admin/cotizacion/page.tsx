@@ -59,7 +59,7 @@ export default function CotizacionPage() {
 
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><DollarSign className="h-5 w-5 text-primary-700" aria-hidden="true" /> Cargar cotización</CardTitle></CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Fecha" htmlFor="cot-date" required>
             <Input id="cot-date" type="date" value={date} max={todayKey()} onChange={(e) => setDate(e.target.value)} />
           </Field>
@@ -69,7 +69,7 @@ export default function CotizacionPage() {
           <Field label="Euro (EUR)" htmlFor="cot-eur" required hint="Pesos por 1 euro">
             <Input id="cot-eur" type="number" inputMode="decimal" step="0.01" min={0} prefix="$" placeholder="Ej: 1100" value={eur} onChange={(e) => setEur(e.target.value)} />
           </Field>
-          <div className="flex justify-end sm:col-span-3">
+          <div className="flex justify-end sm:col-span-2 lg:col-span-3">
             <Button onClick={() => save.mutate()} loading={save.isPending} loadingText="Guardando..." disabled={!canSave}>
               Guardar cotización
             </Button>

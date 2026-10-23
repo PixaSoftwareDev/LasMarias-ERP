@@ -14,6 +14,7 @@ import { PageHeader } from '@/components/page-header';
 import { inventoryApi, productionApi, recipesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { DobleCostoAviso, ReprocesoRows, SinCostoAviso, useStockSources, type InputRow } from '@/components/production/stock-inputs';
 
 interface MilkBatch {
   id: string;
@@ -27,7 +28,8 @@ interface MilkInputRow {
   liters: number;
 }
 
-type SourceKind = 'leche' | 'masa';
+// 'otro' = un subproducto en stock como origen (crema cruda → crema pasteurizada, suero → ricota).
+type SourceKind = 'leche' | 'masa' | 'otro';
 
 // Mismo lenguaje visual que el resto de los selects de la app (fondo elevado + foco).
 const SELECT_CLASS =
@@ -72,25 +74,15 @@ export default function NewProductionPage() {
     [milkBatchesQuery.data],
   );
 
-  // Lotes de masa (categoría intermedio) en stock.
-  const doughBatchesQuery = useQuery({
-    queryKey: ['consumable-batches', 'intermedio'],
-    queryFn: () => inventoryApi.consumableBatches('intermedio'),
-  });
-  const doughBatches: MilkBatch[] = useMemo(
-    () =>
-      (doughBatchesQuery.data ?? []).map((b) => ({
-        id: b.id,
-        code: b.code,
-        remainingQuantity: b.remainingQuantity,
-        label: `${b.code} · ${b.productName} (${b.remainingQuantity} ${b.unit})`,
-      })),
-    [doughBatchesQuery.data],
-  );
+  // Lotes en stock que pueden ser origen: masa, queso para reproceso y subproductos (crema).
+  const stock = useStockSources();
 
   // El silo es un filtro OPCIONAL: "Todos los silos" (siloId vacío) muestra la leche de
   // todos los tanques y una orden puede combinar lotes de varios para llegar a los litros.
-  const milkBatches = source === 'leche' ? milkBatchesFromReceptions : doughBatches;
+  const milkBatches: MilkBatch[] =
+    source === 'leche' ? milkBatchesFromReceptions : source === 'masa' ? stock.masa : stock.subproductos;
+  // Reproceso: solo con masa (mozzarella). Se suma a los lotes de la orden al abrirla.
+  const [reprocesos, setReprocesos] = useState<InputRow[]>([]);
 
   const [recipeId, setRecipeId] = useState('');
   // Fecha de elaboración: por defecto hoy, pero editable para cargar órdenes atrasadas.
@@ -104,7 +96,11 @@ export default function NewProductionPage() {
     if (next === source) return;
     setSource(next);
     setInputs([{ batchId: '', liters: 0 }]);
+    setReprocesos([]);
   }
+
+  // Todo lo que consume la orden: los lotes del origen elegido + el reproceso (si es masa).
+  const allInputs = [...inputs, ...(source === 'masa' ? reprocesos : [])].filter((i) => i.batchId && i.liters > 0);
 
   const open = useMutation({
     mutationFn: (confirmDuplicate?: boolean) =>
@@ -113,7 +109,7 @@ export default function NewProductionPage() {
         operatorId: user!.id,
         // Mediodía local: evita que el huso horario corra la fecha al día anterior/siguiente.
         startedAt: new Date(`${startedDate}T12:00:00`).toISOString(),
-        milkInputs: inputs.filter((i) => i.batchId && i.liters > 0),
+        milkInputs: allInputs,
         notes: notes || undefined,
         confirmDuplicate,
       }),
@@ -160,7 +156,7 @@ export default function NewProductionPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Abrir orden de producción"
-        description="Elegí la receta, el origen (leche o masa) y los lotes a consumir. Las salidas reales se cargan al cerrar."        action={<Button asChild variant="ghost"><Link href="/produccion"><ArrowLeft className="h-4 w-4" /> Volver</Link></Button>}
+        description="Elegí la receta, el origen (leche, masa o crema) y los lotes a consumir. Las salidas reales se cargan al cerrar."        action={<Button asChild variant="ghost"><Link href="/produccion"><ArrowLeft className="h-4 w-4" /> Volver</Link></Button>}
       />
 
       <Card>
@@ -192,11 +188,12 @@ export default function NewProductionPage() {
             label="¿Con qué se elabora?"
             htmlFor="source"
             required
-            hint="Elaboración en dos pasos: primero leche → masa, después masa → mozzarella o queso. La masa es un producto intermedio que queda en stock con su propio costo."
+            hint="Primero leche → masa; después masa (más reproceso, si hay) → mozzarella o queso. La crema cruda se pasteuriza eligiendo «Crema u otro subproducto»."
           >
             <select className={SELECT_CLASS} value={source} onChange={(e) => changeSource(e.target.value as SourceKind)}>
               <option value="leche">Leche cruda (paso 1: hacer masa)</option>
               <option value="masa">Masa en stock (paso 2: hacer mozzarella o queso)</option>
+              <option value="otro">Crema u otro subproducto en stock (ej: pasteurizar crema)</option>
             </select>
           </Field>
 
@@ -211,7 +208,9 @@ export default function NewProductionPage() {
 
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-sm font-medium">{source === 'leche' ? 'Lotes de leche a consumir' : 'Lotes de masa a consumir'}</p>
+              <p className="text-sm font-medium">
+                {source === 'leche' ? 'Lotes de leche a consumir' : source === 'masa' ? 'Lotes de masa a consumir' : 'Lotes a consumir'}
+              </p>
               <Button type="button" size="sm" variant="secondary" onClick={() => setInputs([...inputs, { batchId: '', liters: 0 }])}>
                 <Plus className="h-4 w-4" /> Agregar lote
               </Button>
@@ -222,12 +221,14 @@ export default function NewProductionPage() {
                   ? siloId
                     ? 'No hay lotes de leche disponibles en este silo. Probá "Todos los silos" o cargá una recepción aceptada.'
                     : 'No hay lotes de leche disponibles. Cargá primero una recepción aceptada.'
-                  : 'No hay lotes de masa en stock. Elaborá primero la masa o revisá el stock.'}
+                  : source === 'masa'
+                    ? 'No hay lotes de masa en stock. Elaborá primero la masa o revisá el stock.'
+                    : 'No hay crema ni otros subproductos en stock. Cargá primero el ingreso.'}
               </p>
             )}
             <div className="space-y-2">
               {inputs.map((row, idx) => (
-                <div key={idx} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,140px,auto]">
+                <div key={idx} className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr),140px,auto]">
                   <select
                     className="min-h-touch rounded-md border border-border px-3"
                     value={row.batchId}
@@ -254,6 +255,25 @@ export default function NewProductionPage() {
             </div>
           </div>
 
+          {source === 'masa' && (
+            <ReprocesoRows rows={reprocesos} onChange={setReprocesos} options={stock.reproceso} />
+          )}
+
+          {source !== 'leche' && (
+            <SinCostoAviso
+              batchIds={allInputs.map((i) => i.batchId)}
+              options={[...stock.masa, ...stock.reproceso, ...stock.subproductos]}
+            />
+          )}
+
+          <DobleCostoAviso
+            ingredients={recipes.data?.find((r) => r.id === recipeId)?.activeVersion?.ingredients ?? []}
+            originProductIds={[...stock.masa, ...stock.subproductos]
+              .filter((o) => inputs.some((i) => i.batchId === o.id))
+              .map((o) => o.productId)}
+            products={stock.products}
+          />
+
           <Field label="Notas" htmlFor="notes">
             <textarea
               id="notes"
@@ -268,7 +288,7 @@ export default function NewProductionPage() {
 
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={() => router.push('/produccion')}>Cancelar</Button>
-        <Button onClick={() => open.mutate(undefined)} loading={open.isPending} disabled={!recipeId || !startedDate || inputs.every((i) => !i.batchId)}>
+        <Button onClick={() => open.mutate(undefined)} loading={open.isPending} disabled={!recipeId || !startedDate || allInputs.length === 0}>
           Abrir orden
         </Button>
       </div>

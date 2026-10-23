@@ -1,3 +1,4 @@
+import Big from 'big.js';
 import type {
   TraceBackwardNode,
   TraceBatch,
@@ -118,8 +119,9 @@ function walkBackward(
   };
 }
 
-// --- Sugerencia FEFO pura: dada la cantidad y los lotes ordenados por vencimiento
-// (más próximo primero), arma las asignaciones y el faltante. No persiste nada.
+// --- Sugerencia FEFO pura: dada la cantidad y los lotes ya ordenados (el más viejo primero),
+// arma las asignaciones y el faltante. No persiste nada. Decimal exacto (big.js), igual que
+// el despacho real: en float, 869,2 − 709,9 − 159,3 mostraba "faltan 0".
 export interface FefoSuggestBatch {
   id: string;
   code: string;
@@ -136,19 +138,20 @@ export function buildFefoSuggestion(
   quantity: number,
   batches: FefoSuggestBatch[],
 ): FefoSuggestResult {
-  let pending = quantity;
+  let pending = new Big(quantity);
   const allocations: FefoSuggestResult['allocations'] = [];
   for (const batch of batches) {
-    if (pending <= 0) break;
+    if (pending.lte(0)) break;
     if (batch.remaining <= 0) continue;
-    const take = Math.min(batch.remaining, pending);
+    const available = new Big(batch.remaining);
+    const take = available.lt(pending) ? available : pending;
     allocations.push({
       batchId: batch.id,
       batchCode: batch.code,
-      take,
+      take: take.toNumber(),
       expirationDate: batch.expirationDate,
     });
-    pending -= take;
+    pending = pending.minus(take);
   }
-  return { allocations, shortage: Math.max(0, pending) };
+  return { allocations, shortage: pending.gt(0) ? pending.toNumber() : 0 };
 }

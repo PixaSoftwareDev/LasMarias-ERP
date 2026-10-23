@@ -9,7 +9,17 @@ export const isoDateTimeSchema = z.string().datetime({ offset: true });
 // CUIT argentino — 11 dígitos. Validación simple (formato), no checksum.
 export const cuitSchema = z
   .string()
-  .regex(/^\d{2}-?\d{8}-?\d{1}$/, 'CUIT inválido (formato esperado: 20-12345678-9)');
+  .regex(/^\d{2}-?\d{8}-?\d{1}$/, 'CUIT inválido (formato esperado: 20-12345678-9)')
+  // "00000000000" no es un CUIT: es lo que se tipea cuando el cliente no tiene. Va vacío.
+  .refine((v) => /[1-9]/.test(v), 'Si el cliente no tiene CUIT, dejá el campo vacío.');
+
+// CUIT opcional de verdad: el campo vacío del formulario llega como "" y antes se rechazaba
+// por "CUIT inválido", así que un cliente sin CUIT no se podía cargar (por eso en producción
+// tipearon 00000000000). Vacío = null: al crear queda sin CUIT y al editar BORRA el que tenía.
+export const optionalCuitSchema = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? null : v),
+  cuitSchema.nullable().optional(),
+);
 
 // Email opcional pero estricto
 export const emailSchema = z.string().email('Email inválido');
