@@ -20,12 +20,14 @@ import {
   createSalesOrderInputSchema,
   registerPaymentInputSchema,
   updateSalesOrderDateInputSchema,
+  updateSalesOrderPricesInputSchema,
   upsertPriceListInputSchema,
   type ClientType,
   type CreateReturnInput,
   type CreateSalesOrderInput,
   type RegisterPaymentInput,
   type UpdateSalesOrderDateInput,
+  type UpdateSalesOrderPricesInput,
   type UpsertPriceListInput,
 } from '@lasmarias/shared-schemas';
 import { z } from 'zod';
@@ -79,6 +81,16 @@ export class SalesController {
     @Body(new ZodValidationPipe(updateSalesOrderDateInputSchema)) body: UpdateSalesOrderDateInput,
   ) {
     return this.sales.updateOrderDate(id, body);
+  }
+
+  // Corregir los precios de un despacho ya cargado (crema por % de grasa del análisis).
+  @Patch('orders/:id/prices')
+  @Roles('admin', 'gerente', 'vendedor')
+  updateOrderPrices(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(updateSalesOrderPricesInputSchema)) body: UpdateSalesOrderPricesInput,
+  ) {
+    return this.sales.updateOrderPrices(id, body);
   }
 
   // Borrado con reversa total: stock a los lotes de origen + cargo de cuenta corriente.

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ShoppingCart, Plus, Trash2, Truck, FileText, Undo2, TriangleAlert, PackageCheck, CalendarDays } from 'lucide-react';
+import { ShoppingCart, Plus, Trash2, Truck, FileText, Undo2, TriangleAlert, PackageCheck, CalendarDays, BadgeDollarSign } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -15,6 +15,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { ReturnDialog } from '@/components/sales/return-dialog';
 import { ChangeDateDialog } from '@/components/sales/change-date-dialog';
+import { ChangePriceDialog } from '@/components/sales/change-price-dialog';
 import { clientsApi, inventoryApi, productsApi, salesApi, exchangeRatesApi, settingsApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
@@ -37,6 +38,8 @@ interface Line {
   unitPrice: number;
   // Cómo se cotiza el precio de esta línea: por kg/unidad o por bulto.
   priceBasis: PriceBasis;
+  // Lote elegido a mano. Sin elegir = sale del más viejo (automático).
+  batchId?: string;
 }
 
 const EMPTY_LINE: Line = { productId: '', quantity: 1, unitPrice: 0, priceBasis: 'unidad' };
@@ -52,10 +55,22 @@ function todayLocal(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-// Preview FEFO por línea (CLAUDE.md §4.4). Solo informativo: muestra de qué lote/s
-// saldrá la mercadería; el descuento real lo hace el backend al despachar.
-// Debounce sobre producto+cantidad para no spamear la API.
-function FefoPreview({ productId, quantity }: { productId: string; quantity: number }) {
+// De qué lote sale cada línea. Por defecto el más viejo (y sigue con el siguiente si no
+// alcanza); el dueño pidió poder elegir otro, porque a veces guardan el viejo para madurarlo.
+// El descuento real lo hace el backend al despachar. Debounce sobre producto+cantidad.
+function FefoPreview({
+  productId,
+  quantity,
+  batchId,
+  unit,
+  onChooseBatch,
+}: {
+  productId: string;
+  quantity: number;
+  unit: string;
+  batchId?: string;
+  onChooseBatch: (batchId: string | undefined) => void;
+}) {
   const [debounced, setDebounced] = useState<{ productId: string; quantity: number } | null>(null);
 
   useEffect(() => {
@@ -80,13 +95,50 @@ function FefoPreview({ productId, quantity }: { productId: string; quantity: num
   if (query.isError || !query.data) return null;
 
   const { allocations, shortage } = query.data;
+  const lotes = query.data.batches ?? [];
+  const elegido = batchId ? lotes.find((b) => b.batchId === batchId) : undefined;
+  const fechaLote = (b: (typeof lotes)[number]) =>
+    b.expirationDate ? `vence ${formatDate(b.expirationDate)}` : b.productionDate ? `elaborado ${formatDate(b.productionDate)}` : '';
 
   return (
     <div className="mt-2 space-y-1.5 rounded-lg border border-border-subtle bg-surface-subtle/60 px-3 py-2.5 text-xs">
-      <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-foreground-muted">
-        <PackageCheck className="h-3.5 w-3.5" aria-hidden="true" /> De qué lote sale
-      </p>
-      {allocations.length === 0 ? (
+      <label className="flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-foreground-muted">
+        <span className="flex items-center gap-1.5">
+          <PackageCheck className="h-3.5 w-3.5" aria-hidden="true" /> De qué lote sale
+        </span>
+        {lotes.length > 1 && (
+          <select
+            aria-label="Elegir de qué lote sale"
+            className="min-h-touch rounded-md border border-border bg-surface-elevated px-2 text-sm font-normal normal-case tracking-normal text-foreground"
+            value={batchId ?? ''}
+            onChange={(e) => onChooseBatch(e.target.value || undefined)}
+          >
+            <option value="">El más viejo primero</option>
+            {lotes.map((b) => (
+              <option key={b.batchId} value={b.batchId}>
+                {b.batchCode} · {fechaLote(b)} · {b.remaining.toLocaleString('es-AR')} {unit} disponibles
+              </option>
+            ))}
+          </select>
+        )}
+      </label>
+      {batchId ? (
+        !elegido ? (
+          <p className="flex items-center gap-1.5 text-amber-700">
+            <TriangleAlert className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+            El lote elegido ya no tiene stock. Elegí otro.
+          </p>
+        ) : elegido.remaining < quantity ? (
+          <p className="flex items-center gap-1.5 font-medium text-amber-700">
+            <TriangleAlert className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+            Ese lote tiene {elegido.remaining.toLocaleString('es-AR')} {unit}. Bajá la cantidad o agregá otra línea con otro lote.
+          </p>
+        ) : (
+          <p className="text-foreground-muted">
+            Sale todo del lote <span className="font-mono text-foreground">{elegido.batchCode}</span> ({fechaLote(elegido)}).
+          </p>
+        )
+      ) : allocations.length === 0 ? (
         <p className="flex items-center gap-1.5 text-amber-700">
           <TriangleAlert className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
           No hay lotes disponibles para este producto.
@@ -101,7 +153,7 @@ function FefoPreview({ productId, quantity }: { productId: string; quantity: num
           </p>
         ))
       )}
-      {shortage > 0 && (
+      {!batchId && shortage > 0 && (
         <p className="flex items-center gap-1.5 font-medium text-amber-700">
           <TriangleAlert className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
           Faltan {shortage.toLocaleString('es-AR', { maximumFractionDigits: 2 })} sin stock disponible.
@@ -132,6 +184,8 @@ export default function SalesPage() {
   const [dispatchDate, setDispatchDate] = useState(todayLocal());
   const [returnOrder, setReturnOrder] = useState<SalesOrder | null>(null);
   const [dateOrder, setDateOrder] = useState<SalesOrder | null>(null);
+  // Venta a la que se le corrige el precio (crema: se cobra según el % de grasa del análisis).
+  const [priceOrder, setPriceOrder] = useState<SalesOrder | null>(null);
   // Filtro de fechas de la lista de despachos.
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -245,6 +299,7 @@ export default function SalesPage() {
           bultos: l.bultos,
           unitPrice: l.unitPrice,
           priceBasis: l.priceBasis,
+          batchId: l.batchId,
         })),
         notes: notes || undefined,
         paymentMode,
@@ -308,6 +363,8 @@ export default function SalesPage() {
       cur.map((l, i) => {
         if (i !== idx) return l;
         const next = { ...l, ...patch };
+        // El lote elegido es de UN producto: si cambian el producto, vuelve al automático.
+        if (patch.productId !== undefined && patch.productId !== l.productId) next.batchId = undefined;
         if (patch.productId && priceByProduct.has(patch.productId)) {
           next.unitPrice = priceByProduct.get(patch.productId)!;
         }
@@ -345,7 +402,20 @@ export default function SalesPage() {
     [validLines, stockByProduct],
   );
 
+  // Línea a $0: casi nunca es una venta. En producción (20/10/2026) se cargaron 44.552 kg de
+  // masa a $0 a "VARIOS" para sacarla del stock, y eso ensució ventas y rentabilidad.
+  const hayPrecioCero = validLines.some((l) => !(l.unitPrice > 0));
+
   async function handleRegister() {
+    if (hayPrecioCero) {
+      const ok = await confirm({
+        title: '¿Venta a $0?',
+        message:
+          'Hay productos con precio $0. Si no es una venta de verdad, no la cargues acá: la masa que se usó para hacer mozzarella va como orden de Producción, y lo que se tira o se pierde va con "Dar de baja" en Stock. ¿Es una venta (por ejemplo, una muestra sin cargo)?',
+        confirmLabel: 'Sí, es una venta',
+      });
+      if (!ok) return;
+    }
     if (hasOverStock) {
       const ok = await confirm({
         title: 'Stock insuficiente',
@@ -489,7 +559,7 @@ export default function SalesPage() {
                 const conBultos = usaBultos(product?.category);
                 return (
                   <div key={idx} className="rounded-lg border border-border-subtle p-3">
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,90px,110px,auto]">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr),170px,150px,auto]">
                       <select
                         aria-label="Producto"
                         className="min-h-touch rounded-md border border-border bg-surface-elevated px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
@@ -506,6 +576,7 @@ export default function SalesPage() {
                         min={0.1}
                         aria-label="Cantidad"
                         suffix={lineUnit || undefined}
+                        placeholder="0"
                         value={row.quantity}
                         onChange={(e) => updateLine(idx, { quantity: Number(e.target.value) })}
                       />
@@ -577,8 +648,20 @@ export default function SalesPage() {
                         <span className="font-display font-bold text-foreground">{money(lineTotal)}</span>
                       </div>
                     )}
+                    {row.productId && !(row.unitPrice > 0) && (
+                      <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-amber-700">
+                        <TriangleAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                        Precio $0. Si es masa usada para hacer mozzarella, cargala en Producción; si es merma, usá &quot;Dar de baja&quot; en Stock.
+                      </p>
+                    )}
                     {row.productId && row.quantity > 0 && (
-                      <FefoPreview productId={row.productId} quantity={row.quantity} />
+                      <FefoPreview
+                        productId={row.productId}
+                        quantity={row.quantity}
+                        batchId={row.batchId}
+                        unit={lineUnit}
+                        onChooseBatch={(batchId) => updateLine(idx, { batchId })}
+                      />
                     )}
                   </div>
                 );
@@ -691,6 +774,19 @@ export default function SalesPage() {
                         <CalendarDays className="h-4 w-4" /> Fecha
                       </Button>
                     )}
+                    {canDelete && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Corregir precio de la venta ${o.code}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPriceOrder(o);
+                        }}
+                      >
+                        <BadgeDollarSign className="h-4 w-4" /> Precio
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -733,6 +829,19 @@ export default function SalesPage() {
             queryClient.invalidateQueries({ queryKey: ['accounts'] });
             queryClient.invalidateQueries({ queryKey: ['home'] });
             setDateOrder(null);
+          }}
+        />
+      )}
+
+      {priceOrder && (
+        <ChangePriceDialog
+          order={priceOrder}
+          onClose={() => setPriceOrder(null)}
+          onDone={() => {
+            queryClient.invalidateQueries({ queryKey: ['sales-orders'] });
+            queryClient.invalidateQueries({ queryKey: ['accounts'] });
+            queryClient.invalidateQueries({ queryKey: ['home'] });
+            setPriceOrder(null);
           }}
         />
       )}

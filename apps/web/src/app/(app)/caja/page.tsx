@@ -363,7 +363,7 @@ function NewAccountForm({ onDone }: { onDone: () => void }) {
   });
 
   return (
-    <div className="grid grid-cols-1 gap-4 rounded-xl border border-border-subtle bg-secondary-50/40 p-4 sm:grid-cols-4">
+    <div className="grid grid-cols-1 gap-4 rounded-xl border border-border-subtle bg-secondary-50/40 p-4 sm:grid-cols-2 lg:grid-cols-4">
       <Field label="Nombre" htmlFor="acc-name" required>
         <Input id="acc-name" autoFocus placeholder="Banco Nación" value={name} onChange={(e) => setName(e.target.value)} />
       </Field>

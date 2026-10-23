@@ -296,6 +296,19 @@ export const fefoSuggestionSchema = z.object({
   quantity: z.number(),
   allocations: z.array(fefoAllocationSchema),
   shortage: z.number(), // cantidad que no se pudo cubrir (0 si alcanza el stock)
+  // Todos los lotes con stock del producto, el más viejo primero: para elegir a mano de
+  // cuál sale la venta en vez del automático.
+  batches: z
+    .array(
+      z.object({
+        batchId: uuidSchema,
+        batchCode: z.string(),
+        remaining: z.number(),
+        productionDate: z.string().optional(),
+        expirationDate: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 export type FefoSuggestion = z.infer<typeof fefoSuggestionSchema>;
 

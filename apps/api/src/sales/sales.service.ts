@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import Big from 'big.js';
 import { DataSource, MoreThanOrEqual, Repository } from 'typeorm';
 import type { EntityManager } from 'typeorm';
 import type {
@@ -9,6 +10,7 @@ import type {
   SalesOrder,
   SalesOrderLine,
   UpdateSalesOrderDateInput,
+  UpdateSalesOrderPricesInput,
 } from '@lasmarias/shared-schemas';
 import { SalesOrderEntity } from './sales-order.entity';
 import { AccountMovementEntity } from './account-movement.entity';
@@ -19,6 +21,7 @@ import { ClientsService } from '../clients/clients.service';
 import { ProductsService } from '../products/products.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import { allocateBultos, bultosForQuantity } from '../inventory/bultos-allocation';
+import { sortOldestFirst } from '../inventory/oldest-first';
 import { lockBatches, lockBatchesOfProduct, lockDuplicateSignature, lockRow } from '../common/locks';
 import type { Currency } from '@lasmarias/shared-schemas';
 
@@ -47,18 +50,24 @@ export interface FefoPlan {
   shortage: number; // cantidad que no se pudo cubrir (0 si alcanzó)
 }
 
+// Las cuentas van en DECIMAL EXACTO (big.js): en float, 869,2 − 709,9 − 159,3 daba
+// 0,0000000000000568 y el despacho se frenaba con "faltan 0" (crema, oct 2026).
 export function planFefoAllocation(quantity: number, batches: FefoBatchInput[]): FefoPlan {
-  let pending = quantity;
+  let pending = new Big(quantity);
   const allocations: FefoAllocation[] = [];
   for (const batch of batches) {
-    if (pending <= 0) break;
-    const available = batch.remaining;
-    if (available <= 0) continue;
-    const take = Math.min(available, pending);
-    allocations.push({ batchId: batch.id, take, remainingAfter: available - take });
-    pending -= take;
+    if (pending.lte(0)) break;
+    const available = new Big(batch.remaining);
+    if (available.lte(0)) continue;
+    const take = available.lt(pending) ? available : pending;
+    allocations.push({
+      batchId: batch.id,
+      take: take.toNumber(),
+      remainingAfter: available.minus(take).toNumber(),
+    });
+    pending = pending.minus(take);
   }
-  return { allocations, shortage: Math.max(0, pending) };
+  return { allocations, shortage: pending.gt(0) ? pending.toNumber() : 0 };
 }
 
 @Injectable()
@@ -137,6 +146,7 @@ export class SalesService {
           priceBasis,
           unit: product.unit,
           subtotal,
+          ...(l.batchId && { batchId: l.batchId }),
         });
       }
       total = Math.round(total * 100) / 100;
@@ -184,6 +194,7 @@ export class SalesService {
 
       // Principio no negociable #4: el stock baja con el despacho, nunca a mano.
       await this.dischargeStock(manager, saved);
+      if (saved.lines.some((l) => l.batchId)) await manager.getRepository(SalesOrderEntity).save(saved);
 
       // Cuenta corriente: cargo por el total del despacho.
       const dueDate =
@@ -415,26 +426,42 @@ export class SalesService {
     }
   }
 
-  // Descuenta del stock las cantidades del despacho usando FEFO (vencimiento más
-  // próximo primero) y registra un movimiento de salida por cada lote afectado.
+  // Descuenta del stock las cantidades del despacho, el lote más viejo primero (o del lote
+  // que eligieron para la línea), y registra un movimiento de salida por cada lote afectado.
   private async dischargeStock(manager: EntityManager, order: SalesOrderEntity): Promise<void> {
-    for (const line of order.lines) {
+    // Primero las líneas con lote elegido: si una línea automática del mismo producto fuera
+    // antes, podría llevarse justo ese lote (el más viejo) y la elegida fallaría sin motivo.
+    const elegidasPrimero = [...order.lines].sort((a, b) => Number(!!b.batchId) - Number(!!a.batchId));
+    for (const line of elegidasPrimero) {
       // CANDADO sobre los lotes candidatos antes de mirar saldos: dos despachos del mismo
       // producto a la vez no pueden llevarse el mismo lote (sobreventa / stock negativo).
       await lockBatchesOfProduct(manager, line.productId);
-      const batches = await manager.getRepository(BatchEntity).find({
-        where: { productId: line.productId, status: 'activo' },
-        order: { expirationDate: 'ASC' }, // FEFO
-      });
+      const activos = sortOldestFirst(
+        await manager.getRepository(BatchEntity).find({
+          where: { productId: line.productId, status: 'activo' },
+        }),
+      );
+      // Lote elegido a mano: la línea sale entera de ese lote. Si no alcanza, se avisa cuánto
+      // tiene (para repartir entre dos lotes elegidos se cargan dos líneas).
+      const batches = line.batchId ? activos.filter((b) => b.id === line.batchId) : activos;
+      if (line.batchId && batches.length === 0)
+        throw new BadRequestException(
+          `El lote elegido ya no tiene stock de ${line.productName}. Elegí otro o dejá "el más viejo".`,
+        );
       const plan = planFefoAllocation(
         line.quantity,
         batches.map((b) => ({ id: b.id, remaining: Number(b.remainingQuantity) })),
       );
       if (plan.shortage > 0) {
+        const elegido = line.batchId ? batches[0] : null;
         throw new BadRequestException(
-          `No hay stock suficiente de ${line.productName} para despachar: faltan ${plan.shortage} ${line.unit}`,
+          elegido
+            ? `El lote ${elegido.code} tiene ${Number(elegido.remainingQuantity)} ${line.unit} de ${line.productName} y pediste ${line.quantity}. Bajá la cantidad o agregá otra línea con otro lote.`
+            : `No hay stock suficiente de ${line.productName} para despachar: faltan ${plan.shortage} ${line.unit}`,
         );
       }
+      // La línea guarda el código del lote elegido para mostrarlo en la venta.
+      if (line.batchId) line.batchCode = batches[0]!.code;
       const byId = new Map(batches.map((b) => [b.id, b]));
 
       // Bultos: si el vendedor los cargó, se reparte ese número entre los lotes que tocó
@@ -513,6 +540,80 @@ export class SalesService {
       }
 
       order.dispatchedAt = nuevaFecha;
+      await orderRepo.save(order);
+      const reloaded = await orderRepo.findOne({ where: { id }, relations: { client: true } });
+      return this.orderToDto(reloaded!);
+    });
+  }
+
+  // Corrige el precio de una venta ya cargada (pedido del dueño, oct 2026): la crema a granel
+  // se retira y se cobra según el % de grasa que da el análisis del comprador, días después.
+  // Recalcula cada línea y el total, y con ellos el cargo de cuenta corriente y —si fue
+  // contado— el cobro espejo, así el saldo del cliente sigue cerrando. El stock no se toca.
+  // No aplica a ventas con devoluciones: la nota de crédito se hizo con el precio viejo.
+  async updateOrderPrices(id: string, input: UpdateSalesOrderPricesInput): Promise<SalesOrder> {
+    return this.dataSource.transaction(async (manager) => {
+      await lockRow(manager, 'sales_orders', id);
+      const orderRepo = manager.getRepository(SalesOrderEntity);
+      const order = await orderRepo.findOne({ where: { id } });
+      if (!order) throw new NotFoundException(`Despacho ${id} no encontrado`);
+      if (input.unitPrices.length !== order.lines.length)
+        throw new BadRequestException(`Cargá un precio por cada producto de la venta ${order.code}.`);
+      const devoluciones = await manager.getRepository(CreditNoteEntity).count({ where: { salesOrderId: id } });
+      if (devoluciones > 0)
+        throw new BadRequestException(
+          `La venta ${order.code} tiene devoluciones: la nota de crédito se hizo con el precio anterior y no se puede corregir.`,
+        );
+
+      let total = new Big(0);
+      order.lines = order.lines.map((line, i) => {
+        const unitPrice = input.unitPrices[i]!;
+        const cantidadCobrada = line.priceBasis === 'bulto' ? (line.bultos ?? 0) : line.quantity;
+        const subtotal = new Big(unitPrice).times(cantidadCobrada).round(2);
+        total = total.plus(subtotal);
+        return { ...line, unitPrice, subtotal: subtotal.toNumber() };
+      });
+      const totalStr = total.round(2).toString();
+      order.total = totalStr;
+      if (input.reason?.trim()) {
+        const nota = `Precio corregido: ${input.reason.trim()}`;
+        order.notes = order.notes ? `${order.notes} — ${nota}` : nota;
+      }
+
+      // El cargo y el cobro contado que nacieron con la venta (misma fecha) siguen al total.
+      const accRepo = manager.getRepository(AccountMovementEntity);
+      const movs = await accRepo.find({ where: { referenceType: 'sales_order', referenceId: id } });
+      const nacidos = movs.filter((m) => m.occurredAt.getTime() === order.dispatchedAt.getTime());
+      const cargo = nacidos.find((m) => m.kind === 'charge');
+      if (cargo) {
+        cargo.amount = totalStr;
+        await accRepo.save(cargo);
+      }
+      if (order.paymentMode === 'contado') {
+        const cobro = nacidos.find((m) => m.kind === 'payment');
+        if (cobro && total.gt(0)) {
+          cobro.amount = totalStr;
+          await accRepo.save(cobro);
+        } else if (cobro) {
+          await accRepo.remove(cobro);
+        } else if (total.gt(0)) {
+          // Venta contado cargada a $0: no tenía cobro (createOrder no crea cobros de $0).
+          await accRepo.save(
+            accRepo.create({
+              clientId: order.clientId,
+              kind: 'payment',
+              amount: totalStr,
+              referenceType: 'sales_order',
+              referenceId: order.id,
+              occurredAt: order.dispatchedAt,
+              dueDate: null,
+              notes: `Cobro contado ${order.code}`,
+              createdById: order.createdById,
+            }),
+          );
+        }
+      }
+
       await orderRepo.save(order);
       const reloaded = await orderRepo.findOne({ where: { id }, relations: { client: true } });
       return this.orderToDto(reloaded!);

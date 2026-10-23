@@ -362,7 +362,7 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
             htmlFor="entry-cost"
             hint={costPrefilled ? 'Pre-relleno con el último precio conocido. Modificalo si cambió.' : 'Opcional.'}
           >
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2 lg:flex-row">
               <Input
                 id="entry-cost"
                 type="number"
@@ -377,7 +377,7 @@ function StockEntryForm({ onClose, stockHints }: { onClose: () => void; stockHin
               />
               <select
                 aria-label="Moneda del costo"
-                className="min-h-touch w-24 flex-none rounded-md border border-border bg-surface-elevated px-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                className="min-h-touch w-full flex-none rounded-md border border-border bg-surface-elevated px-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 lg:w-24"
                 value={currency}
                 onChange={(e) => setCurrency(e.target.value as Currency)}
               >

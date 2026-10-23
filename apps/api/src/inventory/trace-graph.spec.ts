@@ -225,4 +225,13 @@ describe('sugerencia FEFO', () => {
       { batchId: 'b1', batchCode: 'L-001', take: 8, expirationDate: '2026-06-01T00:00:00.000Z' },
     ]);
   });
+
+  it('cuenta en decimal exacto: 869,2 de 709,9 + 159,3 no deja "faltan 0"', () => {
+    const r = buildFefoSuggestion(869.2, [
+      { id: 'a', code: 'A', remaining: 709.9 },
+      { id: 'b', code: 'B', remaining: 159.3 },
+    ]);
+    expect(r.shortage).toBe(0);
+    expect(r.allocations.map((a) => a.take)).toEqual([709.9, 159.3]);
+  });
 });

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { Client, CreateClientInput, UpdateClientInput } from '@lasmarias/shared-schemas';
@@ -25,7 +25,25 @@ export class ClientsService {
     return this.toDto(c);
   }
 
+  // El CUIT no se puede repetir (índice único). Antes chocaba contra la base y el usuario veía
+  // "Ocurrió un error inesperado": en producción reintentaron 6 veces el mismo cliente con el
+  // CUIT 00000000000 de VARIOS (20/10/2026). Se compara por dígitos: 20-1234… = 201234….
+  private async assertCuitLibre(taxId: string | null | undefined, exceptId?: string): Promise<void> {
+    if (!taxId) return;
+    const digits = taxId.replace(/\D/g, '');
+    const otro = await this.repo
+      .createQueryBuilder('c')
+      .where("regexp_replace(c.tax_id, '\\D', '', 'g') = :digits", { digits })
+      .andWhere(exceptId ? 'c.id <> :exceptId' : '1=1', { exceptId })
+      .getOne();
+    if (otro)
+      throw new ConflictException(
+        `Ya hay un cliente con ese CUIT: ${otro.businessName}${otro.isActive ? '' : ' (dado de baja)'}. Si este cliente no tiene CUIT, dejá el campo vacío.`,
+      );
+  }
+
   async create(input: CreateClientInput): Promise<Client> {
+    await this.assertCuitLibre(input.taxId);
     const entity = this.repo.create({
       businessName: input.businessName,
       taxId: input.taxId ?? null,
@@ -45,6 +63,7 @@ export class ClientsService {
   async update(id: string, input: UpdateClientInput): Promise<Client> {
     const c = await this.repo.findOne({ where: { id } });
     if (!c) throw new NotFoundException(`Cliente ${id} no encontrado`);
+    if (input.taxId !== undefined) await this.assertCuitLibre(input.taxId, id);
     Object.assign(c, {
       ...(input.businessName !== undefined && { businessName: input.businessName }),
       ...(input.taxId !== undefined && { taxId: input.taxId }),

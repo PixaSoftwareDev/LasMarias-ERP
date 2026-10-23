@@ -171,11 +171,11 @@ export default function ProducersPage() {
                     : 'Precio de la leche. Si es en USD/EUR, se convierte a $ al recibir.'
                 }
               >
-                <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="flex flex-col gap-2 lg:flex-row">
                   <Input type="number" step="0.0001" inputMode="decimal" suffix="/L" placeholder="Ej: 320" className="flex-1" {...form.register('agreedPricePerLiter', { valueAsNumber: true })} />
                   <select
                     aria-label="Moneda del precio"
-                    className="min-h-touch w-full sm:w-24 rounded-md border border-border bg-surface-elevated px-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                    className="min-h-touch w-full lg:w-24 rounded-md border border-border bg-surface-elevated px-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
                     {...form.register('priceCurrency')}
                   >
                     <option value="ARS">ARS</option>

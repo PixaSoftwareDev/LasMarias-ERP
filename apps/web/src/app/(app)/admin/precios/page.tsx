@@ -168,7 +168,7 @@ export default function PreciosPage() {
                     <p className="font-mono text-xs text-foreground-muted">{p.sku} · por {p.unit}</p>
                   </div>
                   <div className="flex-shrink-0 text-right">
-                    <div className="relative w-28 sm:w-36">
+                    <div className="relative w-36 sm:w-44">
                       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-foreground-muted">{currencySymbol(currency)}</span>
                       <Input
                         type="number"
@@ -184,7 +184,7 @@ export default function PreciosPage() {
                     </div>
                     <select
                       aria-label={`Cómo se cobra ${p.name}`}
-                      className="mt-1 min-h-touch w-28 rounded-md border border-border bg-surface-elevated px-2 text-xs sm:w-36 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
+                      className="mt-1 min-h-touch w-36 rounded-md border border-border bg-surface-elevated px-2 text-xs sm:w-44 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
                       value={basis[p.id] ?? 'unidad'}
                       onChange={(e) => setBasis((cur) => ({ ...cur, [p.id]: e.target.value as PriceBasis }))}
                     >

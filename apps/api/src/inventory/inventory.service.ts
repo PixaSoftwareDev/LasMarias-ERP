@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import Big from 'big.js';
 import { Between, DataSource, EntityManager, Repository } from 'typeorm';
 import type {
   CreateWarehouseInput,
@@ -34,6 +35,8 @@ import { resolveAlertLevel } from './stock-alert';
 import { allocateBultos, bultosForQuantity } from './bultos-allocation';
 import { lockBatches, lockBatchesOfProduct, lockDuplicateSignature } from '../common/locks';
 import { siloFillPercent } from './silo.helpers';
+import { sortOldestFirst } from './oldest-first';
+import { resolveInputCost, type InputCostSource } from '../production/input-cost';
 import {
   buildBackwardTrace,
   buildFefoSuggestion,
@@ -53,6 +56,9 @@ export interface ConsumableBatchDto {
   unit: string;
   unitCost: number | null;
   expirationDate?: string;
+  // A qué costo entraría HOY como origen de una orden (misma regla que el cierre): la
+  // pantalla avisa si un lote cargado a mano entra con la ficha, el último lote o a $0.
+  entryCost: { unitCost: number; source: InputCostSource; fromLotCode?: string };
 }
 
 @Injectable()
@@ -414,22 +420,22 @@ export class InventoryService {
     // CANDADO sobre los lotes del producto antes de leer sus saldos: dos bajas o dos
     // ajustes simultáneos no pueden descontar el mismo lote dos veces.
     await lockBatchesOfProduct(manager, productId);
-    const lots = await manager.getRepository(BatchEntity).find({
-      where: { productId, status: 'activo' },
-      order: { expirationDate: 'ASC' },
-    });
+    const lots = sortOldestFirst(
+      await manager.getRepository(BatchEntity).find({ where: { productId, status: 'activo' } }),
+    );
 
     // Primero se decide de qué lote sale cuánto (sin tocar nada), para poder repartir
     // los bultos enteros sobre esa foto y que la suma cierre exacta.
+    // Decimal exacto: en float quedaba un resto de 1e-14 que tocaba un lote más de la cuenta.
     const plan: Array<{ lot: BatchEntity; take: number; avail: number }> = [];
-    let pending = quantity;
+    let pending = new Big(quantity);
     for (const lot of lots) {
-      if (pending <= 0) break;
-      const avail = Number(lot.remainingQuantity);
-      const take = Math.min(avail, pending);
-      if (take <= 0) continue;
-      plan.push({ lot, take, avail });
-      pending -= take;
+      if (pending.lte(0)) break;
+      const avail = new Big(lot.remainingQuantity);
+      const take = avail.lt(pending) ? avail : pending;
+      if (take.lte(0)) continue;
+      plan.push({ lot, take: take.toNumber(), avail: avail.toNumber() });
+      pending = pending.minus(take);
     }
     const repartoBultos =
       bultosPedidos != null
@@ -440,7 +446,7 @@ export class InventoryService {
           ).bultos
         : null;
 
-    let toConsume = quantity;
+    let consumed = new Big(0);
     for (const [idx, { lot, take, avail }] of plan.entries()) {
       // Los bultos bajan a prorrata de lo que sale, salvo que el usuario los haya dicho.
       const bultosTomados =
@@ -449,7 +455,7 @@ export class InventoryService {
           : repartoBultos
             ? (repartoBultos[idx] ?? 0)
             : bultosForQuantity(take, avail, lot.remainingBultos);
-      lot.remainingQuantity = String(avail - take);
+      lot.remainingQuantity = new Big(avail).minus(take).toString();
       if (lot.remainingBultos != null && bultosTomados != null)
         lot.remainingBultos = lot.remainingBultos - bultosTomados;
       if (Number(lot.remainingQuantity) <= 0) lot.status = 'agotado';
@@ -468,9 +474,9 @@ export class InventoryService {
           createdById: userId,
         }),
       );
-      toConsume -= take;
+      consumed = consumed.plus(take);
     }
-    return quantity - toConsume;
+    return consumed.toNumber();
   }
 
   // Dar de baja stock por descarte/merma/vencimiento (salida con motivo, FEFO).
@@ -618,9 +624,24 @@ export class InventoryService {
       .where("b.status IN ('activo', 'en_proceso')")
       .andWhere('b.remaining_quantity > 0');
     if (category) qb.andWhere('p.category = :category', { category });
-    qb.orderBy('b.expiration_date', 'ASC').addOrderBy('b.code', 'ASC');
+    qb.orderBy('b.expiration_date', 'ASC', 'NULLS LAST')
+      .addOrderBy('b.production_date', 'ASC')
+      .addOrderBy('b.code', 'ASC');
     const rows = await qb.getMany();
-    return rows.map((b) => ({
+    const deps = {
+      batches: this.batches,
+      toArs: (amount: number | string, currency: Currency, date: Date) => this.exchangeRates.toArs(amount, currency, date),
+    };
+    const hoy = new Date();
+    const costos = await Promise.all(
+      rows.map((b) =>
+        resolveInputCost(deps, b, b.product ?? null, hoy).catch(
+          // Sin cotización para convertir la ficha: no rompe el listado, avisa como sin costo.
+          () => ({ unitCost: '0', source: 'sin_costo' as const }),
+        ),
+      ),
+    );
+    return rows.map((b, i) => ({
       id: b.id,
       code: b.code,
       productId: b.productId ?? '',
@@ -630,6 +651,7 @@ export class InventoryService {
       unit: b.unit,
       unitCost: b.unitCost != null ? Number(b.unitCost) : null,
       expirationDate: b.expirationDate?.toISOString(),
+      entryCost: { ...costos[i]!, unitCost: Number(costos[i]!.unitCost) },
     }));
   }
 
@@ -647,7 +669,9 @@ export class InventoryService {
       .andWhere('b.product_id IS NULL')
       .andWhere('b.remaining_quantity > 0');
     if (warehouseId) qb.andWhere('b.warehouse_id = :warehouseId', { warehouseId });
-    qb.orderBy('b.expiration_date', 'ASC').addOrderBy('b.code', 'ASC');
+    qb.orderBy('b.expiration_date', 'ASC', 'NULLS LAST')
+      .addOrderBy('b.production_date', 'ASC')
+      .addOrderBy('b.code', 'ASC');
     const rows = await qb.getMany();
     return rows.map((b) => ({
       id: b.id,
@@ -708,12 +732,9 @@ export class InventoryService {
     };
   }
 
-  // FEFO — lotes activos ordenados por vencimiento más próximo.
+  // Lotes activos del producto, el más viejo primero (vencimiento y, si no hay, elaboración).
   async fefoBatchesForProduct(productId: string): Promise<BatchEntity[]> {
-    return this.batches.find({
-      where: { productId, status: 'activo' },
-      order: { expirationDate: 'ASC' },
-    });
+    return sortOldestFirst(await this.batches.find({ where: { productId, status: 'activo' } }));
   }
 
   // Conteo físico — registra ajustes para diferencias (CLAUDE.md §4.4).
@@ -903,7 +924,20 @@ export class InventoryService {
         expirationDate: b.expirationDate?.toISOString(),
       })),
     );
-    return { productId, quantity, ...result };
+    return {
+      productId,
+      quantity,
+      ...result,
+      batches: batches
+        .filter((b) => Number(b.remainingQuantity) > 0)
+        .map((b) => ({
+          batchId: b.id,
+          batchCode: b.code,
+          remaining: Number(b.remainingQuantity),
+          productionDate: b.productionDate?.toISOString(),
+          expirationDate: b.expirationDate?.toISOString(),
+        })),
+    };
   }
 
   warehouseToDto(w: WarehouseEntity): Warehouse {

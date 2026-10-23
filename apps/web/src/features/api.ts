@@ -11,6 +11,7 @@ import type {
   CreateRecipeVersionInput,
   CreateSalesOrderInput,
   UpdateSalesOrderDateInput,
+  UpdateSalesOrderPricesInput,
   UpdateClientInput,
   UpdateProductInput,
   InventoryMovement,
@@ -215,6 +216,8 @@ export interface ConsumableBatch {
   unit: string;
   unitCost: number | null;
   expirationDate?: string;
+  // A qué costo entra como origen de una orden (misma regla que el cierre).
+  entryCost: { unitCost: number; source: 'lote' | 'precio_masa' | 'ficha' | 'ultimo_lote' | 'sin_costo'; fromLotCode?: string };
 }
 
 export const inventoryApi = {
@@ -345,6 +348,9 @@ export const salesApi = {
   // Corregir la fecha de una venta ya cargada (mueve también su cargo/cobro en cuenta).
   updateOrderDate: (id: string, input: UpdateSalesOrderDateInput) =>
     api<SalesOrder>(`/api/sales/orders/${id}/date`, { method: 'PATCH', body: input }),
+  // Corregir los precios de una venta ya cargada (crema por % de grasa del análisis).
+  updateOrderPrices: (id: string, input: UpdateSalesOrderPricesInput) =>
+    api<SalesOrder>(`/api/sales/orders/${id}/prices`, { method: 'PATCH', body: input }),
   // Listas de precio por tipo de cliente (editable a mano).
   priceList: (clientType: ClientType) =>
     api<PriceListItem[]>(`/api/sales/price-list?clientType=${encodeURIComponent(clientType)}`),

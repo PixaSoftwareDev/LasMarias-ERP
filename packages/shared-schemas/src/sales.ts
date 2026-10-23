@@ -25,6 +25,10 @@ export const salesOrderLineSchema = z.object({
   priceBasis: priceBasisSchema.optional(),
   unit: z.string(),
   subtotal: z.number().nonnegative(),
+  // Lote elegido a mano para esta línea (pedido del dueño: "que salga el más viejo, pero
+  // que te dé la opción de elegir"). Ausente = automático, el más viejo primero.
+  batchId: uuidSchema.optional(),
+  batchCode: z.string().optional(),
 });
 export type SalesOrderLine = z.infer<typeof salesOrderLineSchema>;
 
@@ -62,6 +66,9 @@ export const createSalesOrderInputSchema = z.object({
         unitPrice: z.number().nonnegative('El precio no puede ser negativo'),
         // Por bulto: el importe es bultos × precio (exige bultos > 0). Por defecto 'unidad'.
         priceBasis: priceBasisSchema.optional(),
+        // Lote del que sale TODA la línea. Si se omite, sale del más viejo (y sigue con el
+        // siguiente si no alcanza). Para repartir entre dos lotes elegidos: dos líneas.
+        batchId: uuidSchema.optional(),
       }),
     )
     .min(1, 'Cargá al menos un ítem'),
@@ -88,6 +95,16 @@ export const updateSalesOrderDateInputSchema = z.object({
   dispatchedAt: isoDateTimeSchema,
 });
 export type UpdateSalesOrderDateInput = z.infer<typeof updateSalesOrderDateInputSchema>;
+
+// Corregir el precio de una venta ya cargada. Caso típico: la crema a granel se cobra según el
+// % de grasa del análisis del comprador, que llega días después del retiro. Un precio por línea
+// (mismo orden que la venta); el importe, el cargo en cuenta corriente y el cobro contado se
+// recalculan. El stock no se toca. `reason` queda anotado en la venta (ej: "Análisis 42% grasa").
+export const updateSalesOrderPricesInputSchema = z.object({
+  unitPrices: z.array(z.number().nonnegative('El precio no puede ser negativo')).min(1),
+  reason: z.string().max(300).optional(),
+});
+export type UpdateSalesOrderPricesInput = z.infer<typeof updateSalesOrderPricesInputSchema>;
 
 // --- Listas de precio por tipo de cliente (editable a mano) ---
 // Un precio por (tipo de cliente, producto). Sin vigencias: la fila vigente es is_active.

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { CreateProductInput, Product, UpdateProductInput } from '@lasmarias/shared-schemas';
@@ -22,7 +22,17 @@ export class ProductsService {
     return this.toDto(p);
   }
 
+  // El código (SKU) no se puede repetir (índice único). Antes chocaba contra la base y el usuario
+  // veía "Ocurrió un error inesperado" (CREMA PARA PASTEURIZAR con CDL y BOLSA RICOTTA con BR,
+  // 20/10/2026). Ahora se dice qué producto ya lo usa.
+  private async assertSkuLibre(sku: string, exceptId?: string): Promise<void> {
+    const otro = await this.repo.findOne({ where: { sku } });
+    if (otro && otro.id !== exceptId)
+      throw new ConflictException(`El código ${sku} ya lo usa el producto ${otro.name}. Elegí otro código.`);
+  }
+
   async create(input: CreateProductInput): Promise<Product> {
+    await this.assertSkuLibre(input.sku);
     const entity = this.repo.create({
       sku: input.sku,
       name: input.name,
@@ -44,6 +54,7 @@ export class ProductsService {
   async update(id: string, input: UpdateProductInput): Promise<Product> {
     const p = await this.repo.findOne({ where: { id } });
     if (!p) throw new NotFoundException(`Producto ${id} no encontrado`);
+    if (input.sku !== undefined) await this.assertSkuLibre(input.sku, id);
     Object.assign(p, {
       ...(input.sku !== undefined && { sku: input.sku }),
       ...(input.name !== undefined && { name: input.name }),

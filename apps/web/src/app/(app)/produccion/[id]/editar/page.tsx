@@ -15,6 +15,7 @@ import { TableSkeleton } from '@/components/ui/skeleton';
 import { inventoryApi, productionApi, recipesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { DobleCostoAviso, ReprocesoRows, SinCostoAviso, useStockSources, type InputRow } from '@/components/production/stock-inputs';
 
 interface MilkBatch {
   id: string;
@@ -28,15 +29,27 @@ interface MilkInputRow {
   liters: number;
 }
 
-type SourceKind = 'leche' | 'masa';
+// 'otro' = un subproducto en stock como origen (crema cruda → crema pasteurizada, suero → ricota).
+type SourceKind = 'leche' | 'masa' | 'otro';
 
 const SELECT_CLASS =
   'min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-1';
 
-// La masa (producto intermedio) se guarda con código LM-PP-…; la leche cruda con LM-LC-….
-// Así detectamos con qué se elaboró la orden para mostrar el origen correcto al editar.
-function detectSource(batchCode: string | undefined): SourceKind {
-  return batchCode?.startsWith('LM-LC') === false ? 'masa' : 'leche';
+// De qué tipo es cada lote de la orden, por la categoría de su producto (viene en el detalle
+// de la orden). Sin categoría = leche cruda; las órdenes viejas sin el dato se resuelven por
+// el código (la leche es LM-LC-…).
+type InputKind = SourceKind | 'reproceso';
+function inputKind(mi: { batchCode: string; category?: string }): InputKind {
+  if (mi.category === 'queso') return 'reproceso';
+  if (mi.category === 'subproducto') return 'otro';
+  if (mi.category === 'intermedio') return 'masa';
+  return mi.batchCode.startsWith('LM-LC') ? 'leche' : 'masa';
+}
+function detectSource(milkInputs: { batchCode: string; category?: string }[]): SourceKind {
+  const kinds = milkInputs.map(inputKind);
+  if (kinds.includes('otro')) return 'otro';
+  if (kinds.includes('masa') || kinds.includes('reproceso')) return 'masa';
+  return 'leche';
 }
 
 export default function EditProductionPage() {
@@ -70,22 +83,10 @@ export default function EditProductionPage() {
     [milkBatchesQuery.data],
   );
 
-  const doughBatchesQuery = useQuery({
-    queryKey: ['consumable-batches', 'intermedio'],
-    queryFn: () => inventoryApi.consumableBatches('intermedio'),
-  });
-  const doughBatches: MilkBatch[] = useMemo(
-    () =>
-      (doughBatchesQuery.data ?? []).map((b) => ({
-        id: b.id,
-        code: b.code,
-        remainingQuantity: b.remainingQuantity,
-        label: `${b.code} · ${b.productName} (${b.remainingQuantity} ${b.unit})`,
-      })),
-    [doughBatchesQuery.data],
-  );
-
-  const availableBatches = source === 'leche' ? milkBatchesFromReceptions : doughBatches;
+  // Lotes en stock que pueden ser origen: masa, queso para reproceso y subproductos (crema).
+  const stock = useStockSources();
+  const availableBatches: MilkBatch[] =
+    source === 'leche' ? milkBatchesFromReceptions : source === 'masa' ? stock.masa : stock.subproductos;
 
   // Los lotes de la orden que NO están en la lista de disponibles se agregan igual, para
   // poder verlos y cambiarlos. Pero hay dos motivos muy distintos por los que un lote no
@@ -99,10 +100,10 @@ export default function EditProductionPage() {
   // Antes se mostraba siempre "reservado en esta orden", que en el caso (b) es mentira y
   // tapaba justamente el problema que había que ver.
   const reservada = orderQuery.data?.milkReserved !== false;
-  const milkBatches: MilkBatch[] = useMemo(() => {
-    const merged = [...availableBatches];
+  const mergeOrderBatches = <T extends MilkBatch>(available: T[], kind: InputKind): MilkBatch[] => {
+    const merged: MilkBatch[] = [...available];
     for (const mi of orderQuery.data?.milkInputs ?? []) {
-      if (detectSource(mi.batchCode) !== source) continue;
+      if (inputKind(mi) !== kind) continue;
       if (merged.some((b) => b.id === mi.batchId)) continue;
       merged.push({
         id: mi.batchId,
@@ -114,21 +115,30 @@ export default function EditProductionPage() {
       });
     }
     return merged;
-  }, [availableBatches, orderQuery.data, source, reservada]);
+  };
+  const milkBatches = mergeOrderBatches(availableBatches, source);
+  const reprocesoOptions = mergeOrderBatches(stock.reproceso, 'reproceso').map((b) => ({
+    productId: '',
+    unitCost: 0,
+    ...b,
+    remainingQuantity: Number(b.remainingQuantity),
+  }));
 
   // Lotes de la orden que quedaron sin leche por culpa de otra orden: hay que avisarlo
   // arriba de todo, porque si no el operario guarda igual y el error recién aparece al cerrar.
   const lotesSinLeche = useMemo(() => {
     if (reservada) return [];
     return (orderQuery.data?.milkInputs ?? []).filter(
-      (mi) => !availableBatches.some((b) => b.id === mi.batchId),
+      (mi) => ![...availableBatches, ...stock.reproceso].some((b) => b.id === mi.batchId),
     );
-  }, [availableBatches, orderQuery.data, reservada]);
+  }, [availableBatches, stock.reproceso, orderQuery.data, reservada]);
 
   const [recipeId, setRecipeId] = useState('');
   const [startedDate, setStartedDate] = useState('');
   const [notes, setNotes] = useState('');
   const [inputs, setInputs] = useState<MilkInputRow[]>([{ batchId: '', liters: 0 }]);
+  // Reproceso (queso que vuelve a fundirse con la masa): solo con origen masa.
+  const [reprocesos, setReprocesos] = useState<InputRow[]>([]);
   const [seeded, setSeeded] = useState(false);
 
   // Solo se usan al editar una orden CERRADA: producción real (kg por producto), cámara destino
@@ -146,11 +156,17 @@ export default function EditProductionPage() {
     setRecipeId(order.recipeId);
     setStartedDate(order.startedAt.slice(0, 10));
     setNotes(order.notes ?? '');
-    setSource(detectSource(order.milkInputs[0]?.batchCode));
+    setSource(detectSource(order.milkInputs));
+    const principales = order.milkInputs.filter((mi) => inputKind(mi) !== 'reproceso');
     setInputs(
-      order.milkInputs.length
-        ? order.milkInputs.map((mi) => ({ batchId: mi.batchId, liters: mi.liters }))
+      principales.length
+        ? principales.map((mi) => ({ batchId: mi.batchId, liters: mi.liters }))
         : [{ batchId: '', liters: 0 }],
+    );
+    setReprocesos(
+      order.milkInputs
+        .filter((mi) => inputKind(mi) === 'reproceso')
+        .map((mi) => ({ batchId: mi.batchId, liters: mi.liters })),
     );
     // Si estaba cerrada, precargar la producción real y el esperado para no perderlos al recalcular.
     if (order.status === 'closed') {
@@ -165,7 +181,11 @@ export default function EditProductionPage() {
     if (next === source) return;
     setSource(next);
     setInputs([{ batchId: '', liters: 0 }]);
+    setReprocesos([]);
   }
+
+  // Todo lo que consume la orden: los lotes del origen elegido + el reproceso (si es masa).
+  const allInputs = [...inputs, ...(source === 'masa' ? reprocesos : [])].filter((i) => i.batchId && i.liters > 0);
 
   const save = useMutation({
     mutationFn: () =>
@@ -174,7 +194,7 @@ export default function EditProductionPage() {
         // Conservamos el operario original de la orden.
         operatorId: orderQuery.data!.operatorId,
         startedAt: new Date(`${startedDate}T12:00:00`).toISOString(),
-        milkInputs: inputs.filter((i) => i.batchId && i.liters > 0),
+        milkInputs: allInputs,
         notes: notes || undefined,
         // Solo si la orden estaba cerrada: mandar la producción real para recalcular el costo.
         ...(wasClosed
@@ -317,11 +337,12 @@ export default function EditProductionPage() {
             label="¿Con qué se elabora?"
             htmlFor="source"
             required
-            hint="Elaboración en dos pasos: primero leche → masa, después masa → mozzarella o queso."
+            hint="Primero leche → masa; después masa (más reproceso, si hay) → mozzarella o queso. La crema cruda se pasteuriza eligiendo «Crema u otro subproducto»."
           >
             <select className={SELECT_CLASS} value={source} onChange={(e) => changeSource(e.target.value as SourceKind)}>
               <option value="leche">Leche cruda (paso 1: hacer masa)</option>
               <option value="masa">Masa en stock (paso 2: hacer mozzarella o queso)</option>
+              <option value="otro">Crema u otro subproducto en stock (ej: pasteurizar crema)</option>
             </select>
           </Field>
 
@@ -336,14 +357,16 @@ export default function EditProductionPage() {
 
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-sm font-medium">{source === 'leche' ? 'Lotes de leche a consumir' : 'Lotes de masa a consumir'}</p>
+              <p className="text-sm font-medium">
+                {source === 'leche' ? 'Lotes de leche a consumir' : source === 'masa' ? 'Lotes de masa a consumir' : 'Lotes a consumir'}
+              </p>
               <Button type="button" size="sm" variant="secondary" onClick={() => setInputs([...inputs, { batchId: '', liters: 0 }])}>
                 <Plus className="h-4 w-4" /> Agregar lote
               </Button>
             </div>
             <div className="space-y-2">
               {inputs.map((row, idx) => (
-                <div key={idx} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr,140px,auto]">
+                <div key={idx} className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr),140px,auto]">
                   <select
                     className="min-h-touch rounded-md border border-border px-3"
                     value={row.batchId}
@@ -369,6 +392,25 @@ export default function EditProductionPage() {
               ))}
             </div>
           </div>
+
+          {source === 'masa' && (
+            <ReprocesoRows rows={reprocesos} onChange={setReprocesos} options={reprocesoOptions} />
+          )}
+
+          {source !== 'leche' && (
+            <SinCostoAviso
+              batchIds={allInputs.map((i) => i.batchId)}
+              options={[...stock.masa, ...stock.reproceso, ...stock.subproductos]}
+            />
+          )}
+
+          <DobleCostoAviso
+            ingredients={recipes.data?.find((r) => r.id === recipeId)?.activeVersion?.ingredients ?? []}
+            originProductIds={[...stock.masa, ...stock.subproductos]
+              .filter((o) => inputs.some((i) => i.batchId === o.id))
+              .map((o) => o.productId)}
+            products={stock.products}
+          />
 
           <Field label="Notas" htmlFor="notes">
             <textarea

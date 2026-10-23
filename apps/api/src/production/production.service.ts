@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, MoreThanOrEqual, Repository } from 'typeorm';
+import { DataSource, In, MoreThanOrEqual, Repository } from 'typeorm';
 import type {
   CloseProductionInput,
   Currency,
@@ -32,6 +32,7 @@ import {
 import { UsersService } from '../users/users.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import { bultosForQuantity } from '../inventory/bultos-allocation';
+import { resolveInputCost } from './input-cost';
 import { lockBatches, lockBatchesOfProduct, lockDuplicateSignature, lockRow } from '../common/locks';
 
 // Leche (o masa) descontada al reservar una orden. Con estos datos el que abre/edita la orden
@@ -77,7 +78,20 @@ export class ProductionService {
     const salidas = await this.dataSource.getRepository(InventoryMovementEntity).count({
       where: { referenceType: 'production_order', referenceId: r.id, type: 'out' },
     });
-    return { ...this.toDto(r), milkReserved: salidas > 0 };
+    // Categoría de cada lote de origen (masa, queso para reproceso, crema…), para la edición.
+    const dto = this.toDto(r);
+    const lotes = dto.milkInputs.length
+      ? await this.dataSource.getRepository(BatchEntity).find({
+          where: { id: In(dto.milkInputs.map((m) => m.batchId)) },
+          relations: { product: true },
+        })
+      : [];
+    const categoria = new Map(lotes.map((b) => [b.id, b.product?.category ?? '']));
+    return {
+      ...dto,
+      milkInputs: dto.milkInputs.map((m) => ({ ...m, category: categoria.get(m.batchId) ?? '' })),
+      milkReserved: salidas > 0,
+    };
   }
 
   // Reserva los lotes de materia prima (leche o masa) y calcula las salidas esperadas con la
@@ -432,19 +446,20 @@ export class ProductionService {
       await lockBatches(manager, order.milkInputs.map((m) => m.batchId));
       for (const mi of order.milkInputs) {
         const batch = await manager.getRepository(BatchEntity).findOneByOrFail({ id: mi.batchId });
-        // Por defecto, el costo del input es el congelado en el lote ($/litro de leche o
-        // $/kg de masa producida). EXCEPCIÓN (pedidos #14/#15): si el input es MASA
-        // (producto intermedio) con un "precio de masa" cargado a mano, se usa ese precio
-        // —valga la masa propia o comprada—, no el costo calculado del lote.
-        let unitCost = batch.unitCost ?? '0';
-        if (batch.productId) {
-          const inputProduct = await manager
-            .getRepository(ProductEntity)
-            .findOne({ where: { id: batch.productId } });
-          if (inputProduct?.category === 'intermedio' && inputProduct.defaultCost != null) {
-            unitCost = inputProduct.defaultCost;
-          }
-        }
+        // Costo del lote de origen: regla única en input-cost.ts (lote propio; masa con precio
+        // manual; lote cargado a mano → ficha → último lote producido → $0).
+        const inputProduct = batch.productId
+          ? await manager.getRepository(ProductEntity).findOne({ where: { id: batch.productId } })
+          : null;
+        const { unitCost } = await resolveInputCost(
+          {
+            batches: manager.getRepository(BatchEntity),
+            toArs: (amount, currency, date) => this.exchangeRates.toArs(amount, currency, date),
+          },
+          batch,
+          inputProduct,
+          order.startedAt,
+        );
         primaryInputs.push({
           name: batch.code,
           quantity: String(mi.liters),

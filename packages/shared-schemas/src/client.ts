@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { cuitSchema, optionalEmailSchema, isoDateTimeSchema, phoneSchema, uuidSchema } from './common';
+import { optionalCuitSchema, optionalEmailSchema, isoDateTimeSchema, phoneSchema, uuidSchema } from './common';
 import { currencySchema, ivaModeSchema } from './money';
 
 // Cliente comercial — minorista o mayorista.
@@ -10,7 +10,7 @@ export type ClientType = z.infer<typeof clientTypeSchema>;
 export const clientSchema = z.object({
   id: uuidSchema,
   businessName: z.string().min(1).max(200), // Razón social
-  taxId: cuitSchema.optional(), // CUIT
+  taxId: optionalCuitSchema, // CUIT (vacío = sin CUIT)
   type: clientTypeSchema,
   email: optionalEmailSchema,
   phone: phoneSchema.optional(),

@@ -42,7 +42,7 @@ export default function SimulatorPage() {
             </select>
           </Field>
           <Field label="Litros de leche" htmlFor="liters" required>
-            <Input type="number" inputMode="numeric" value={liters} onChange={(e) => setLiters(Number(e.target.value))} />
+            <Input id="liters" type="number" inputMode="numeric" value={liters} onChange={(e) => setLiters(Number(e.target.value))} />
           </Field>
           <Field label="Grasa real (%)" htmlFor="fat" hint="Dejá en blanco para usar el valor base de la receta">
             <Input type="number" step="0.01" inputMode="decimal" value={fat ?? ''} onChange={(e) => setFat(e.target.value === '' ? undefined : Number(e.target.value))} />
