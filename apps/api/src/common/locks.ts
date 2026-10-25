@@ -37,7 +37,7 @@ export async function lockBatchesOfProduct(manager: EntityManager, productId: st
 /** Bloquea una fila de una tabla por id (ej. la orden que se está por cerrar). */
 export async function lockRow(
   manager: EntityManager,
-  table: 'production_orders' | 'sales_orders' | 'warehouses',
+  table: 'production_orders' | 'sales_orders' | 'warehouses' | 'milk_receptions',
   id: string,
 ) {
   await manager.query(`SELECT id FROM ${table} WHERE id = $1 FOR UPDATE`, [id]);

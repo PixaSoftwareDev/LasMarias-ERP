@@ -12,10 +12,11 @@ import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/page-header';
 import { TableSkeleton } from '@/components/ui/skeleton';
-import { inventoryApi, productionApi, recipesApi } from '@/features/api';
+import { inventoryApi, productionApi, productsApi, recipesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
 import { DobleCostoAviso, ReprocesoRows, SinCostoAviso, useStockSources, type InputRow } from '@/components/production/stock-inputs';
+import { OutputFields } from '@/components/production/output-fields';
 
 interface MilkBatch {
   id: string;
@@ -141,11 +142,21 @@ export default function EditProductionPage() {
   const [reprocesos, setReprocesos] = useState<InputRow[]>([]);
   const [seeded, setSeeded] = useState(false);
 
-  // Solo se usan al editar una orden CERRADA: producción real (kg por producto), cámara destino
-  // y rendimiento esperado. Al guardar se revierte el stock y se vuelve a cerrar recalculando.
+  // Solo se usan al editar una orden CERRADA: producción real (kg y bultos por producto),
+  // cámara destino y rendimiento esperado. Al guardar se revierte el stock y se vuelve a
+  // cerrar recalculando. Bultos y cámara se precargan de la orden: si no, al guardar el
+  // lote nuevo los perdía (bug corregido oct 2026).
   const [quantities, setQuantities] = useState<Record<string, number | undefined>>({});
+  const [bultos, setBultos] = useState<Record<string, number | undefined>>({});
   const [warehouseId, setWarehouseId] = useState('');
   const [expectedYield, setExpectedYield] = useState('');
+
+  // Ficha de cada producto: define si se cuenta por bultos y cuántos kg trae uno.
+  const productsQuery = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
+  const productById = useMemo(
+    () => new Map((productsQuery.data ?? []).map((p) => [p.id, p])),
+    [productsQuery.data],
+  );
 
   const wasClosed = orderQuery.data?.status === 'closed';
 
@@ -168,9 +179,16 @@ export default function EditProductionPage() {
         .filter((mi) => inputKind(mi) === 'reproceso')
         .map((mi) => ({ batchId: mi.batchId, liters: mi.liters })),
     );
-    // Si estaba cerrada, precargar la producción real y el esperado para no perderlos al recalcular.
+    // Si estaba cerrada, precargar la producción real (kg y bultos), la cámara y el esperado
+    // para no perderlos al recalcular.
     if (order.status === 'closed') {
       setQuantities(Object.fromEntries(order.actualOutputs.map((o) => [o.productId, o.quantity])));
+      setBultos(
+        Object.fromEntries(
+          order.actualOutputs.filter((o) => o.bultos != null).map((o) => [o.productId, o.bultos]),
+        ),
+      );
+      setWarehouseId(order.warehouseId ?? '');
       const std = order.costBreakdown?.estandar?.rendimiento;
       if (std) setExpectedYield(std);
     }
@@ -202,6 +220,7 @@ export default function EditProductionPage() {
               actualOutputs: (orderQuery.data?.expectedOutputs ?? []).map((o) => ({
                 productId: o.productId,
                 quantity: Number(quantities[o.productId] ?? 0),
+                bultos: bultos[o.productId] != null ? Number(bultos[o.productId]) : undefined,
                 isPrincipal: o.isPrincipal,
               })),
               warehouseId: warehouseId || undefined,
@@ -434,50 +453,32 @@ export default function EditProductionPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             {principalOutputs.map((o) => (
-              <Field
+              <OutputFields
                 key={o.productId}
-                label={`${o.productName} — kg producidos`}
-                htmlFor={`out-${o.productId}`}
-                hint={o.quantity > 0 ? `Esperado: ${o.quantity.toLocaleString('es-AR', { maximumFractionDigits: 1 })} ${o.unit}` : undefined}
-              >
-                <Input
-                  id={`out-${o.productId}`}
-                  type="number"
-                  inputMode="decimal"
-                  step="0.1"
-                  min={0}
-                  placeholder="Ej: 120"
-                  value={quantities[o.productId] ?? ''}
-                  onChange={(e) =>
-                    setQuantities((q) => ({ ...q, [o.productId]: e.target.value === '' ? undefined : Number(e.target.value) }))
-                  }
-                />
-              </Field>
+                output={o}
+                product={productById.get(o.productId)}
+                kg={quantities[o.productId]}
+                bultos={bultos[o.productId]}
+                placeholder="Ej: 120"
+                onKg={(v) => setQuantities((q) => ({ ...q, [o.productId]: v }))}
+                onBultos={(v) => setBultos((b) => ({ ...b, [o.productId]: v }))}
+              />
             ))}
 
             {byproductOutputs.length > 0 && (
               <div className="flex flex-col gap-4 border-t border-border-subtle pt-4">
                 <p className="text-sm font-medium text-foreground">Subproductos (opcional)</p>
                 {byproductOutputs.map((o) => (
-                  <Field
+                  <OutputFields
                     key={o.productId}
-                    label={`${o.productName} — ${o.unit} obtenidos`}
-                    htmlFor={`out-${o.productId}`}
-                    hint={o.quantity > 0 ? `Esperado: ${o.quantity.toLocaleString('es-AR', { maximumFractionDigits: 1 })} ${o.unit}` : undefined}
-                  >
-                    <Input
-                      id={`out-${o.productId}`}
-                      type="number"
-                      inputMode="decimal"
-                      step="0.1"
-                      min={0}
-                      placeholder="Ej: 15"
-                      value={quantities[o.productId] ?? ''}
-                      onChange={(e) =>
-                        setQuantities((q) => ({ ...q, [o.productId]: e.target.value === '' ? undefined : Number(e.target.value) }))
-                      }
-                    />
-                  </Field>
+                    output={o}
+                    product={productById.get(o.productId)}
+                    kg={quantities[o.productId]}
+                    bultos={bultos[o.productId]}
+                    placeholder="Ej: 15"
+                    onKg={(v) => setQuantities((q) => ({ ...q, [o.productId]: v }))}
+                    onBultos={(v) => setBultos((b) => ({ ...b, [o.productId]: v }))}
+                  />
                 ))}
               </div>
             )}
