@@ -127,6 +127,34 @@ export default function CopiasPage() {
     onError: () => toast.error('No se pudo descargar esa copia.'),
   });
 
+  // --- Activación con UN botón (pedido del dueño): prende la copia automática del
+  // servidor Y el guardado en ESTA PC, y hace una primera copia ya mismo como prueba.
+  // Se aprieta desde la computadora donde se quieren guardar las copias.
+  const [activating, setActivating] = useState(false);
+  async function activarTodo() {
+    if (!overview) return;
+    setActivating(true);
+    try {
+      await backupsApi.updateConfig({ enabled: true, hour, days: [...days].sort((a, b) => a - b) });
+      const run = await backupsApi.runNow();
+      if (run.status !== 'ok') {
+        toast.error(`La primera copia falló: ${run.error ?? 'error desconocido'}. Revisá el detalle abajo.`);
+      }
+      const fresh = await backupsApi.overview();
+      await enableAutoSave(fresh);
+      setAutoSave(true);
+      setLastLocal(lastSavedAt());
+      refresh();
+      if (run.status === 'ok') {
+        toast.success('Copias activadas: se hacen solas en el servidor y se guardan en esta PC.');
+      }
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : 'No se pudo activar. Probá de nuevo.');
+    } finally {
+      setActivating(false);
+    }
+  }
+
   const columns: Column<BackupRun>[] = [
     {
       key: 'fecha',
@@ -183,7 +211,9 @@ export default function CopiasPage() {
     },
   ];
 
-  const warnings = overview?.warnings ?? [];
+  // Apagado = pantalla de activación (el aviso del server sería redundante ahí).
+  const apagado = !!overview && !overview.config.enabled;
+  const warnings = apagado ? [] : (overview?.warnings ?? []);
 
   return (
     <div className="space-y-6">
@@ -208,6 +238,28 @@ export default function CopiasPage() {
           </div>
         }
       />
+
+      {/* Apagado de fábrica: UN botón lo prende todo, desde la PC donde se guardan. */}
+      {apagado && (
+        <Card className="border-primary-200 bg-primary-50/40">
+          <CardContent className="flex flex-col items-start gap-3 py-6">
+            <p className="flex items-center gap-2 font-medium text-foreground">
+              <HardDriveDownload className="h-5 w-5 text-primary-600" aria-hidden="true" />
+              Las copias de seguridad están apagadas.
+            </p>
+            <p className="text-sm text-foreground-muted">
+              Apretá el botón <span className="font-medium text-foreground">desde la computadora donde
+              quieras que se guarden las copias</span>. A partir de ahí, el servidor hace una copia
+              todos los días a las {hour} h y esta PC las baja solas a Descargas al abrir la
+              aplicación. Se hace una primera copia ya mismo, para comprobar que todo anda.
+            </p>
+            <Button size="lg" onClick={activarTodo} loading={activating} loadingText="Activando…">
+              <DatabaseBackup className="mr-2 h-5 w-5" aria-hidden="true" />
+              Activar copias de seguridad en esta PC
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {warnings.length > 0 && (
         <div className="space-y-2" role="alert">

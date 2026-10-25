@@ -5,7 +5,9 @@ import type { BackupConfig } from '@lasmarias/shared-schemas';
 // tests se verifican a mano (CLAUDE.md §8).
 
 export const DEFAULT_BACKUP_CONFIG: BackupConfig = {
-  enabled: true,
+  // Arranca APAGADO (pedido del dueño, oct 2026): nada corre solo hasta que alguien
+  // aprieta "Activar" en la pantalla de Copias, desde la PC donde quiere guardarlas.
+  enabled: false,
   hour: '03:00',
   days: [1, 2, 3, 4, 5, 6, 7], // todos los días
 };
@@ -62,7 +64,9 @@ export interface RunForWarnings {
 export function computeWarnings(config: BackupConfig, runs: RunForWarnings[], now: Date): string[] {
   const warnings: string[] = [];
   if (!config.enabled) {
-    warnings.push('Las copias de seguridad automáticas están apagadas.');
+    warnings.push(
+      'Las copias de seguridad están apagadas. Activalas en Copias de seguridad desde la PC donde quieras guardarlas.',
+    );
     return warnings;
   }
   if (runs.length === 0) return warnings; // recién instalado: la primera corre sola a la hora.

@@ -13,12 +13,20 @@ import type { BackupConfig } from '@lasmarias/shared-schemas';
 // jueves 22/10/2026, viernes 23/10/2026, sábado 24/10/2026, domingo 25/10/2026.
 const vie23 = (h: number, m = 0) => new Date(2026, 9, 23, h, m);
 
+// Config PRENDIDA para los tests del calendario (el default real arranca apagado:
+// nada corre hasta que se activa con el botón de la pantalla — pedido del dueño).
 const config = (over: Partial<BackupConfig> = {}): BackupConfig => ({
   ...DEFAULT_BACKUP_CONFIG,
+  enabled: true,
   ...over,
 });
 
 describe('calendario de copias (backup-schedule)', () => {
+  it('de fábrica está APAGADO: no corre nada hasta que se activa con el botón', () => {
+    expect(DEFAULT_BACKUP_CONFIG.enabled).toBe(false);
+    expect(isDue(DEFAULT_BACKUP_CONFIG, null, vie23(23, 59))).toBe(false);
+  });
+
   it('isoWeekday: lunes=1 … domingo=7', () => {
     expect(isoWeekday(new Date(2026, 9, 19))).toBe(1); // lunes 19/10/2026
     expect(isoWeekday(new Date(2026, 9, 23))).toBe(5); // viernes
@@ -84,7 +92,7 @@ describe('calendario de copias (backup-schedule)', () => {
 
     it('automático apagado → solo el aviso de apagado', () => {
       expect(computeWarnings(config({ enabled: false }), [okHoy], vie23(10))).toEqual([
-        'Las copias de seguridad automáticas están apagadas.',
+        'Las copias de seguridad están apagadas. Activalas en Copias de seguridad desde la PC donde quieras guardarlas.',
       ]);
     });
 
