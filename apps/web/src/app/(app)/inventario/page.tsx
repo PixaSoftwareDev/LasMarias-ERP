@@ -41,8 +41,9 @@ import { labelOr, movementReasonLabel, movementTypeLabel } from '@/lib/labels';
 import { CURRENCY_OPTIONS, currencySymbol, equivalentArs } from '@/features/currency';
 import { ivaFactor, usaBultos, type StockSummary, type DiscardReason, type Currency, type InventoryMovement } from '@lasmarias/shared-schemas';
 import { useConfirm } from '@/hooks/use-confirm';
+import { BatchesDialog } from '@/components/inventory/batches-dialog';
 
-type AdjustMode = 'discard' | 'count' | 'min';
+type AdjustMode = 'discard' | 'count' | 'min' | 'batches';
 
 function alertBadge(level?: StockSummary['alertLevel']): { variant: Status; label: string } {
   switch (level) {
@@ -196,6 +197,7 @@ function StockRow({
         <RowActions
           label={`Acciones de ${s.productName}`}
           actions={[
+            { label: 'Ver y corregir lotes', icon: Layers, onClick: () => onAction('batches', s) },
             { label: typeof s.minStock === 'number' && s.minStock > 0 ? 'Cambiar aviso de stock bajo' : 'Definir aviso de stock bajo', icon: Bell, onClick: () => onAction('min', s) },
             { label: 'Ajustar por conteo', icon: ClipboardCheck, onClick: () => onAction('count', s) },
             { label: 'Dar de baja', icon: Trash2, onClick: () => onAction('discard', s), destructive: true },
@@ -888,7 +890,8 @@ export default function InventoryPage() {
         </>
       )}
 
-      {adjust && <AdjustDialog s={adjust.s} mode={adjust.mode} onClose={() => setAdjust(null)} />}
+      {adjust && adjust.mode === 'batches' && <BatchesDialog s={adjust.s} onClose={() => setAdjust(null)} />}
+      {adjust && adjust.mode !== 'batches' && <AdjustDialog s={adjust.s} mode={adjust.mode} onClose={() => setAdjust(null)} />}
     </div>
   );
 }

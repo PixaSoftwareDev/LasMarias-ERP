@@ -312,6 +312,42 @@ export const fefoSuggestionSchema = z.object({
 });
 export type FefoSuggestion = z.infer<typeof fefoSuggestionSchema>;
 
+// --- Lotes de un producto + edición de lote (pedido del dueño, oct 2026) ---
+// Un lote cargado o producido con algo mal (kg, bultos, costo, vencimiento, cámara) se
+// corrige acá, sin desarmar producción ni ventas. Los kg se corrigen como ajuste por
+// conteo CON rastro (movimiento); el costo aplica HACIA ADELANTE: no recalcula órdenes
+// ya cerradas ni ventas hechas (la calculadora queda intacta, CLAUDE.md §5).
+export const productBatchSchema = z.object({
+  id: uuidSchema,
+  code: z.string(),
+  productionDate: isoDateTimeSchema.nullable(),
+  expirationDate: isoDateTimeSchema.nullable(),
+  initialQuantity: z.number(),
+  remainingQuantity: z.number(),
+  initialBultos: z.number().int().nullable(),
+  remainingBultos: z.number().int().nullable(),
+  unit: z.string(),
+  status: z.string(),
+  unitCost: z.number().nullable(),
+  warehouseId: uuidSchema.nullable(),
+  warehouseName: z.string().nullable(),
+  notes: z.string().nullable(),
+});
+export type ProductBatch = z.infer<typeof productBatchSchema>;
+
+export const updateBatchInputSchema = z.object({
+  // Kg reales de ESTE lote: se registra la diferencia como ajuste por conteo.
+  countedQuantity: z.number().nonnegative('No puede ser negativo').optional(),
+  // Bultos restantes del lote. null = este lote no se cuenta por bultos.
+  remainingBultos: z.number().int().nonnegative().nullable().optional(),
+  // Costo por unidad en $ (aplica hacia adelante). null = sin costo.
+  unitCost: z.number().nonnegative().nullable().optional(),
+  expirationDate: isoDateTimeSchema.nullable().optional(),
+  warehouseId: uuidSchema.nullable().optional(),
+  notes: z.string().max(1000).optional(),
+});
+export type UpdateBatchInput = z.infer<typeof updateBatchInputSchema>;
+
 export const stockCountInputSchema = z.object({
   warehouseId: uuidSchema.optional(),
   counts: z

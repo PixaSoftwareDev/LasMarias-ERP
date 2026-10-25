@@ -19,21 +19,25 @@ jest.mock('../products/product.entity', () => ({ ProductEntity: { name: 'Product
 const PRINCIPAL_PRODUCT_ID = 'prod-mozza';
 
 function makeService(existingOrder: any, milkBatches: any[]) {
+  const activeVersion = {
+    id: 'ver-1',
+    baseYieldKgPerLiter: '0.1',
+    yieldSensitivityFat: '0',
+    yieldSensitivityProtein: '0',
+    baselineFatPercent: '3.4',
+    baselineProteinPercent: '3.2',
+    standardWastePercent: '0',
+    ingredients: [],
+    byproducts: [],
+  };
   const recipe: any = {
     id: 'rec-1',
     productId: PRINCIPAL_PRODUCT_ID,
     productName: 'Mozzarella',
-    activeVersion: {
-      id: 'ver-1',
-      baseYieldKgPerLiter: '0.1',
-      yieldSensitivityFat: '0',
-      yieldSensitivityProtein: '0',
-      baselineFatPercent: '3.4',
-      baselineProteinPercent: '3.2',
-      standardWastePercent: '0',
-      ingredients: [],
-      byproducts: [],
-    },
+    activeVersion,
+    // Una versión VIEJA (congelada en órdenes anteriores) con otro rendimiento, para probar
+    // que editar una orden no la cambia por la activa.
+    versions: [{ ...activeVersion, id: 'ver-0', baseYieldKgPerLiter: '0.2', isActive: false }, activeVersion],
   };
   const recipes = { get: jest.fn().mockResolvedValue(recipe) };
   const users = { findById: jest.fn().mockResolvedValue({ id: 'op-1', fullName: 'Juan' }) };
@@ -214,6 +218,44 @@ describe('ProductionService.update — editar una orden abierta', () => {
         // Falta actualOutputs a propósito.
       } as any),
     ).rejects.toThrow(/producción real/);
+  });
+
+  it('editar sin cambiar la receta CONSERVA la versión congelada de la orden (CLAUDE.md §5.1)', async () => {
+    // La orden se abrió con la versión vieja 'ver-0' (rinde 0.2); hoy la activa es 'ver-1' (0.1).
+    const { service, getOrder } = makeService(
+      openOrder({ recipeId: 'rec-1', recipeVersionId: 'ver-0' }),
+      [batch('a', 'en_proceso', '500')],
+    );
+
+    await service.update('order-1', {
+      recipeId: 'rec-1',
+      operatorId: 'op-1',
+      startedAt: '2026-05-30T08:00:00Z',
+      milkInputs: [{ batchId: 'a', liters: 500 }],
+    } as any);
+
+    const saved = getOrder();
+    expect(saved.recipeVersionId).toBe('ver-0');
+    // Y el esperado se calcula con el rendimiento de SU versión: 500 L × 0.2 = 100 kg (no 50).
+    const principal = saved.expectedOutputs.find((o: any) => o.isPrincipal);
+    expect(principal.quantity).toBe(100);
+  });
+
+  it('si la edición CAMBIA de receta, usa la versión activa de la nueva', async () => {
+    // La orden era de otra receta ('rec-X'): al pasarla a 'rec-1' corresponde la activa 'ver-1'.
+    const { service, getOrder } = makeService(
+      openOrder({ recipeId: 'rec-X', recipeVersionId: 'ver-X' }),
+      [batch('a', 'en_proceso', '500')],
+    );
+
+    await service.update('order-1', {
+      recipeId: 'rec-1',
+      operatorId: 'op-1',
+      startedAt: '2026-05-30T08:00:00Z',
+      milkInputs: [{ batchId: 'a', liters: 500 }],
+    } as any);
+
+    expect(getOrder().recipeVersionId).toBe('ver-1');
   });
 
   it('frena si el lote nuevo no tiene litros suficientes', async () => {

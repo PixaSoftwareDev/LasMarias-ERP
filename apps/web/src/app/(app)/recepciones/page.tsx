@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, GitBranch, Milk, Plus, Search, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, GitBranch, Milk, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import type { MilkReception } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -285,6 +285,15 @@ export default function ReceptionsPage() {
                               </Link>
                             </Button>
                           )}
+                          {canDelete && r.status !== 'anulada' && (
+                            <Link
+                              href={`/recepciones/nueva?editar=${r.id}`}
+                              aria-label={`Editar recepción ${r.code}`}
+                              className="flex min-h-touch min-w-touch items-center justify-center rounded-md text-foreground-muted transition-colors hover:bg-surface-subtle hover:text-foreground"
+                            >
+                              <Pencil className="h-4 w-4" aria-hidden="true" />
+                            </Link>
+                          )}
                           {canDelete && (
                             <button
                               type="button"
@@ -336,6 +345,15 @@ export default function ReceptionsPage() {
                                     <GitBranch className="h-4 w-4" /> Ver recorrido
                                   </Link>
                                 </Button>
+                              )}
+                              {canDelete && r.status !== 'anulada' && (
+                                <Link
+                                  href={`/recepciones/nueva?editar=${r.id}`}
+                                  aria-label={`Editar recepción ${r.code}`}
+                                  className="flex min-h-touch min-w-touch items-center justify-center rounded-md text-foreground-muted transition-colors hover:bg-surface-subtle hover:text-foreground"
+                                >
+                                  <Pencil className="h-4 w-4" aria-hidden="true" />
+                                </Link>
                               )}
                               {canDelete && (
                                 <button

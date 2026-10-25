@@ -94,6 +94,9 @@ export const productionOrderSchema = z.object({
   // edición lo necesita para no decir "reservado en esta orden" cuando no es cierto.
   // Solo viene en el detalle de una orden; en los listados no.
   milkReserved: z.boolean().optional(),
+  // Cámara del lote principal producido (solo en el detalle de una orden cerrada): la
+  // pantalla de edición la precarga para que al guardar no se pierda.
+  warehouseId: uuidSchema.optional(),
   expectedOutputs: z.array(productionOutputSchema),
   actualOutputs: z.array(productionOutputSchema),
   totalMilkLiters: z.number(),
