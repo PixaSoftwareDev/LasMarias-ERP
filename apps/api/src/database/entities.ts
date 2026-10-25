@@ -25,8 +25,10 @@ import { ExchangeRateEntity } from '../exchange-rates/exchange-rate.entity';
 import { SupplierEntity } from '../suppliers/supplier.entity';
 import { PayableEntity } from '../suppliers/payable.entity';
 import { SupplierPaymentEntity } from '../suppliers/supplier-payment.entity';
+import { BackupRunEntity } from '../backups/backup-run.entity';
 
 export const entities = [
+  BackupRunEntity,
   UserEntity,
   ClientEntity,
   ClientPriceItemEntity,

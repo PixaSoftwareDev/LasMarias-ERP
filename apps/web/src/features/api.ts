@@ -71,6 +71,10 @@ import type {
   ProducerPayment,
   RegisterProducerPaymentInput,
   AppSettings,
+  BackupConfig,
+  BackupRun,
+  BackupsOverview,
+  UpdateBackupConfigInput,
   CompanySettings,
   QualityLimits,
   UpdateCompanySettingsInput,
@@ -161,6 +165,16 @@ export const settingsApi = {
 };
 
 // Cotización del día (USD/EUR en pesos). Lectura: cualquiera; alta: admin/gerente.
+// Copias de seguridad (solo admin). La descarga usa downloadFile (manda el token).
+export const backupsApi = {
+  overview: () => api<BackupsOverview>('/api/backups'),
+  updateConfig: (input: UpdateBackupConfigInput) =>
+    api<BackupConfig>('/api/backups/config', { method: 'PATCH', body: input }),
+  runNow: () => api<BackupRun>('/api/backups/run', { method: 'POST' }),
+  download: (run: BackupRun) =>
+    downloadFile(`/api/backups/${run.id}/download`, run.fileName ?? 'copia.dump'),
+};
+
 export const exchangeRatesApi = {
   list: () => api<ExchangeRate[]>('/api/exchange-rates'),
   latest: () => api<ExchangeRate | null>('/api/exchange-rates/latest'),

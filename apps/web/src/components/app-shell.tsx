@@ -7,6 +7,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { LogOut, UserCog, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import type { User } from '@lasmarias/shared-schemas';
 import { groupedFor, mobileNavFor, type NavItem } from '@/lib/navigation';
+import { useBackupAutoSave } from '@/hooks/use-backup-auto-save';
 import { cn } from '@/lib/utils';
 
 // CLAUDE.md §5.3:
@@ -23,6 +24,9 @@ const COLLAPSE_KEY = 'lm.sidebarCollapsed';
 
 export function AppShell({ user, onLogout, children }: Props) {
   const groups = groupedFor(user.role);
+  // Copias de seguridad: si este navegador tiene activado "guardar en esta PC",
+  // baja solas las copias nuevas al abrir la app (una vez por sesión, solo admin).
+  useBackupAutoSave(user);
   const pathname = usePathname();
   const router = useRouter();
 

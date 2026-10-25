@@ -2,10 +2,10 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, Package, Users, Milk, Snowflake, Tags, SlidersHorizontal, DollarSign, type LucideIcon } from 'lucide-react';
+import { ChevronRight, Package, Users, Milk, Snowflake, Tags, SlidersHorizontal, DollarSign, DatabaseBackup, type LucideIcon } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageHeader } from '@/components/page-header';
-import { productsApi, clientsApi, producersApi, inventoryApi, salesApi } from '@/features/api';
+import { productsApi, clientsApi, producersApi, inventoryApi, salesApi, backupsApi } from '@/features/api';
 
 // Hub de datos maestros. Cada tarjeta muestra un mini-dato (conteo) para que
 // aporte información, no sólo navegación. Estilo consistente con el Home.
@@ -86,6 +86,8 @@ export default function AdminHome() {
     },
   });
 
+  const backupsQuery = useQuery({ queryKey: ['backups'], queryFn: () => backupsApi.overview() });
+
   const sections: Section[] = [
     {
       href: '/productos',
@@ -141,6 +143,17 @@ export default function AdminHome() {
       error: pricesQuery.isError,
       singular: 'producto con precio',
       plural: 'productos con precio',
+    },
+    {
+      href: '/admin/copias',
+      icon: DatabaseBackup,
+      title: 'Copias de seguridad',
+      desc: 'Copias automáticas de la base, con descarga a esta PC.',
+      count: backupsQuery.data?.runs.filter((r) => r.status === 'ok').length,
+      loading: backupsQuery.isLoading,
+      error: backupsQuery.isError,
+      singular: 'copia guardada',
+      plural: 'copias guardadas',
     },
   ];
 

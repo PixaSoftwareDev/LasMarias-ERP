@@ -18,6 +18,7 @@ import { ReportsModule } from './reports/reports.module';
 import { SettingsModule } from './settings/settings.module';
 import { ExchangeRatesModule } from './exchange-rates/exchange-rates.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
+import { BackupsModule } from './backups/backups.module';
 import { HealthModule } from './health/health.module';
 
 // Fase 1 — Recepción de leche, Elaboración (calculadora de costo), Inventario,
@@ -44,6 +45,7 @@ import { HealthModule } from './health/health.module';
     ExchangeRatesModule,
     SuppliersModule,
     HealthModule,
+    BackupsModule,
   ],
 })
 export class AppModule {}

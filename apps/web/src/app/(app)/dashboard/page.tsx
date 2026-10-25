@@ -20,6 +20,7 @@ import {
   TriangleAlert,
   Wallet,
   type LucideIcon,
+  DatabaseBackup,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -27,7 +28,7 @@ import { PageHeader } from '@/components/page-header';
 import { MonthCalendar } from '@/components/month-calendar';
 import { SetupChecklist } from '@/components/setup-checklist';
 import { useAuth } from '@/hooks/use-auth';
-import { homeApi, inventoryApi, salesApi, financeApi, suppliersApi } from '@/features/api';
+import { homeApi, inventoryApi, salesApi, financeApi, suppliersApi, backupsApi } from '@/features/api';
 import { formatMoney as money } from '@/lib/utils';
 import type { HomeCalendarEvent, StockSummary, AccountBalance, SilosOverview, Cheque, SupplierBalance } from '@lasmarias/shared-schemas';
 
@@ -127,8 +128,21 @@ function buildPending(
   silos: SilosOverview | undefined,
   cheques: Cheque[] | undefined,
   suppliers: SupplierBalance[] | undefined,
+  backupWarnings: string[] | undefined,
 ): Pending[] {
   const items: Pending[] = [];
+
+  // Copias de seguridad: si la de ayer no se hizo o la última falló, es lo primero
+  // a resolver (sin copia, un problema de datos no tiene vuelta atrás).
+  for (const [i, w] of (backupWarnings ?? []).entries()) {
+    items.push({
+      key: `backup-${i}`,
+      severity: w.includes('falló') ? 'danger' : 'warning',
+      icon: DatabaseBackup,
+      text: w,
+      href: '/admin/copias',
+    });
+  }
 
   for (const it of stock ?? []) {
     if (it.alertLevel === 'critical' || it.alertLevel === 'expiring') {
@@ -272,6 +286,11 @@ export default function DashboardPage() {
   const silosQuery = useQuery({ queryKey: ['silos'], queryFn: () => inventoryApi.silos(), enabled: !!user });
   const chequesQuery = useQuery({ queryKey: ['cheques'], queryFn: () => financeApi.cheques(), enabled: !!user });
   const suppliersAccQuery = useQuery({ queryKey: ['supplier-accounts'], queryFn: () => suppliersApi.accounts(), enabled: !!user });
+  const backupsQuery = useQuery({
+    queryKey: ['backups'],
+    queryFn: () => backupsApi.overview(),
+    enabled: user?.role === 'admin',
+  });
 
   const s = summaryQuery.data;
   // Bloque PLATA: todo en $ (finanzas y comercial).
@@ -293,8 +312,8 @@ export default function DashboardPage() {
     : [];
 
   const pending = useMemo(
-    () => buildPending(stockQuery.data, accountsQuery.data, silosQuery.data, chequesQuery.data, suppliersAccQuery.data),
-    [stockQuery.data, accountsQuery.data, silosQuery.data, chequesQuery.data, suppliersAccQuery.data],
+    () => buildPending(stockQuery.data, accountsQuery.data, silosQuery.data, chequesQuery.data, suppliersAccQuery.data, backupsQuery.data?.warnings),
+    [stockQuery.data, accountsQuery.data, silosQuery.data, chequesQuery.data, suppliersAccQuery.data, backupsQuery.data],
   );
   const pendingLoading = stockQuery.isLoading || accountsQuery.isLoading;
   const pendingError = stockQuery.isError && accountsQuery.isError;

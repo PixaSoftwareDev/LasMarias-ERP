@@ -60,3 +60,7 @@ rec-lista.png
 # Material de capacitación (onboarding, NO es software) — pesa >1GB de raws de video
 tutorial/
 apps/web/public/tutorial_completo.mp4
+
+# Copias de seguridad generadas por la API (BACKUP_DIR), no el código fuente
+apps/api/backups/
+/backups/

@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { type Env, loadEnv } from './env.schema';
 
@@ -46,5 +47,15 @@ export class EnvService {
 
   get corsOrigins(): string[] {
     return this.env.CORS_ORIGIN.split(',').map((o) => o.trim());
+  }
+
+  // Carpeta de copias de seguridad (absoluta).
+  get backupDir(): string {
+    return resolve(this.env.BACKUP_DIR);
+  }
+
+  // Comando pg_dump completo para reemplazar el binario del PATH (opcional).
+  get backupPgDump(): string | undefined {
+    return this.env.BACKUP_PG_DUMP;
   }
 }

@@ -20,6 +20,12 @@ export const envSchema = z.object({
   JWT_REFRESH_TTL: z.string().default('7d'),
 
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
+
+  // Copias de seguridad: carpeta donde se guardan los .dump (relativa al cwd o absoluta)
+  // y, opcional, el comando pg_dump completo a usar en lugar del binario del PATH
+  // (p. ej. "docker exec -i lasmarias-postgres pg_dump -U lasmarias lasmarias").
+  BACKUP_DIR: z.string().default('backups'),
+  BACKUP_PG_DUMP: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
