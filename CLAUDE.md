@@ -226,4 +226,44 @@ Desde la v1 (19/06) se hizo solo pulido sobre el producto cerrado, sin agregar m
 
 ---
 
+---
+
+## 10. Producción en el VPS de Pixs (relevado 08/10/2026)
+
+Las Marías corre en el **VPS compartido de Pixs** (Dattaweb, `200.58.109.110`), el mismo
+que aloja Intellix/MutuaLyF, CRM-Pixs, Handicapp y Ecuestre. En ese servidor solo lo que
+empieza con `lasmarias-` es de este proyecto; el resto no se toca.
+
+**Acceso SSH** (alias ya definido en `~/.ssh/config`, clave `~/.ssh/mutualyf_vps`):
+
+```bash
+ssh pixs-vps                      # = ssh -i ~/.ssh/mutualyf_vps -p 2251 root@200.58.109.110
+```
+
+**Cómo está desplegada:**
+
+| Qué | Dónde |
+|---|---|
+| Código y compose | `/opt/lasmarias` (`docker-compose.yml` en la raíz, proyecto compose `lasmarias`) |
+| Contenedores | `lasmarias-api` (NestJS, `node dist/main.js`, 127.0.0.1:4000), `lasmarias-web` (Next `start -p 3010`, 127.0.0.1:3010), `lasmarias-postgres` (postgres:16-alpine, 127.0.0.1:5436, volumen `lasmarias_pg_data`) |
+| Entrada pública | `http://200.58.109.110/` sin dominio: el nginx de Intellix (`ia_nginx`, server block por defecto) proxya `/` a `lasmarias-web:3010`, y la web proxya a su API por `API_PROXY_TARGET` |
+| Variables | `/opt/lasmarias/apps/api/.env` (lo usan la API y la base); el compose pisa `API_HOST`, `POSTGRES_HOST=db` y `CORS_ORIGIN` |
+| Backups del VPS viejo | `/opt/lasmarias/backups-vps-viejo/` (dump pre-ajuste tanque 4 + carpeta `lasmarias-backups`) |
+| Recursos | cpuset 14-15, 512 MB y 1 CPU por contenedor (apps satélite enjauladas; Intellix tiene prioridad) |
+
+⚠️ **`/opt/lasmarias` NO es un repo git**: es una copia fiel del VPS viejo (migración
+2026-08-20), con `node_modules` y builds compilados incluidos. No hay `git pull` posible:
+un deploy implica copiar el build (`apps/api/dist`, `apps/web/.next`) y reiniciar con
+`docker compose -f /opt/lasmarias/docker-compose.yml restart api web`. Antes de subir
+cualquier cambio, respaldar la base (`docker exec lasmarias-postgres pg_dump -U lasmarias lasmarias`)
+y acordarlo con el equipo: nunca deployar por iniciativa propia.
+
+Comandos útiles:
+
+```bash
+ssh pixs-vps 'docker ps --filter name=lasmarias'
+ssh pixs-vps 'docker logs --tail 100 lasmarias-api'
+ssh pixs-vps 'docker exec lasmarias-postgres psql -U lasmarias -d lasmarias'
+```
+
 *Documento maestro — Quesería Las Marías, Argentina. Producto cerrado (v1 junio 2026, pulido al 03/07/2026).*
