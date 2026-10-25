@@ -87,10 +87,17 @@ export class ProductionService {
         })
       : [];
     const categoria = new Map(lotes.map((b) => [b.id, b.product?.category ?? '']));
+    // Cámara del lote principal producido (solo órdenes cerradas): la pantalla de edición
+    // la precarga; si no, al guardar el lote se recreaba sin cámara (bug corregido oct 2026).
+    const principal = dto.actualOutputs.find((o) => o.isPrincipal && o.batchId);
+    const principalBatch = principal?.batchId
+      ? await this.dataSource.getRepository(BatchEntity).findOne({ where: { id: principal.batchId } })
+      : null;
     return {
       ...dto,
       milkInputs: dto.milkInputs.map((m) => ({ ...m, category: categoria.get(m.batchId) ?? '' })),
       milkReserved: salidas > 0,
+      warehouseId: principalBatch?.warehouseId ?? undefined,
     };
   }
 
@@ -102,10 +109,20 @@ export class ProductionService {
   private async reserveMilkAndPlan(
     manager: import('typeorm').EntityManager,
     input: OpenProductionInput,
+    versionId?: string,
   ) {
     const recipe = await this.recipes.get(input.recipeId);
-    const version = recipe.activeVersion;
-    if (!version) throw new BadRequestException('La receta no tiene versión activa');
+    // Al EDITAR una orden se conserva SU versión de receta congelada (CLAUDE.md §5.1: los
+    // lotes viejos conservan su versión). Sin esto, editar una orden vieja la recalculaba
+    // en silencio con la receta de hoy. Solo al abrir una orden nueva (o si la edición
+    // cambió de receta) se usa la versión activa.
+    const version = versionId
+      ? (recipe.versions ?? []).find((v) => v.id === versionId)
+      : recipe.activeVersion;
+    if (!version)
+      throw new BadRequestException(
+        versionId ? 'No se encontró la versión de receta de esta orden' : 'La receta no tiene versión activa',
+      );
 
     // Una orden puede consumir leche de VARIOS silos para llegar a los litros que necesita:
     // cada lote entra con su propio costo/litro y la calculadora los suma (elaboration-cost.ts).
@@ -349,9 +366,13 @@ export class ProductionService {
         await this.releaseReservedMilk(manager, order);
       }
 
-      // Reservar los nuevos lotes (descuenta el stock) y recalcular salidas esperadas con la
-      // versión activa vigente.
-      const plan = await this.reserveMilkAndPlan(manager, input);
+      // Reservar los nuevos lotes (descuenta el stock) y recalcular las salidas esperadas.
+      // Si no se cambió de receta, se mantiene la versión congelada de la orden.
+      const plan = await this.reserveMilkAndPlan(
+        manager,
+        input,
+        input.recipeId === order.recipeId ? order.recipeVersionId : undefined,
+      );
 
       order.recipeId = plan.recipe.id;
       order.recipeVersionId = plan.version.id;

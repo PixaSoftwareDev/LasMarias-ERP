@@ -1,7 +1,7 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -40,16 +40,33 @@ import { cn } from '@/lib/utils';
 // - Una sola acción primaria (Guardar).
 
 function nowLocalInput(): string {
-  const d = new Date();
-  // YYYY-MM-DDTHH:mm para datetime-local
-  const tz = d.getTimezoneOffset() * 60_000;
-  return new Date(d.getTime() - tz).toISOString().slice(0, 16);
+  return toLocalInput(new Date());
 }
 
-export default function NewReceptionPage() {
+// Date/ISO → "YYYY-MM-DDTHH:mm" para datetime-local (en hora local, no UTC).
+function toLocalInput(d: Date | string): string {
+  const date = new Date(d);
+  const tz = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - tz).toISOString().slice(0, 16);
+}
+
+// La misma pantalla carga una recepción NUEVA o EDITA una existente (?editar=<id>):
+// mismo formulario, mismos avisos en vivo. Al editar, el backend rehace los lotes de
+// leche si no se usaron; si ya se usaron, limita los litros a lo no consumido.
+function ReceptionFormPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [savedCode, setSavedCode] = useState<string | null>(null);
+
+  const searchParams = useSearchParams();
+  const editId = searchParams.get('editar');
+  const editQuery = useQuery({
+    queryKey: ['reception', editId],
+    queryFn: () => receptionsApi.get(editId!),
+    enabled: !!editId,
+  });
+  const editing = !!editId;
+  const milkUsed = editQuery.data?.milkUsed ?? false;
 
   const producersQuery = useQuery({
     queryKey: ['producers'],
@@ -74,6 +91,7 @@ export default function NewReceptionPage() {
     watch,
     control,
     setValue,
+    reset,
     formState: { errors, isSubmitting, isValid },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -89,10 +107,39 @@ export default function NewReceptionPage() {
   });
   const producerLines = useFieldArray({ control, name: 'producers' });
 
+  // Al editar: precargar el formulario con la recepción una sola vez, cuando llega.
+  const [seeded, setSeeded] = useState(false);
+  useEffect(() => {
+    const r = editQuery.data;
+    if (!r || seeded) return;
+    reset({
+      receivedAt: toLocalInput(r.receivedAt),
+      producers: (r.lines.length > 0 ? r.lines : [{ producerId: r.producerId, liters: r.liters, declaredLiters: r.declaredLiters }]).map(
+        (l) => ({ producerId: l.producerId, liters: l.liters, declaredLiters: l.declaredLiters }),
+      ),
+      remito: r.remito,
+      quality: { alcoholTestPassed: true, ...r.quality },
+      notes: r.notes,
+    });
+    const enSilos = (r.silos ?? []).filter((s) => s.warehouseId);
+    if (enSilos.length > 0) {
+      setSiloRows(enSilos.map((s) => ({ warehouseId: s.warehouseId as string, liters: String(s.liters) })));
+    }
+    setSeeded(true);
+  }, [editQuery.data, seeded, reset]);
+
   const mutation = useMutation({
-    mutationFn: (input: CreateMilkReceptionInput) => receptionsApi.create(input),
+    mutationFn: (input: CreateMilkReceptionInput) =>
+      editId ? receptionsApi.update(editId, input) : receptionsApi.create(input),
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ['receptions'] });
+      queryClient.invalidateQueries({ queryKey: ['silos'] });
+      queryClient.invalidateQueries({ queryKey: ['stock'] });
+      if (editId) {
+        toast.success(`Recepción ${r.code} corregida.`);
+        router.push('/recepciones');
+        return;
+      }
       if (r.status === 'aceptada') {
         // Confirmación visual fuerte para planta (CLAUDE.md §5.4): check verde a pantalla
         // completa con el SIGUIENTE PASO a mano (no se vuelve solo a la lista muda).
@@ -171,16 +218,28 @@ export default function NewReceptionPage() {
   const litersDiff = anyDeclared && totalLiters > 0 ? totalLiters - totalDeclared : null;
 
   // --- Reparto en silos: capacidad disponible + validación ---
-  const usingSilos = silos.length > 0;
+  // Al editar una recepción cuya leche ya se usó, los silos no se tocan (lo maneja el backend).
+  const usingSilos = silos.length > 0 && !(editing && milkUsed);
   const siloLevels = useMemo(
     () => new Map((silosQuery.data?.silos ?? []).map((s) => [s.id, s])),
     [silosQuery.data],
   );
+  // Al editar, la leche de ESTA recepción ya está contada en el nivel del silo: se la
+  // sumamos de vuelta al disponible (el backend rehace los lotes, así que ese lugar queda libre).
+  const ownInSilo = useMemo(() => {
+    const map = new Map<string, number>();
+    if (editing) {
+      for (const s of editQuery.data?.silos ?? []) {
+        if (s.warehouseId) map.set(s.warehouseId, (map.get(s.warehouseId) ?? 0) + s.liters);
+      }
+    }
+    return map;
+  }, [editing, editQuery.data]);
   // Litros disponibles de un silo = capacidad − nivel actual (Infinity si no tiene capacidad).
   const availableOf = (warehouseId: string): number => {
     const s = siloLevels.get(warehouseId);
     if (!s || !(s.capacityLiters > 0)) return Infinity;
-    return Math.round((s.capacityLiters - s.currentLiters) * 10) / 10;
+    return Math.round((s.capacityLiters - s.currentLiters + (ownInSilo.get(warehouseId) ?? 0)) * 10) / 10;
   };
   const assignedLiters = siloRows.reduce((a, r) => a + (Number(r.liters) > 0 ? Number(r.liters) : 0), 0);
   const unassignedLiters = Math.round((totalLiters - assignedLiters) * 10) / 10;
@@ -214,8 +273,12 @@ export default function NewReceptionPage() {
         </div>
       )}
       <PageHeader
-        title="Nueva recepción de leche"
-        description="Cargá los datos de este ingreso. El sistema genera el código de lote automáticamente."
+        title={editing ? `Editar recepción ${editQuery.data?.code ?? ''}` : 'Nueva recepción de leche'}
+        description={
+          editing
+            ? 'Corregí lo que se haya cargado mal. El código de lote no cambia.'
+            : 'Cargá los datos de este ingreso. El sistema genera el código de lote automáticamente.'
+        }
         action={
           <Button asChild variant="ghost" size="sm">
             <Link href="/recepciones">
@@ -225,6 +288,15 @@ export default function NewReceptionPage() {
           </Button>
         }
       />
+
+      {/* Aviso al editar leche ya usada: qué se puede corregir y qué no. */}
+      {editing && milkUsed && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          La leche de esta recepción ya se usó en elaboración. Podés corregir los datos, la calidad
+          y los litros <span className="font-medium">hasta lo que todavía no se consumió</span>; los
+          silos no se tocan y lo ya elaborado conserva su costo.
+        </div>
+      )}
 
       <form
         id="new-reception-form"
@@ -720,11 +792,20 @@ export default function NewReceptionPage() {
               loading={isSubmitting || mutation.isPending}
               loadingText="Guardando..."
             >
-              Guardar recepción
+              {editing ? 'Guardar cambios' : 'Guardar recepción'}
             </Button>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+// useSearchParams exige un límite de Suspense al prerenderizar (Next App Router).
+export default function NewReceptionPage() {
+  return (
+    <Suspense fallback={null}>
+      <ReceptionFormPage />
+    </Suspense>
   );
 }

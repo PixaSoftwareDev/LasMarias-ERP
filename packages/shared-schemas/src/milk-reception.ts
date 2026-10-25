@@ -88,6 +88,13 @@ export const milkReceptionSchema = z.object({
   blockedReason: z.string().max(500).optional(),
   notes: z.string().max(1000).optional(),
   batchId: uuidSchema.optional(),
+  // Solo en el detalle (GET /:id): si la leche ya se usó en elaboración, la edición queda
+  // limitada (litros hasta lo no consumido, sin tocar silos).
+  milkUsed: z.boolean().optional(),
+  // Reparto actual en silos, derivado de los lotes (para precargar la edición).
+  silos: z
+    .array(z.object({ warehouseId: uuidSchema.nullable(), liters: z.number() }))
+    .optional(),
   createdBy: uuidSchema,
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
@@ -137,3 +144,11 @@ export const createMilkReceptionInputSchema = z.object({
 });
 
 export type CreateMilkReceptionInput = z.infer<typeof createMilkReceptionInputSchema>;
+
+// Editar una recepción cargada mal (pedido del dueño, oct 2026): mismos campos que crear,
+// sin el aviso de duplicado (que es de la carga). Si la leche ya se usó en elaboración, el
+// backend limita los litros a lo no consumido y no toca los silos.
+export const updateMilkReceptionInputSchema = createMilkReceptionInputSchema.omit({
+  confirmDuplicate: true,
+});
+export type UpdateMilkReceptionInput = z.infer<typeof updateMilkReceptionInputSchema>;

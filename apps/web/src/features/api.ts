@@ -29,6 +29,8 @@ import type {
   SilosOverview,
   MilkBatchDto,
   StockEntryInput,
+  ProductBatch,
+  UpdateBatchInput,
   DiscardStockInput,
   CountAdjustInput,
   User,
@@ -243,6 +245,12 @@ export const inventoryApi = {
   // Ajuste por conteo físico.
   countAdjust: (input: CountAdjustInput) =>
     api<{ adjusted: number }>('/api/inventory/count-adjust', { method: 'POST', body: input }),
+  // Todos los lotes de un producto (incluidos agotados), para verlos y corregirlos.
+  batchesOfProduct: (productId: string) =>
+    api<ProductBatch[]>(`/api/inventory/batches-of/${productId}`),
+  // Corregir un lote cargado mal: kg (ajuste con rastro), bultos, costo, vencimiento, cámara.
+  updateBatch: (batchId: string, input: UpdateBatchInput) =>
+    api<ProductBatch>(`/api/inventory/batches/${batchId}`, { method: 'PATCH', body: input }),
   // Eliminar un ingreso de stock intacto (papelera). Borra el lote + su movimiento, sin dejar baja.
   deleteStockEntry: (batchId: string) =>
     api<{ deleted: true; code: string }>(`/api/inventory/stock-entry/${batchId}`, { method: 'DELETE' }),

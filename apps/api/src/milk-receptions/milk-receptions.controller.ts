@@ -1,8 +1,10 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import {
   createMilkReceptionInputSchema,
+  updateMilkReceptionInputSchema,
   type CreateMilkReceptionInput,
+  type UpdateMilkReceptionInput,
 } from '@lasmarias/shared-schemas';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -47,5 +49,22 @@ export class MilkReceptionsController {
   @Roles('admin', 'gerente', 'operario')
   remove(@Param('id') id: string) {
     return this.receptions.remove(id);
+  }
+
+  @Get(':id')
+  @Roles('admin', 'gerente', 'operario')
+  get(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.receptions.get(id);
+  }
+
+  // Editar una recepción cargada mal. Si la leche ya se usó en elaboración, los litros
+  // solo pueden bajar hasta lo no consumido y los silos no se tocan.
+  @Patch(':id')
+  @Roles('admin', 'gerente', 'operario')
+  update(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(updateMilkReceptionInputSchema)) body: UpdateMilkReceptionInput,
+  ) {
+    return this.receptions.update(id, body);
   }
 }

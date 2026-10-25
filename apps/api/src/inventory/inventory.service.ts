@@ -13,6 +13,8 @@ import type {
   InventoryMovement,
   StockCountInput,
   StockSummary,
+  ProductBatch,
+  UpdateBatchInput,
   TraceBackward,
   TraceBatch,
   TraceDispatch,
@@ -288,12 +290,16 @@ export class InventoryService {
           `No se puede eliminar el lote ${batch.code}: ya se usó en producción o se vendió. Dalo de baja en su lugar.`,
         );
 
-      // Control de coherencia: el saldo tiene que ser exactamente lo que entró menos las
-      // bajas registradas. Si no cierra, algo lo tocó por fuera y no se borra a ciegas.
-      const bajas = resto
-        .filter((m) => m.referenceType === 'stock_adjustment')
-        .reduce((acc, m) => acc + Number(m.quantity), 0);
-      const esperado = Number(batch.initialQuantity) - bajas;
+      // Control de coherencia: el saldo tiene que ser exactamente lo que entró más/menos
+      // las correcciones registradas. Si no cierra, algo lo tocó por fuera y no se borra
+      // a ciegas. Las ediciones de lote nuevas van con signo (in/out); las bajas y los
+      // ajustes viejos (type 'adjustment') restan si son baja y suman si son alta de conteo.
+      const esperado = resto.reduce((acc, m) => {
+        const q = Number(m.quantity);
+        if (m.type === 'in') return acc + q;
+        if (m.type === 'out') return acc - q;
+        return acc + (m.referenceType === 'stock_adjustment' ? -q : q);
+      }, Number(batch.initialQuantity));
       if (Math.abs(Number(batch.remainingQuantity) - esperado) > 1e-6)
         throw new BadRequestException(
           `No se puede eliminar el lote ${batch.code}: su saldo no coincide con sus movimientos. Dalo de baja en su lugar.`,
@@ -610,6 +616,136 @@ export class InventoryService {
         createdById: userId,
       }),
     );
+  }
+
+  // Todos los lotes de un producto (incluidos los agotados), el más nuevo primero: la
+  // pantalla de inventario los lista para poder ver y CORREGIR cada lote (pedido del
+  // dueño, oct 2026 — ej. masa vieja con kg en 0 pero bultos colgados).
+  async listBatchesOfProduct(productId: string): Promise<ProductBatch[]> {
+    const rows = await this.batches.find({
+      where: { productId },
+      relations: { warehouse: true },
+      order: { productionDate: 'DESC', code: 'DESC' },
+      take: 200,
+    });
+    return rows.map((b) => this.batchToDto(b));
+  }
+
+  // Edición de un lote existente: corregir kg (como ajuste por conteo CON rastro), bultos,
+  // costo, vencimiento, cámara y notas, sin desarmar producción ni ventas. El costo aplica
+  // HACIA ADELANTE: lo ya elaborado o vendido con el costo viejo no se recalcula — la
+  // calculadora queda intacta (CLAUDE.md §5).
+  async updateBatch(batchId: string, input: UpdateBatchInput, userId: string): Promise<ProductBatch> {
+    return this.dataSource.transaction(async (manager) => {
+      const batchRepo = manager.getRepository(BatchEntity);
+      const movementRepo = manager.getRepository(InventoryMovementEntity);
+      // CANDADO: nadie más (venta, producción, otro ajuste) toca este lote mientras se edita.
+      await lockBatches(manager, [batchId]);
+      const batch = await batchRepo.findOne({ where: { id: batchId }, relations: { warehouse: true } });
+      if (!batch) throw new NotFoundException(`Lote ${batchId} no encontrado`);
+
+      // Un lote reservado por una orden abierta (en_proceso) tiene su saldo y sus bultos
+      // comprometidos con esa orden: corregirlos acá desarmaría la reserva. Costo,
+      // vencimiento y notas sí se pueden corregir.
+      const tocaStock =
+        (input.countedQuantity !== undefined && input.countedQuantity !== Number(batch.remainingQuantity)) ||
+        (input.remainingBultos !== undefined && input.remainingBultos !== batch.remainingBultos) ||
+        (input.warehouseId !== undefined && input.warehouseId !== batch.warehouseId);
+      if (batch.status === 'en_proceso' && tocaStock) {
+        throw new BadRequestException(
+          `El lote ${batch.code} está reservado por una orden de producción abierta: cerrá o editá esa orden antes de corregir sus kg, bultos o cámara. (Costo, vencimiento y notas sí se pueden corregir.)`,
+        );
+      }
+
+      // Kg reales del lote: la diferencia queda registrada como ajuste por conteo, con
+      // signo (entrada si aparece, salida si falta).
+      if (input.countedQuantity !== undefined) {
+        const current = Number(batch.remainingQuantity);
+        const diff = new Big(input.countedQuantity).minus(current);
+        if (!diff.eq(0)) {
+          batch.remainingQuantity = String(input.countedQuantity);
+          await movementRepo.save(
+            movementRepo.create({
+              batchId: batch.id,
+              productId: batch.productId,
+              type: diff.gt(0) ? 'in' : 'out',
+              reason: 'count',
+              quantity: diff.abs().toString(),
+              unit: batch.unit,
+              referenceType: 'stock_count',
+              notes: `Edición de lote — kg: ${current} → ${input.countedQuantity}`,
+              createdById: userId,
+            }),
+          );
+        }
+      }
+
+      // Bultos restantes: corrección directa, con movimiento de rastro (kg 0, bultos con signo).
+      if (input.remainingBultos !== undefined && input.remainingBultos !== batch.remainingBultos) {
+        const diffBultos = (input.remainingBultos ?? 0) - (batch.remainingBultos ?? 0);
+        const antes = batch.remainingBultos;
+        batch.remainingBultos = input.remainingBultos;
+        if (diffBultos !== 0) {
+          await movementRepo.save(
+            movementRepo.create({
+              batchId: batch.id,
+              productId: batch.productId,
+              type: 'adjustment',
+              reason: 'count',
+              quantity: '0',
+              unit: batch.unit,
+              bultos: diffBultos,
+              referenceType: 'stock_count',
+              notes: `Edición de lote — bultos: ${antes ?? '—'} → ${input.remainingBultos ?? '—'}`,
+              createdById: userId,
+            }),
+          );
+        }
+      }
+
+      if (input.unitCost !== undefined) {
+        batch.unitCost = input.unitCost != null ? String(input.unitCost) : null;
+      }
+      if (input.expirationDate !== undefined) {
+        batch.expirationDate = input.expirationDate ? new Date(input.expirationDate) : null;
+      }
+      if (input.warehouseId !== undefined) {
+        if (input.warehouseId) {
+          const w = await manager.getRepository(WarehouseEntity).findOne({ where: { id: input.warehouseId } });
+          if (!w) throw new NotFoundException('Cámara no encontrada');
+        }
+        batch.warehouseId = input.warehouseId;
+      }
+      if (input.notes !== undefined) batch.notes = input.notes || null;
+
+      // Estado coherente con el saldo: un agotado que recupera kg vuelve a activo y al
+      // revés. 'en_proceso' (reservado por una orden abierta) no se toca.
+      const remaining = Number(batch.remainingQuantity);
+      if (remaining <= 0 && batch.status === 'activo') batch.status = 'agotado';
+      if (remaining > 0 && batch.status === 'agotado') batch.status = 'activo';
+
+      const saved = await batchRepo.save(batch);
+      return this.batchToDto(saved);
+    });
+  }
+
+  private batchToDto(b: BatchEntity): ProductBatch {
+    return {
+      id: b.id,
+      code: b.code,
+      productionDate: b.productionDate?.toISOString() ?? null,
+      expirationDate: b.expirationDate?.toISOString() ?? null,
+      initialQuantity: Number(b.initialQuantity),
+      remainingQuantity: Number(b.remainingQuantity),
+      initialBultos: b.initialBultos ?? null,
+      remainingBultos: b.remainingBultos ?? null,
+      unit: b.unit,
+      status: b.status,
+      unitCost: b.unitCost != null ? Number(b.unitCost) : null,
+      warehouseId: b.warehouseId ?? null,
+      warehouseName: b.warehouse?.name ?? null,
+      notes: b.notes ?? null,
+    };
   }
 
   // Lotes disponibles para consumir en producción (CLAUDE.md §4.3 — apertura de orden).

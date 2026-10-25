@@ -6,12 +6,14 @@ import {
   stockEntryInputSchema,
   discardStockInputSchema,
   countAdjustInputSchema,
+  updateBatchInputSchema,
   type CreateWarehouseInput,
   type UpdateWarehouseInput,
   type StockCountInput,
   type StockEntryInput,
   type DiscardStockInput,
   type CountAdjustInput,
+  type UpdateBatchInput,
 } from '@lasmarias/shared-schemas';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -70,6 +72,24 @@ export class InventoryController {
   @Roles('admin', 'gerente', 'operario')
   milkBatches(@Query('warehouseId') warehouseId?: string) {
     return this.inventory.milkBatches(warehouseId || undefined);
+  }
+
+  // Todos los lotes de un producto (incluidos agotados), para verlos y corregirlos.
+  @Get('batches-of/:productId')
+  @Roles('admin', 'gerente', 'operario')
+  batchesOfProduct(@Param('productId', new ParseUUIDPipe()) productId: string) {
+    return this.inventory.listBatchesOfProduct(productId);
+  }
+
+  // Corregir un lote cargado mal: kg (ajuste con rastro), bultos, costo, vencimiento, cámara.
+  @Patch('batches/:id')
+  @Roles('admin', 'gerente')
+  updateBatch(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(updateBatchInputSchema)) body: UpdateBatchInput,
+    @CurrentUser() user: JwtUserPayload,
+  ) {
+    return this.inventory.updateBatch(id, body, user.sub);
   }
 
   @Get('movements')
