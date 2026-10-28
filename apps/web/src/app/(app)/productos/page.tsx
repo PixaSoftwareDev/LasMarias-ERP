@@ -77,6 +77,7 @@ export default function ProductsPage() {
         costIvaMode: editing.costIvaMode ?? 'sin_iva',
         // Sin esto, la casilla "Insumo trazable" se destildaba al editar y se perdía la marca.
         requiresLotNumber: editing.requiresLotNumber ?? false,
+        pricedByFat: editing.pricedByFat ?? false,
         kgPorBulto: editing.kgPorBulto,
       });
     }
@@ -154,7 +155,7 @@ export default function ProductsPage() {
         <Card>
           <CardHeader><CardTitle>{editing ? 'Editar producto' : 'Nuevo producto'}</CardTitle></CardHeader>
           <CardContent>
-            <form onSubmit={form.handleSubmit((v) => save.mutateAsync(v))} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <form onSubmit={form.handleSubmit((v) => save.mutateAsync({ ...v, pricedByFat: v.category === 'subproducto' ? v.pricedByFat : false }))} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="SKU" htmlFor="sku" required error={form.formState.errors.sku?.message}>
                 <Input autoFocus placeholder="QC-001" {...form.register('sku')} />
               </Field>
@@ -250,6 +251,17 @@ export default function ProductsPage() {
                   <span className="text-sm">
                     Insumo trazable: pedir el <span className="font-medium">N° de lote del proveedor</span> al ingresar stock
                     <span className="block text-xs text-foreground-muted">Para fermentos, calcio, cuajo y demás insumos que controla bromatología.</span>
+                  </span>
+                </label>
+              )}
+              {watchCategory === 'subproducto' && (
+                <label className="flex items-start gap-2 sm:col-span-2">
+                  <input type="checkbox" className="mt-0.5 h-5 w-5" {...form.register('pricedByFat')} />
+                  <span className="text-sm">
+                    Se cobra por <span className="font-medium">% de grasa</span> (crema a granel)
+                    <span className="block text-xs text-foreground-muted">
+                      El precio de lista es por kg de materia grasa. Al vender se carga el % del análisis y el precio por kg sale solo: lista × % ÷ 100.
+                    </span>
                   </span>
                 </label>
               )}

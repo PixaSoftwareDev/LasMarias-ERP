@@ -45,6 +45,7 @@ export class ProductsService {
       defaultCostCurrency: input.defaultCostCurrency ?? 'ARS',
       costIvaMode: input.costIvaMode ?? 'sin_iva',
       requiresLotNumber: input.requiresLotNumber ?? false,
+      pricedByFat: input.pricedByFat ?? false,
       kgPorBulto: input.kgPorBulto != null ? String(input.kgPorBulto) : null,
       isActive: true,
     });
@@ -71,6 +72,7 @@ export class ProductsService {
       ...(input.defaultCostCurrency !== undefined && { defaultCostCurrency: input.defaultCostCurrency }),
       ...(input.costIvaMode !== undefined && { costIvaMode: input.costIvaMode }),
       ...(input.requiresLotNumber !== undefined && { requiresLotNumber: input.requiresLotNumber }),
+      ...(input.pricedByFat !== undefined && { pricedByFat: input.pricedByFat }),
       ...(input.kgPorBulto !== undefined && {
         kgPorBulto: input.kgPorBulto != null ? String(input.kgPorBulto) : null,
       }),
@@ -93,6 +95,7 @@ export class ProductsService {
       defaultCostCurrency: (e.defaultCostCurrency as Product['defaultCostCurrency']) ?? 'ARS',
       costIvaMode: (e.costIvaMode as Product['costIvaMode']) ?? 'sin_iva',
       requiresLotNumber: e.requiresLotNumber,
+      pricedByFat: e.pricedByFat,
       kgPorBulto: e.kgPorBulto != null ? Number(e.kgPorBulto) : undefined,
       isActive: e.isActive,
       createdAt: e.createdAt.toISOString(),

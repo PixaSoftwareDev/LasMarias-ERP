@@ -44,6 +44,10 @@ export const productSchema = z.object({
   kgPorBulto: z.number().positive().optional(),
   // Insumo trazable: exige N° de lote del proveedor al ingresar stock (bromatología).
   requiresLotNumber: z.boolean().optional(),
+  // Se cobra según el % de grasa del análisis del comprador (crema a granel): el precio de
+  // lista es por kg de MATERIA GRASA y el precio por kg de producto sale de multiplicarlo
+  // por el %. Ej: lista $7.199,50 × 59% = $4.247,705 por kg de crema.
+  pricedByFat: z.boolean().optional(),
   isActive: z.boolean(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
