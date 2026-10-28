@@ -33,6 +33,7 @@ interface FormValues {
 }
 
 // Categorías de productos que pueden usarse como insumo de una receta.
+const BYPRODUCT_CATEGORIES = ['subproducto', 'intermedio', 'queso'];
 const INGREDIENT_CATEGORIES = ['materia_prima', 'insumo', 'envase', 'intermedio'];
 
 const BASIS_OPTIONS: { value: IngredientBasis; label: string }[] = [
@@ -68,6 +69,9 @@ interface ByproductRow {
   unit: 'kg' | 'litro';
   basis: 'per_liter_milk' | 'per_kg_product';
   destination: ByproductDestination;
+  // Producto del catálogo al que va el subproducto (solo con destino 'product'): es lo que
+  // hace que al cerrar la orden genere su propio lote de stock (ej. crema cruda → CLNP).
+  destinationProductId: string;
   referenceValuePerUnit: string;
 }
 
@@ -78,6 +82,7 @@ const emptyByproduct: ByproductRow = {
   unit: 'litro',
   basis: 'per_liter_milk',
   destination: 'sale',
+  destinationProductId: '',
   referenceValuePerUnit: '',
 };
 
@@ -112,18 +117,23 @@ export default function NewRecipePage() {
     if (field === 'quantity') return Number(r.quantity) > 0 ? undefined : 'Tiene que ser mayor a 0';
     return r.unitCost === '' || Number(r.unitCost) >= 0 ? undefined : 'El costo no puede ser negativo';
   }
-  function bpError(r: ByproductRow, field: 'name' | 'expectedYield' | 'referenceValuePerUnit'): string | undefined {
+  function bpError(r: ByproductRow, field: 'name' | 'expectedYield' | 'referenceValuePerUnit' | 'destinationProductId'): string | undefined {
     if (field === 'name') return r.name.trim() ? undefined : 'Ingresá el nombre';
+    if (field === 'destinationProductId')
+      return r.destination !== 'product' || r.destinationProductId ? undefined : 'Elegí a qué producto va';
     if (field === 'expectedYield') return Number(r.expectedYield) > 0 ? undefined : 'Tiene que ser mayor a 0';
     return r.referenceValuePerUnit === '' || Number(r.referenceValuePerUnit) >= 0 ? undefined : 'No puede ser negativo';
   }
   // Error a mostrar: sólo si el campo ya fue visitado.
   const shownIng = (idx: number, r: IngredientRow, field: 'productId' | 'quantity' | 'unitCost') =>
     touched.has(`ing-${idx}-${field}`) ? ingError(r, field) : undefined;
-  const shownBp = (idx: number, r: ByproductRow, field: 'name' | 'expectedYield' | 'referenceValuePerUnit') =>
+  const shownBp = (idx: number, r: ByproductRow, field: 'name' | 'expectedYield' | 'referenceValuePerUnit' | 'destinationProductId') =>
     touched.has(`bp-${idx}-${field}`) ? bpError(r, field) : undefined;
 
   const ingredientProducts = products.data?.filter((p) => INGREDIENT_CATEGORIES.includes(p.category)) ?? [];
+  // Productos a los que puede ir un subproducto: lo que se stockea (crema cruda, suero, ricota,
+  // masa, queso), menos el producto de esta receta.
+  const byproductProducts = products.data?.filter((p) => p.isActive && BYPRODUCT_CATEGORIES.includes(p.category) && p.id !== form.watch('productId')) ?? [];
 
   const create = useMutation({
     mutationFn: (i: FormValues) =>
@@ -159,6 +169,7 @@ export default function NewRecipePage() {
             unit: r.unit,
             basis: r.basis,
             destination: r.destination,
+            destinationProductId: r.destination === 'product' && r.destinationProductId ? r.destinationProductId : undefined,
             referenceValuePerUnit: r.referenceValuePerUnit === '' ? undefined : Number(r.referenceValuePerUnit),
           })),
         },
@@ -181,6 +192,7 @@ export default function NewRecipePage() {
     // Subproductos: nombre + rendimiento > 0 obligatorios; valor de recupero opcional.
     for (const [idx, r] of byproducts.entries()) {
       if (!r.name.trim()) { toast.error(`Subproducto ${idx + 1}: ingresá el nombre`); return; }
+      if (r.destination === 'product' && !r.destinationProductId) { toast.error(`Subproducto ${idx + 1}: elegí a qué producto va`); return; }
       if (!(Number(r.expectedYield) > 0)) { toast.error(`Subproducto ${idx + 1}: el rendimiento tiene que ser mayor a 0`); return; }
       if (r.referenceValuePerUnit !== '' && !(Number(r.referenceValuePerUnit) >= 0)) {
         toast.error(`Subproducto ${idx + 1}: el valor de recupero no es válido`);
@@ -479,11 +491,47 @@ export default function NewRecipePage() {
                     <select
                       className={selectClass}
                       value={row.destination}
-                      onChange={(e) => updateByproduct(idx, { destination: e.target.value as ByproductDestination })}
+                      onChange={(e) => {
+                        const destination = e.target.value as ByproductDestination;
+                        updateByproduct(idx, { destination, ...(destination !== 'product' ? { destinationProductId: '' } : {}) });
+                      }}
                     >
                       {DESTINATION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </Field>
+                  {row.destination === 'product' && (
+                    <Field
+                      label="¿A qué producto va?"
+                      htmlFor={`bp-product-${idx}`}
+                      required
+                      hint="Al cerrar la orden, lo que cargues de este subproducto entra al stock de ese producto, con su propio lote."
+                      error={shownBp(idx, row, 'destinationProductId')}
+                    >
+                      <select
+                        id={`bp-product-${idx}`}
+                        className={selectClass}
+                        value={row.destinationProductId}
+                        onChange={(e) => {
+                          const p = byproductProducts.find((x) => x.id === e.target.value);
+                          // El nombre y el valor de recupero salen de la ficha (se pueden cambiar).
+                          // Recupero = costo de referencia en pesos: así la masa descuenta lo mismo
+                          // que después paga la elaboración que use esa crema.
+                          const fichaArs = p?.defaultCost != null && (p.defaultCostCurrency ?? 'ARS') === 'ARS' ? String(p.defaultCost) : '';
+                          updateByproduct(idx, {
+                            destinationProductId: e.target.value,
+                            ...(p ? { name: p.name, unit: p.unit === 'litro' ? 'litro' : 'kg' } : {}),
+                            ...(p && row.referenceValuePerUnit === '' && fichaArs ? { referenceValuePerUnit: fichaArs } : {}),
+                          });
+                        }}
+                        onBlur={() => touch(`bp-${idx}-destinationProductId`)}
+                      >
+                        <option value="">Elegí el producto</option>
+                        {byproductProducts.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </Field>
+                  )}
                   <Field label="Rendimiento esperado" htmlFor={`bp-yield-${idx}`} required error={shownBp(idx, row, 'expectedYield')}>
                     <Input
                       type="number"

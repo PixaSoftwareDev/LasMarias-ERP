@@ -599,7 +599,9 @@ export class ProductionService {
       const byproductActuals: Record<string, number> = {};
       for (const o of input.actualOutputs) {
         if (!o.isPrincipal && !o.isFormat) {
-          const exp = order.expectedOutputs.find((e) => e.productId === o.productId);
+          // Solo entre los subproductos: una receta vieja podía dejar el subproducto con el
+          // mismo productId que el principal, y entonces se tomaba el nombre equivocado.
+          const exp = order.expectedOutputs.find((e) => !e.isPrincipal && e.productId === o.productId);
           if (exp?.productName) byproductActuals[exp.productName] = o.quantity;
         }
       }
