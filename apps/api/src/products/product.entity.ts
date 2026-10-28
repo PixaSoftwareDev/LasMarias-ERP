@@ -51,6 +51,10 @@ export class ProductEntity extends BaseEntity {
   @Column({ type: 'boolean', name: 'requires_lot_number', default: false })
   requiresLotNumber!: boolean;
 
+  // Se cobra por % de grasa (crema a granel): el precio de lista es por kg de materia grasa.
+  @Column({ type: 'boolean', name: 'priced_by_fat', default: false })
+  pricedByFat!: boolean;
+
   @Column({ type: 'boolean', name: 'is_active', default: true })
   isActive!: boolean;
 }

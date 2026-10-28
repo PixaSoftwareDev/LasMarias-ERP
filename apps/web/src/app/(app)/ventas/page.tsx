@@ -40,7 +40,13 @@ interface Line {
   priceBasis: PriceBasis;
   // Lote elegido a mano. Sin elegir = sale del más viejo (automático).
   batchId?: string;
+  // Crema por % de grasa: % del análisis y precio de lista por kg de materia grasa.
+  // El precio por kg sale solo: fatBasePrice × fatPct ÷ 100.
+  fatPct?: number;
+  fatBasePrice?: number;
 }
+
+const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
 const EMPTY_LINE: Line = { productId: '', quantity: 1, unitPrice: 0, priceBasis: 'unidad' };
 
@@ -261,9 +267,18 @@ export default function SalesPage() {
   useEffect(() => {
     if (!priceListQuery.data && !clientPricesQuery.data) return;
     setLines((cur) =>
-      cur.map((l) => (l.productId && priceByProduct.has(l.productId) ? { ...l, unitPrice: priceByProduct.get(l.productId)! } : l)),
+      cur.map((l) => {
+        if (!l.productId) return l;
+        // Cambió el cliente y el nuevo no tiene precio: no arrastrar la base del anterior.
+        if (!priceByProduct.has(l.productId)) return l.fatBasePrice != null ? { ...l, fatBasePrice: undefined } : l;
+        const lista = priceByProduct.get(l.productId)!;
+        if (l.fatBasePrice != null || productsQuery.data?.find((p) => p.id === l.productId)?.pricedByFat) {
+          return { ...l, fatBasePrice: lista, unitPrice: l.fatPct ? round4((lista * l.fatPct) / 100) : lista };
+        }
+        return { ...l, unitPrice: lista };
+      }),
     );
-  }, [priceListQuery.data, clientPricesQuery.data, priceByProduct]);
+  }, [priceListQuery.data, clientPricesQuery.data, priceByProduct, productsQuery.data]);
 
   const stockByProduct = useMemo(
     () => new Map((stockQuery.data ?? []).map((s) => [s.productId, s])),
@@ -300,6 +315,7 @@ export default function SalesPage() {
           unitPrice: l.unitPrice,
           priceBasis: l.priceBasis,
           batchId: l.batchId,
+          ...(l.fatPct && l.fatBasePrice != null && { fat: { pct: l.fatPct, basePrice: l.fatBasePrice } }),
         })),
         notes: notes || undefined,
         paymentMode,
@@ -370,6 +386,15 @@ export default function SalesPage() {
         }
         // La lista manda cómo se cobra ese producto (por kg o por bulto).
         if (patch.productId) next.priceBasis = basisByProduct.get(patch.productId) ?? 'unidad';
+        // Crema por % de grasa: la lista es por kg de materia grasa; el % lo carga el usuario.
+        if (patch.productId !== undefined && patch.productId !== l.productId) {
+          const porGrasa = productsQuery.data?.find((p) => p.id === patch.productId)?.pricedByFat;
+          next.fatPct = undefined;
+          next.fatBasePrice = porGrasa ? priceByProduct.get(patch.productId) : undefined;
+          // El % es sobre el kg de crema: se cobra por kg, nunca por bulto.
+          if (porGrasa) next.priceBasis = 'unidad';
+        }
+        if (next.fatBasePrice != null && next.fatPct) next.unitPrice = round4((next.fatBasePrice * next.fatPct) / 100);
         return next;
       }),
     );
@@ -389,8 +414,10 @@ export default function SalesPage() {
 
   // Cobrar por bulto exige saber cuántos bultos salen (si no, el importe sería 0).
   const bultosFaltantes = validLines.some((l) => l.priceBasis === 'bulto' && !(l.bultos && l.bultos > 0));
+  const grasaInvalida = (l: Line) => l.fatPct != null && !(l.fatPct > 0 && l.fatPct <= 100);
+  const hayGrasaInvalida = validLines.some(grasaInvalida);
   const canSave =
-    !!clientId && validLines.length > 0 && !create.isPending && !needsRate && !bultosFaltantes && !!dispatchDate && dispatchDate <= todayLocal();
+    !!clientId && validLines.length > 0 && !create.isPending && !needsRate && !bultosFaltantes && !hayGrasaInvalida && !!dispatchDate && dispatchDate <= todayLocal();
 
   // ¿Alguna línea pide más de lo que hay en stock? (venta quedaría con stock negativo)
   const hasOverStock = useMemo(
@@ -589,6 +616,7 @@ export default function SalesPage() {
                         prefix="$"
                         placeholder="Precio"
                         value={row.unitPrice}
+                        readOnly={row.fatBasePrice != null && !!row.fatPct}
                         onChange={(e) => updateLine(idx, { unitPrice: Number(e.target.value) })}
                       />
                       <button
@@ -618,6 +646,9 @@ export default function SalesPage() {
                             })
                           }
                         />
+                        {product?.pricedByFat ? (
+                          <span className="self-center text-xs text-foreground-muted">Se cobra por kg según el % de grasa.</span>
+                        ) : (
                         <select
                           aria-label="Cómo se cobra"
                           className="min-h-touch rounded-md border border-border bg-surface-elevated px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
@@ -627,6 +658,48 @@ export default function SalesPage() {
                           <option value="unidad">Precio por {lineUnit || 'unidad'}</option>
                           <option value="bulto">Precio por bulto</option>
                         </select>
+                        )}
+                      </div>
+                    )}
+                    {/* Crema a granel: se cobra por % de grasa del análisis del comprador. */}
+                    {product?.pricedByFat && (
+                      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[150px,1fr] sm:items-center">
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          step="0.1"
+                          min={0}
+                          max={100}
+                          aria-label="% de grasa"
+                          suffix="% grasa"
+                          placeholder="Ej: 59"
+                          value={row.fatPct ?? ''}
+                          onChange={(e) =>
+                            updateLine(idx, { fatPct: e.target.value === '' ? undefined : Number(e.target.value) })
+                          }
+                        />
+                        {grasaInvalida(row) ? (
+                          <span className="flex items-start gap-1.5 text-xs font-medium text-red-600">
+                            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                            El % de grasa tiene que estar entre 0 y 100.
+                          </span>
+                        ) : row.fatBasePrice != null ? (
+                          row.fatPct ? (
+                            <span className="text-xs text-foreground-muted">
+                              {money(row.fatBasePrice)} por kg de grasa × {row.fatPct}% = <span className="font-medium text-foreground">{money(row.unitPrice)}</span> por {lineUnit || 'kg'}
+                            </span>
+                          ) : (
+                            <span className="flex items-start gap-1.5 text-xs font-medium text-amber-700">
+                              <TriangleAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                              Falta el % de grasa: el precio quedó al 100% ({money(row.fatBasePrice)} por kg de grasa). Si el análisis llega después, corregilo con el botón &quot;Precio&quot;.
+                            </span>
+                          )
+                        ) : (
+                          <span className="flex items-start gap-1.5 text-xs font-medium text-amber-700">
+                            <TriangleAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                            Este producto no tiene precio por kg de grasa en la lista del cliente: cargalo en Lista de precios o poné el precio por {lineUnit || 'kg'} a mano.
+                          </span>
+                        )}
                       </div>
                     )}
                     {row.priceBasis === 'bulto' && !(row.bultos && row.bultos > 0) && (
@@ -836,6 +909,7 @@ export default function SalesPage() {
       {priceOrder && (
         <ChangePriceDialog
           order={priceOrder}
+          products={productsQuery.data ?? []}
           onClose={() => setPriceOrder(null)}
           onDone={() => {
             queryClient.invalidateQueries({ queryKey: ['sales-orders'] });
