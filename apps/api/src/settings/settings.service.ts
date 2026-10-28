@@ -19,7 +19,7 @@ const QUALITY_KEY = 'quality_limits';
 const DEFAULT_COMPANY: CompanySettings = {
   name: 'Lácteos Las Marías',
   address: undefined,
-  city: 'Pergamino, Buenos Aires',
+  city: 'General Gelly, Santa Fe',
   taxId: undefined,
   phone: undefined,
   ivaRate: DEFAULT_IVA_RATE,
