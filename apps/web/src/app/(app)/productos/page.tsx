@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -41,6 +41,8 @@ export default function ProductsPage() {
   const [categoryFilter, setCategoryFilter] = useState('todas');
 
   const { data = [], isLoading } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
+  // Familias ya usadas, para sugerir la misma ortografía ("Mozzarella" y no "mozarela").
+  const familias = useMemo(() => [...new Set(data.map((p) => p.family).filter((f): f is string => !!f))].sort(), [data]);
 
   const filteredData =
     categoryFilter === 'todas' ? data : data.filter((p) => p.category === categoryFilter);
@@ -78,6 +80,7 @@ export default function ProductsPage() {
         // Sin esto, la casilla "Insumo trazable" se destildaba al editar y se perdía la marca.
         requiresLotNumber: editing.requiresLotNumber ?? false,
         pricedByFat: editing.pricedByFat ?? false,
+        family: editing.family ?? '',
         kgPorBulto: editing.kgPorBulto,
       });
     }
@@ -161,6 +164,17 @@ export default function ProductsPage() {
               </Field>
               <Field label="Nombre" htmlFor="name" required error={form.formState.errors.name?.message}>
                 <Input placeholder="Queso cremoso 1kg" {...form.register('name')} />
+              </Field>
+              <Field
+                label="Familia"
+                htmlFor="family"
+                hint='Opcional. Stock suma todos los productos de la misma familia (ej. "Mozzarella": todas las marcas, planchas y cilindros).'
+                error={form.formState.errors.family?.message}
+              >
+                <Input id="family" list="familias" placeholder="Ej: Mozzarella" {...form.register('family')} />
+                <datalist id="familias">
+                  {familias.map((f) => <option key={f} value={f} />)}
+                </datalist>
               </Field>
               <Field label="Categoría" htmlFor="category" required error={form.formState.errors.category?.message}>
                 <select id="category" className="min-h-touch w-full rounded-md border border-border px-3" {...form.register('category')}>

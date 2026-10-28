@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import Big from 'big.js';
 import { DataSource, In, MoreThanOrEqual, Repository } from 'typeorm';
 import type {
   CloseProductionInput,
@@ -540,6 +541,30 @@ export class ProductionService {
       if (!principalOutput || principalOutput.quantity <= 0)
         throw new BadRequestException(`Tenés que cargar la cantidad producida de ${recipe.name} (producto principal)`);
 
+      // --- 2b. Otros formatos de la misma tachada (plancha + cilindro). Son producto, no
+      // subproducto: sus kg se suman al principal para el costo/kg y el rendimiento, y cada
+      // uno genera su propio lote con el MISMO costo/kg. Tienen que ser de la misma categoría
+      // que el principal (queso con queso, masa con masa) y distintos entre sí.
+      const principalProduct = await manager.getRepository(ProductEntity).findOne({ where: { id: principalProductId } });
+      const formatos: { productId: string; quantity: number; bultos: number | null; product: ProductEntity }[] = [];
+      for (const o of input.actualOutputs) {
+        if (!o.isFormat || o.isPrincipal) continue;
+        if (!(o.quantity > 0)) continue;
+        if (o.productId === principalProductId)
+          throw new BadRequestException(`${recipe.name} ya es el producto principal: cargá sus kg arriba, no como otro formato.`);
+        if (formatos.some((f) => f.productId === o.productId))
+          throw new BadRequestException('Cargaste el mismo formato dos veces. Sumá los kg en una sola línea.');
+        const fp = await manager.getRepository(ProductEntity).findOne({ where: { id: o.productId } });
+        if (!fp) throw new BadRequestException('Uno de los formatos elegidos no existe en Productos.');
+        if (principalProduct && fp.category !== principalProduct.category)
+          throw new BadRequestException(`${fp.name} no es otro formato de ${recipe.name}: tienen que ser de la misma categoría.`);
+        formatos.push({ productId: o.productId, quantity: o.quantity, bultos: o.bultos ?? null, product: fp });
+      }
+      // Kg totales de producto de la tachada: principal + formatos. Es lo que divide el costo.
+      const kgProductoTotal = formatos
+        .reduce((acc, f) => acc.plus(f.quantity), new Big(principalOutput.quantity))
+        .toString();
+
       // --- 3. Calcular el costo real y estándar con la calculadora de elaboración ---
       const totalLiters = Number(order.totalMilkLiters);
       // El precio de cada insumo vive en la FICHA del producto (Datos maestros → Productos):
@@ -573,7 +598,7 @@ export class ProductionService {
       // Cantidades reales de subproductos (por nombre, desde lo que carga el operario).
       const byproductActuals: Record<string, number> = {};
       for (const o of input.actualOutputs) {
-        if (!o.isPrincipal) {
+        if (!o.isPrincipal && !o.isFormat) {
           const exp = order.expectedOutputs.find((e) => e.productId === o.productId);
           if (exp?.productName) byproductActuals[exp.productName] = o.quantity;
         }
@@ -582,7 +607,7 @@ export class ProductionService {
       const realCost = computeElaborationCost({
         mode: 'real',
         litros: String(totalLiters),
-        productKg: String(principalOutput.quantity),
+        productKg: kgProductoTotal,
         primaryInputs,
         ingredients,
         byproducts: version.byproducts.map((bp) => ({
@@ -666,11 +691,50 @@ export class ProductionService {
         }),
       );
 
+      // --- 4a. Otros formatos: un lote por formato con el MISMO costo/kg que el principal. ---
+      const formatBatch = new Map<string, { id: string; code: string }>();
+      let fIdx = 0;
+      for (const f of formatos) {
+        fIdx += 1;
+        const fBatch = await manager.getRepository(BatchEntity).save(
+          manager.getRepository(BatchEntity).create({
+            code: `LM-PP-${order.code.replace('OP-', '')}-F${fIdx}`,
+            productId: f.productId,
+            productionDate: order.startedAt,
+            initialQuantity: String(f.quantity),
+            remainingQuantity: String(f.quantity),
+            initialBultos: f.bultos,
+            remainingBultos: f.bultos,
+            unit: 'kg',
+            status: 'activo',
+            parentBatchId: order.milkInputs[0]?.batchId ?? null,
+            warehouseId: input.warehouseId ?? null,
+            unitCost: realCost.costoPorKg,
+            notes: `Producido en ${order.code} (otro formato de la misma elaboración)`,
+          }),
+        );
+        await manager.getRepository(InventoryMovementEntity).save(
+          manager.getRepository(InventoryMovementEntity).create({
+            batchId: fBatch.id,
+            productId: f.productId,
+            type: 'in',
+            reason: 'production',
+            quantity: String(f.quantity),
+            unit: 'kg',
+            bultos: f.bultos,
+            referenceType: 'production_order',
+            referenceId: order.id,
+            createdById: order.operatorId,
+          }),
+        );
+        formatBatch.set(f.productId, { id: fBatch.id, code: fBatch.code });
+      }
+
       // --- 4b. Subproductos con producto del catálogo (ej. suero) → generan su lote de stock ---
       const byproductBatch = new Map<string, { id: string; code: string }>();
       let bpIdx = 0;
       for (const o of input.actualOutputs) {
-        if (o.isPrincipal || o.quantity <= 0) continue;
+        if (o.isPrincipal || o.isFormat || o.quantity <= 0) continue;
         if (o.productId === principalProductId) continue; // sin producto propio: solo descuenta costo
         const bpProduct = await manager.getRepository(ProductEntity).findOne({ where: { id: o.productId } });
         if (!bpProduct) continue;
@@ -724,7 +788,7 @@ export class ProductionService {
             : ing.basis === 'per_1000_liters_milk'
               ? (Number(ing.quantity) * totalLiters) / 1000
               : ing.basis === 'per_kg_product'
-                ? Number(ing.quantity) * Number(principalOutput.quantity)
+                ? Number(ing.quantity) * Number(kgProductoTotal)
                 : Number(ing.quantity);
         if (!(consumed > 0)) continue;
         const lots = await manager.getRepository(BatchEntity).find({
@@ -758,28 +822,35 @@ export class ProductionService {
         }
       }
 
-      const actualOutputs: ProductionOutput[] = input.actualOutputs.map((o) => {
-        const exp = order.expectedOutputs.find((e) => e.productId === o.productId);
-        const batch = o.isPrincipal
-          ? { id: productionBatch.id, code: productionBatch.code }
-          : byproductBatch.get(o.productId);
-        return {
-          productId: o.productId,
-          productName: exp?.productName ?? '',
-          quantity: o.quantity,
-          bultos: o.bultos,
-          unit: exp?.unit ?? 'kg',
-          isPrincipal: o.isPrincipal,
-          batchId: batch?.id,
-          batchCode: batch?.code,
-        };
-      });
+      const actualOutputs: ProductionOutput[] = input.actualOutputs
+        // Un formato en 0 kg no produjo nada: no se guarda.
+        .filter((o) => !(o.isFormat && !(o.quantity > 0)))
+        .map((o) => {
+          const exp = order.expectedOutputs.find((e) => e.productId === o.productId);
+          const formato = o.isFormat ? formatos.find((f) => f.productId === o.productId) : undefined;
+          const batch = o.isPrincipal
+            ? { id: productionBatch.id, code: productionBatch.code }
+            : o.isFormat
+              ? formatBatch.get(o.productId)
+              : byproductBatch.get(o.productId);
+          return {
+            productId: o.productId,
+            productName: formato?.product.name ?? exp?.productName ?? '',
+            quantity: o.quantity,
+            bultos: o.bultos,
+            unit: exp?.unit ?? 'kg',
+            isPrincipal: o.isPrincipal,
+            ...(o.isFormat && { isFormat: true }),
+            batchId: batch?.id,
+            batchCode: batch?.code,
+          };
+        });
 
       // --- 5. Cerrar la orden y persistir el costo ---
       order.status = 'closed';
       order.closedAt = new Date();
       order.actualOutputs = actualOutputs;
-      order.totalPrincipalKg = String(principalOutput.quantity);
+      order.totalPrincipalKg = kgProductoTotal;
       order.totalCost = realCost.costoNeto;
       order.unitCost = realCost.costoPorKg;
       order.costBreakdown = { real: realCost, estandar: estandarCost, variance };

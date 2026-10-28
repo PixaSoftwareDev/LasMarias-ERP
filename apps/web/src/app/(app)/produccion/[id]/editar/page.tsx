@@ -17,6 +17,7 @@ import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
 import { DobleCostoAviso, ReprocesoRows, SinCostoAviso, useStockSources, type InputRow } from '@/components/production/stock-inputs';
 import { OutputFields } from '@/components/production/output-fields';
+import { FormatOutputs, type FormatRow } from '@/components/production/format-outputs';
 
 interface MilkBatch {
   id: string;
@@ -148,6 +149,8 @@ export default function EditProductionPage() {
   // lote nuevo los perdía (bug corregido oct 2026).
   const [quantities, setQuantities] = useState<Record<string, number | undefined>>({});
   const [bultos, setBultos] = useState<Record<string, number | undefined>>({});
+  // Otros formatos de la misma tachada (plancha + cilindro), precargados de la orden cerrada.
+  const [formatos, setFormatos] = useState<FormatRow[]>([]);
   const [warehouseId, setWarehouseId] = useState('');
   const [expectedYield, setExpectedYield] = useState('');
 
@@ -188,6 +191,9 @@ export default function EditProductionPage() {
           order.actualOutputs.filter((o) => o.bultos != null).map((o) => [o.productId, o.bultos]),
         ),
       );
+      setFormatos(
+        order.actualOutputs.filter((o) => o.isFormat).map((o) => ({ productId: o.productId, kg: o.quantity, bultos: o.bultos })),
+      );
       setWarehouseId(order.warehouseId ?? '');
       const std = order.costBreakdown?.estandar?.rendimiento;
       if (std) setExpectedYield(std);
@@ -217,12 +223,21 @@ export default function EditProductionPage() {
         // Solo si la orden estaba cerrada: mandar la producción real para recalcular el costo.
         ...(wasClosed
           ? {
-              actualOutputs: (orderQuery.data?.expectedOutputs ?? []).map((o) => ({
-                productId: o.productId,
-                quantity: Number(quantities[o.productId] ?? 0),
-                bultos: bultos[o.productId] != null ? Number(bultos[o.productId]) : undefined,
-                isPrincipal: o.isPrincipal,
-              })),
+              actualOutputs: [
+                ...(orderQuery.data?.expectedOutputs ?? []).map((o) => ({
+                  productId: o.productId,
+                  quantity: Number(quantities[o.productId] ?? 0),
+                  bultos: bultos[o.productId] != null ? Number(bultos[o.productId]) : undefined,
+                  isPrincipal: o.isPrincipal,
+                })),
+                ...formatosValidos.map((f) => ({
+                  productId: f.productId,
+                  quantity: Number(f.kg),
+                  bultos: f.bultos != null ? Number(f.bultos) : undefined,
+                  isPrincipal: false,
+                  isFormat: true,
+                })),
+              ],
               warehouseId: warehouseId || undefined,
               expectedYieldKgPerLiter:
                 expectedYield !== '' && Number(expectedYield) > 0 ? Number(expectedYield) : undefined,
@@ -287,8 +302,11 @@ export default function EditProductionPage() {
 
   const principalOutputs = (order.expectedOutputs ?? []).filter((o) => o.isPrincipal);
   const byproductOutputs = (order.expectedOutputs ?? []).filter((o) => !o.isPrincipal);
+  const formatosValidos = formatos.filter((f) => f.productId && f.kg != null && f.kg > 0);
+  const formatoIncompleto = formatos.some((f) => f.productId && !(f.kg != null && f.kg > 0));
   // Para una orden cerrada necesitamos al menos un kg de producto principal para poder recalcular.
-  const closedReady = !wasClosed || principalOutputs.some((o) => Number(quantities[o.productId] ?? 0) > 0);
+  const closedReady =
+    !wasClosed || (principalOutputs.some((o) => Number(quantities[o.productId] ?? 0) > 0) && !formatoIncompleto);
 
   return (
     <div className="flex flex-col gap-6">
@@ -464,6 +482,22 @@ export default function EditProductionPage() {
                 onBultos={(v) => setBultos((b) => ({ ...b, [o.productId]: v }))}
               />
             ))}
+
+            {principalOutputs[0] && (
+              <div className="flex flex-col gap-3 border-t border-border-subtle pt-4">
+                <p className="text-sm font-medium text-foreground">Otros formatos de la misma tachada (opcional)</p>
+                <p className="text-xs text-foreground-muted">Ej: planchas y también cilindros. Comparten el costo por kg.</p>
+                <FormatOutputs
+                  rows={formatos}
+                  onChange={setFormatos}
+                  products={productsQuery.data ?? []}
+                  principalProductId={principalOutputs[0].productId}
+                />
+                {formatoIncompleto && (
+                  <p className="text-xs font-medium text-amber-700">Cargá los kg del formato agregado (o quitalo).</p>
+                )}
+              </div>
+            )}
 
             {byproductOutputs.length > 0 && (
               <div className="flex flex-col gap-4 border-t border-border-subtle pt-4">

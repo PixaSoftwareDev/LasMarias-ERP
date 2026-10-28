@@ -211,12 +211,12 @@ export const productionApi = {
       startedAt: string;
       milkInputs: { batchId: string; liters: number }[];
       notes?: string;
-      actualOutputs?: { productId: string; quantity: number; isPrincipal: boolean }[];
+      actualOutputs?: { productId: string; quantity: number; bultos?: number; isPrincipal: boolean; isFormat?: boolean }[];
       warehouseId?: string;
       expectedYieldKgPerLiter?: number;
     },
   ) => api<ProductionOrder>(`/api/production-orders/${id}`, { method: 'PATCH', body: input }),
-  close: (id: string, input: { actualOutputs: { productId: string; quantity: number; isPrincipal: boolean }[]; warehouseId?: string; expectedYieldKgPerLiter?: number; notes?: string }) =>
+  close: (id: string, input: { actualOutputs: { productId: string; quantity: number; bultos?: number; isPrincipal: boolean; isFormat?: boolean }[]; warehouseId?: string; expectedYieldKgPerLiter?: number; notes?: string }) =>
     api<ProductionOrder>(`/api/production-orders/${id}/close`, { method: 'POST', body: input }),
   remove: (id: string) =>
     api<{ deleted: true; code: string }>(`/api/production-orders/${id}`, { method: 'DELETE' }),

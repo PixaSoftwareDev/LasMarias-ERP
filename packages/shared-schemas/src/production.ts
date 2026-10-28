@@ -28,6 +28,10 @@ export const productionOutputSchema = z.object({
   batchId: uuidSchema.optional(),
   batchCode: z.string().optional(),
   isPrincipal: z.boolean(),
+  // Otro FORMATO de la misma elaboración (pedido del dueño, 27/10/2026): de una tachada de
+  // mozzarella salen planchas y también cilindros. No es un subproducto: es producto, hereda
+  // el mismo costo/kg que el principal y sus kg cuentan para el rendimiento.
+  isFormat: z.boolean().optional(),
 });
 export type ProductionOutput = z.infer<typeof productionOutputSchema>;
 
@@ -136,6 +140,7 @@ export const updateProductionInputSchema = openProductionInputSchema.extend({
         quantity: z.number().nonnegative(),
         bultos: bultosSchema,
         isPrincipal: z.boolean(),
+        isFormat: z.boolean().optional(),
       }),
     )
     .optional(),
@@ -152,6 +157,8 @@ export const closeProductionInputSchema = z.object({
       // Bultos (bolsas/cajas) realmente obtenidos. Opcional: no afecta el costo.
       bultos: bultosSchema,
       isPrincipal: z.boolean(),
+      // Otro formato del mismo producto (plancha + cilindro): comparte el costo/kg.
+      isFormat: z.boolean().optional(),
     }),
   ),
   // Cámara/sector donde se almacena el lote de producto resultante (opcional).

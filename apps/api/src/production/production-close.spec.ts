@@ -516,4 +516,90 @@ describe('ProductionService.close', () => {
     const salida = savedMovements.find((m) => m.type === 'out' && m.reason === 'production');
     expect(salida.bultos).toBe(40);
   });
+
+  // PEDIDO DEL DUEÑO (audio 27/10/2026): de una misma tachada salen planchas Y cilindros.
+  // Los dos son producto (no subproducto): el costo se divide por los kg TOTALES y cada
+  // formato se lleva su lote con el MISMO costo/kg. A mano: $10.500 ÷ (100 + 40) kg = $75/kg.
+  describe('otros formatos de la misma elaboración', () => {
+    const products = {
+      'prod-mozza': { id: 'prod-mozza', name: 'Mozzarella plancha', category: 'queso', defaultCost: null },
+      'prod-cil': { id: 'prod-cil', name: 'Mozzarella cilindro', category: 'queso', defaultCost: null },
+      'prod-ricota': { id: 'prod-ricota', name: 'Ricota', category: 'subproducto', defaultCost: null },
+    };
+
+    it('reparte el costo por los kg totales y los dos lotes heredan el mismo costo/kg', async () => {
+      const { service, savedBatches, getOrder } = makeService({ products });
+      await service.close('order-1', {
+        actualOutputs: [
+          { productId: PRINCIPAL_PRODUCT_ID, quantity: 100, bultos: 10, isPrincipal: true },
+          { productId: 'prod-cil', quantity: 40, bultos: 8, isPrincipal: false, isFormat: true },
+        ],
+      } as any);
+      const order = getOrder();
+      expect(order.unitCost).toBe('75.0000');
+      expect(order.totalPrincipalKg).toBe('140');
+      expect(order.costBreakdown.real.rendimiento).toBe('0.1400');
+      const plancha = savedBatches.find((b) => b.productId === PRINCIPAL_PRODUCT_ID);
+      const cilindro = savedBatches.find((b) => b.productId === 'prod-cil');
+      expect(plancha.unitCost).toBe('75.0000');
+      expect(cilindro.unitCost).toBe('75.0000');
+      expect(cilindro.code).toBe('LM-PP-20260530-0001-F1');
+      expect(cilindro.initialQuantity).toBe('40');
+      expect(cilindro.remainingBultos).toBe(8);
+      // Queda en la orden como salida con su lote, marcada como formato.
+      const salida = order.actualOutputs.find((o: any) => o.productId === 'prod-cil');
+      expect(salida.isFormat).toBe(true);
+      expect(salida.productName).toBe('Mozzarella cilindro');
+      expect(salida.batchCode).toBe('LM-PP-20260530-0001-F1');
+    });
+
+    it('los insumos "por kg de producto" se consumen sobre los kg totales', async () => {
+      const { service, savedMovements } = makeService({
+        products,
+        ingredients: [{ productId: 'ins-sal', productName: 'Sal', quantity: 0.01, unitCost: 100, basis: 'per_kg_product' }],
+        insumoLots: [{ id: 'sal-1', productId: 'ins-sal', remainingQuantity: '50', status: 'activo', unit: 'kg' }],
+      });
+      await service.close('order-1', {
+        actualOutputs: [
+          { productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true },
+          { productId: 'prod-cil', quantity: 40, isPrincipal: false, isFormat: true },
+        ],
+      } as any);
+      const sal = savedMovements.find((m) => m.productId === 'ins-sal' && m.reason === 'consumption');
+      expect(Number(sal.quantity)).toBeCloseTo(1.4, 6); // 0,01 × 140 kg
+    });
+
+    it('un formato en 0 kg no genera lote ni queda en la orden', async () => {
+      const { service, savedBatches, getOrder } = makeService({ products });
+      await service.close('order-1', {
+        actualOutputs: [
+          { productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true },
+          { productId: 'prod-cil', quantity: 0, isPrincipal: false, isFormat: true },
+        ],
+      } as any);
+      expect(savedBatches.find((b) => b.productId === 'prod-cil')).toBeUndefined();
+      expect(getOrder().unitCost).toBe('105.0000');
+      expect(getOrder().actualOutputs.some((o: any) => o.productId === 'prod-cil')).toBe(false);
+    });
+
+    it('rechaza un formato de otra categoría y el mismo producto principal repetido', async () => {
+      const { service } = makeService({ products });
+      await expect(
+        service.close('order-1', {
+          actualOutputs: [
+            { productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true },
+            { productId: 'prod-ricota', quantity: 10, isPrincipal: false, isFormat: true },
+          ],
+        } as any),
+      ).rejects.toThrow(/misma categoría/);
+      await expect(
+        service.close('order-1', {
+          actualOutputs: [
+            { productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true },
+            { productId: PRINCIPAL_PRODUCT_ID, quantity: 10, isPrincipal: false, isFormat: true },
+          ],
+        } as any),
+      ).rejects.toThrow(/ya es el producto principal/);
+    });
+  });
 });

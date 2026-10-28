@@ -46,6 +46,7 @@ export class ProductsService {
       costIvaMode: input.costIvaMode ?? 'sin_iva',
       requiresLotNumber: input.requiresLotNumber ?? false,
       pricedByFat: input.pricedByFat ?? false,
+      family: input.family?.trim() || null,
       kgPorBulto: input.kgPorBulto != null ? String(input.kgPorBulto) : null,
       isActive: true,
     });
@@ -73,6 +74,7 @@ export class ProductsService {
       ...(input.costIvaMode !== undefined && { costIvaMode: input.costIvaMode }),
       ...(input.requiresLotNumber !== undefined && { requiresLotNumber: input.requiresLotNumber }),
       ...(input.pricedByFat !== undefined && { pricedByFat: input.pricedByFat }),
+      ...(input.family !== undefined && { family: input.family?.trim() || null }),
       ...(input.kgPorBulto !== undefined && {
         kgPorBulto: input.kgPorBulto != null ? String(input.kgPorBulto) : null,
       }),
@@ -96,6 +98,7 @@ export class ProductsService {
       costIvaMode: (e.costIvaMode as Product['costIvaMode']) ?? 'sin_iva',
       requiresLotNumber: e.requiresLotNumber,
       pricedByFat: e.pricedByFat,
+      family: e.family ?? undefined,
       kgPorBulto: e.kgPorBulto != null ? Number(e.kgPorBulto) : undefined,
       isActive: e.isActive,
       createdAt: e.createdAt.toISOString(),

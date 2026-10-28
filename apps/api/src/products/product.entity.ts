@@ -55,6 +55,10 @@ export class ProductEntity extends BaseEntity {
   @Column({ type: 'boolean', name: 'priced_by_fat', default: false })
   pricedByFat!: boolean;
 
+  // Familia para el subtotal en Stock (ej. "Mozzarella"). Null = sin familia.
+  @Column({ type: 'varchar', length: 60, nullable: true })
+  family!: string | null;
+
   @Column({ type: 'boolean', name: 'is_active', default: true })
   isActive!: boolean;
 }
