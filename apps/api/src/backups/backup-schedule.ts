@@ -12,9 +12,11 @@ export const DEFAULT_BACKUP_CONFIG: BackupConfig = {
   days: [1, 2, 3, 4, 5, 6, 7], // todos los días
 };
 
-// Cantidad de copias automáticas cuyos archivos se conservan (la base hoy pesa <1 MB,
-// así que 30 diarias cuestan nada). Las manuales no se rotan.
-export const MAX_AUTO_FILES = 30;
+// El servidor NO es el archivo de copias (pedido del dueño, oct 2026): guarda solo
+// una semana como red de seguridad y el historial completo queda en la PC del dueño.
+export const MAX_AUTO_FILES = 7;
+// Días que sobrevive un archivo en el servidor, también los de las copias manuales.
+export const MAX_FILE_AGE_DAYS = 7;
 
 // Clave de fecha LOCAL del servidor (YYYY-MM-DD). Las copias se piensan en "días".
 export function localDateKey(d: Date): string {
@@ -94,11 +96,22 @@ export function computeWarnings(config: BackupConfig, runs: RunForWarnings[], no
 export interface RunForPrune {
   trigger: 'auto' | 'manual';
   fileAvailable: boolean;
+  startedAt: Date;
 }
 
-// Rotación: de las copias AUTOMÁTICAS con archivo (ordenadas nueva→vieja), devuelve
-// las que pierden su archivo por exceder el máximo. Nunca toca las manuales.
-export function runsToPrune<T extends RunForPrune>(runsDesc: T[], keep: number = MAX_AUTO_FILES): T[] {
-  const autosWithFile = runsDesc.filter((r) => r.trigger === 'auto' && r.fileAvailable);
-  return autosWithFile.slice(keep);
+// Rotación: de las copias con archivo (ordenadas nueva→vieja) devuelve las que lo
+// pierden, por dos motivos: ya hay más de `keep` automáticas más nuevas, o el archivo
+// pasó los `maxAgeDays` días (esto último alcanza también a las manuales, así el
+// servidor nunca junta copias viejas). La fila del historial queda igual.
+export function runsToPrune<T extends RunForPrune>(
+  runsDesc: T[],
+  now: Date,
+  keep: number = MAX_AUTO_FILES,
+  maxAgeDays: number = MAX_FILE_AGE_DAYS,
+): T[] {
+  const withFile = runsDesc.filter((r) => r.fileAvailable);
+  const sobrantes = withFile.filter((r) => r.trigger === 'auto').slice(keep);
+  const cutoff = now.getTime() - maxAgeDays * 24 * 60 * 60 * 1000;
+  const vencidas = withFile.filter((r) => r.startedAt.getTime() < cutoff);
+  return [...new Set([...sobrantes, ...vencidas])];
 }

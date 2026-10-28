@@ -48,6 +48,9 @@ export const productSchema = z.object({
   // lista es por kg de MATERIA GRASA y el precio por kg de producto sale de multiplicarlo
   // por el %. Ej: lista $7.199,50 × 59% = $4.247,705 por kg de crema.
   pricedByFat: z.boolean().optional(),
+  // Familia para sumar en Stock (ej. "Mozzarella": todas las marcas y formatos juntos, sin
+  // mezclar con tybo, ricota ni crema). Texto libre y opcional.
+  family: z.string().max(60).optional(),
   isActive: z.boolean(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,

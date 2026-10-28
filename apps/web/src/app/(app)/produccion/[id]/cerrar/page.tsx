@@ -16,6 +16,7 @@ import { productionApi, inventoryApi, productsApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { type ProductionOrder } from '@lasmarias/shared-schemas';
 import { OutputFields } from '@/components/production/output-fields';
+import { FormatOutputs, type FormatRow } from '@/components/production/format-outputs';
 
 // Pantalla de cierre de orden (CLAUDE.md §4.3): se cargan las salidas reales por producto
 // y al cerrar se muestra el panel de costo. El cierre es definitivo.
@@ -47,6 +48,8 @@ export default function CloseProductionPage({ params }: { params: { id: string }
   const [quantities, setQuantities] = useState<Record<string, number | undefined>>({});
   // Bultos (bolsas/cajas) por producto. Opcional: si no se cargan, el lote va sin bultos.
   const [bultos, setBultos] = useState<Record<string, number | undefined>>({});
+  // Otros formatos de la misma tachada (plancha + cilindro). Cada uno hace su lote al cerrar.
+  const [formatos, setFormatos] = useState<FormatRow[]>([]);
   // Cámara/sector destino de los lotes de producto generados al cerrar (opcional).
   const [warehouseId, setWarehouseId] = useState<string>('');
   // Rendimiento ESPERADO (kg/litro) cargado a mano al cerrar (opcional). Si se carga,
@@ -65,12 +68,21 @@ export default function CloseProductionPage({ params }: { params: { id: string }
   const close = useMutation({
     mutationFn: () =>
       productionApi.close(id, {
-        actualOutputs: (order?.expectedOutputs ?? []).map((o) => ({
-          productId: o.productId,
-          quantity: Number(quantities[o.productId] ?? 0),
-          bultos: bultos[o.productId] != null ? Number(bultos[o.productId]) : undefined,
-          isPrincipal: o.isPrincipal,
-        })),
+        actualOutputs: [
+          ...(order?.expectedOutputs ?? []).map((o) => ({
+            productId: o.productId,
+            quantity: Number(quantities[o.productId] ?? 0),
+            bultos: bultos[o.productId] != null ? Number(bultos[o.productId]) : undefined,
+            isPrincipal: o.isPrincipal,
+          })),
+          ...formatosValidos.map((f) => ({
+            productId: f.productId,
+            quantity: Number(f.kg),
+            bultos: f.bultos != null ? Number(f.bultos) : undefined,
+            isPrincipal: false,
+            isFormat: true,
+          })),
+        ],
         warehouseId: warehouseId || undefined,
         expectedYieldKgPerLiter:
           expectedYield !== '' && Number(expectedYield) > 0 ? Number(expectedYield) : undefined,
@@ -93,10 +105,15 @@ export default function CloseProductionPage({ params }: { params: { id: string }
     [order],
   );
 
-  const canClose = principal.some((o) => Number(quantities[o.productId] ?? 0) > 0);
+  // Formatos con producto y kg cargados (los vacíos se ignoran).
+  const formatosValidos = formatos.filter((f) => f.productId && f.kg != null && f.kg > 0);
+  const formatoIncompleto = formatos.some((f) => f.productId && !(f.kg != null && f.kg > 0));
+  const canClose = principal.some((o) => Number(quantities[o.productId] ?? 0) > 0) && !formatoIncompleto;
 
-  // Rendimiento real EN VIVO = kg de producto principal ÷ litros de leche de la orden.
-  const principalKg = principal.reduce((a, o) => a + Number(quantities[o.productId] ?? 0), 0);
+  // Rendimiento real EN VIVO = kg de producto (principal + otros formatos) ÷ litros de la orden.
+  const principalKg =
+    principal.reduce((a, o) => a + Number(quantities[o.productId] ?? 0), 0) +
+    formatosValidos.reduce((a, f) => a + Number(f.kg), 0);
   const realYield = order && order.totalMilkLiters > 0 && principalKg > 0 ? principalKg / order.totalMilkLiters : null;
 
   if (orderQuery.isLoading) {
@@ -218,6 +235,28 @@ export default function CloseProductionPage({ params }: { params: { id: string }
           ))}
         </CardContent>
       </Card>
+
+      {principal[0] && (
+        <Card>
+          <CardHeader>
+            <CardTitle>¿Salió también en otro formato?</CardTitle>
+            <p className="text-sm text-foreground-muted">
+              Si de esta misma tachada salieron, por ejemplo, planchas y también cilindros, cargá acá los kg del otro formato. Comparte el mismo costo por kg y suma al rendimiento.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <FormatOutputs
+              rows={formatos}
+              onChange={setFormatos}
+              products={productsQuery.data ?? []}
+              principalProductId={principal[0].productId}
+            />
+            {formatoIncompleto && (
+              <p className="mt-2 text-xs font-medium text-amber-700">Cargá los kg del formato agregado (o quitalo).</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {byproducts.length > 0 && (
         <Card>

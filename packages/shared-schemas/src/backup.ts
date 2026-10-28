@@ -1,7 +1,8 @@
 import { z } from 'zod';
 
-// Copias de seguridad de la base. La copia corre SOLA en el servidor los días y a la
-// hora configurados; la PC del dueño solo descarga (pantalla Admin → Copias).
+// Copias de seguridad de la base. La copia corre SOLA en el servidor todos los días a
+// una hora FIJA (no configurable desde la app); la PC del dueño solo descarga
+// (pantalla Admin → Copias).
 
 // Días de la semana en formato ISO: 1=lunes … 7=domingo (como los muestra la pantalla, L a D).
 export const backupConfigSchema = z.object({
@@ -15,7 +16,9 @@ export const backupConfigSchema = z.object({
 });
 export type BackupConfig = z.infer<typeof backupConfigSchema>;
 
-export const updateBackupConfigInputSchema = backupConfigSchema;
+// La HORA no se configura desde la app (pedido del dueño, oct 2026): la copia corre
+// siempre a las 03:00. Sí se eligen los DÍAS (ej. sin domingos) y prendido/apagado.
+export const updateBackupConfigInputSchema = backupConfigSchema.pick({ enabled: true, days: true });
 export type UpdateBackupConfigInput = z.infer<typeof updateBackupConfigInputSchema>;
 
 // Una corrida de copia (automática o a mano), con su resultado.

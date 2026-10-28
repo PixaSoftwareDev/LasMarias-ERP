@@ -43,6 +43,10 @@ const getSavedIds = (): string[] => {
 };
 const setSavedIds = (ids: string[]) => write(SAVED_KEY, JSON.stringify(ids.slice(-200)));
 
+// Ids de las copias que YA están descargadas en esta computadora (para mostrarlo en
+// el historial: "En esta PC" vs "Solo en el servidor").
+export const savedBackupIds = (): string[] => getSavedIds();
+
 const todayKey = () => new Date().toDateString();
 const isBeforeToday = (iso: string) => new Date(iso).toDateString() !== todayKey();
 
