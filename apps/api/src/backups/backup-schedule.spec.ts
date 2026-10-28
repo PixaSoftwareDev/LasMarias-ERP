@@ -107,24 +107,42 @@ describe('calendario de copias (backup-schedule)', () => {
   });
 
   describe('runsToPrune — rotación de archivos', () => {
-    const auto = (n: number) => ({ n, trigger: 'auto' as const, fileAvailable: true });
-    const manual = (n: number) => ({ n, trigger: 'manual' as const, fileAvailable: true });
+    // "Ahora" fijo para los tests: viernes 23/10/2026 10:00.
+    const ahora = new Date(2026, 9, 23, 10, 0);
+    const hace = (dias: number) => new Date(ahora.getTime() - dias * 24 * 60 * 60 * 1000);
+    const auto = (n: number, dias = 0) => ({ n, trigger: 'auto' as const, fileAvailable: true, startedAt: hace(dias) });
+    const manual = (n: number, dias = 0) => ({ n, trigger: 'manual' as const, fileAvailable: true, startedAt: hace(dias) });
 
-    it('con 32 automáticas y máximo 30, rota las 2 más viejas', () => {
-      const runs = Array.from({ length: 32 }, (_, i) => auto(i)); // 0 = la más nueva
-      const prune = runsToPrune(runs, 30);
-      expect(prune.map((r) => r.n)).toEqual([30, 31]);
+    it('con 9 automáticas y máximo 7, rota las 2 más viejas', () => {
+      const runs = Array.from({ length: 9 }, (_, i) => auto(i)); // 0 = la más nueva
+      const prune = runsToPrune(runs, ahora, 7);
+      expect(prune.map((r) => r.n)).toEqual([7, 8]);
     });
 
-    it('las manuales no se rotan nunca', () => {
-      const runs = [manual(0), ...Array.from({ length: 31 }, (_, i) => auto(i + 1))];
-      const prune = runsToPrune(runs, 30);
+    it('las manuales no cuentan para el máximo de automáticas', () => {
+      const runs = [manual(0), ...Array.from({ length: 8 }, (_, i) => auto(i + 1))];
+      const prune = runsToPrune(runs, ahora, 7);
       expect(prune.every((r) => r.trigger === 'auto')).toBe(true);
       expect(prune).toHaveLength(1);
     });
 
     it('con menos del máximo no borra nada', () => {
-      expect(runsToPrune([auto(0), auto(1)], 30)).toEqual([]);
+      expect(runsToPrune([auto(0), auto(1)], ahora, 7)).toEqual([]);
+    });
+
+    it('borra el archivo de una manual vieja (más de 7 días en el servidor)', () => {
+      const prune = runsToPrune([auto(0), manual(1, 8)], ahora, 7);
+      expect(prune.map((r) => r.n)).toEqual([1]);
+    });
+
+    it('no borra una manual de hace 6 días', () => {
+      expect(runsToPrune([auto(0), manual(1, 6)], ahora, 7)).toEqual([]);
+    });
+
+    it('no repite una automática que además está vencida', () => {
+      const runs = [...Array.from({ length: 7 }, (_, i) => auto(i)), auto(7, 9)];
+      const prune = runsToPrune(runs, ahora, 7);
+      expect(prune.map((r) => r.n)).toEqual([7]);
     });
   });
 });

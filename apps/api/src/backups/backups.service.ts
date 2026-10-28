@@ -57,14 +57,28 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
 
   // ---------- Configuración ----------
 
+  // La HORA es fija (sale siempre de DEFAULT_BACKUP_CONFIG); de la base se respetan
+  // prendido/apagado y los días elegidos. Así una hora guardada antes de este cambio
+  // tampoco sigue en pie.
   async getConfig(): Promise<BackupConfig> {
     const row = await this.settings.findOne({ where: { key: CONFIG_KEY } });
-    if (!row || row.value == null) return DEFAULT_BACKUP_CONFIG;
-    return { ...DEFAULT_BACKUP_CONFIG, ...(row.value as object) } as BackupConfig;
+    const saved = (row?.value ?? null) as Partial<BackupConfig> | null;
+    const days = saved?.days?.length ? saved.days : DEFAULT_BACKUP_CONFIG.days;
+    return {
+      ...DEFAULT_BACKUP_CONFIG,
+      enabled: saved?.enabled ?? DEFAULT_BACKUP_CONFIG.enabled,
+      days: [...days].sort((a, b) => a - b),
+    };
   }
 
+  // Se prende/apaga y se eligen los días; la hora queda fija en DEFAULT_BACKUP_CONFIG.
   async updateConfig(input: UpdateBackupConfigInput): Promise<BackupConfig> {
-    await this.settings.save(this.settings.create({ key: CONFIG_KEY, value: input }));
+    const value: BackupConfig = {
+      ...DEFAULT_BACKUP_CONFIG,
+      enabled: input.enabled,
+      days: [...input.days].sort((a, b) => a - b),
+    };
+    await this.settings.save(this.settings.create({ key: CONFIG_KEY, value }));
     return this.getConfig();
   }
 
@@ -176,10 +190,11 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  // Rotación: conserva los archivos de las últimas MAX_AUTO_FILES copias automáticas.
-  private async prune(): Promise<void> {
+  // Rotación: el servidor guarda solo la última semana (ver runsToPrune); el historial
+  // completo vive en la PC donde se guardan las copias.
+  private async prune(now = new Date()): Promise<void> {
     const all = await this.runs.find({ order: { startedAt: 'DESC' } });
-    for (const old of runsToPrune(all)) {
+    for (const old of runsToPrune(all, now)) {
       if (old.fileName) await unlink(join(this.env.backupDir, old.fileName)).catch(() => undefined);
       old.fileAvailable = false;
       await this.runs.save(old);
