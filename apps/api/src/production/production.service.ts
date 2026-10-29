@@ -15,6 +15,7 @@ import type {
   ProductionMilkInput,
   ProductionOrder,
   ProductionOutput,
+  SaveProductionProgressInput,
   UpdateProductionInput,
 } from '@lasmarias/shared-schemas';
 import { ProductionOrderEntity } from './production-order.entity';
@@ -420,6 +421,57 @@ export class ProductionService {
         relations: { recipe: true, operator: true },
       });
       return this.toDto(reloaded!);
+    });
+  }
+
+  // Guarda lo que YA salió de una orden abierta, SIN cerrarla (pedido del dueño, 29/10/2026).
+  // En la planta la crema se desnata el mismo día de la elaboración, pero la masa se pesa recién
+  // al día siguiente: antes había que esperar a tener los kg de masa para poder anotar la crema.
+  // Acá se guardan solo las cantidades de los SUBPRODUCTOS y la orden pasa a "en curso". No mueve
+  // stock, no crea lotes y no corre la calculadora: todo eso sigue siendo al CERRAR (CLAUDE.md §5).
+  async saveProgress(orderId: string, input: SaveProductionProgressInput): Promise<ProductionOrder> {
+    return this.dataSource.transaction(async (manager) => {
+      // Mismo candado que cerrar/editar: si llega un cierre a la vez, se serializan.
+      await lockRow(manager, 'production_orders', orderId);
+      const repo = manager.getRepository(ProductionOrderEntity);
+      const order = await repo.findOne({
+        where: { id: orderId },
+        relations: { recipe: true, operator: true },
+      });
+      if (!order) throw new NotFoundException(`Orden ${orderId} no encontrada`);
+      if (order.status === 'closed')
+        throw new ForbiddenException(
+          `La orden ${order.code} ya está cerrada. Si hay que corregir lo producido, editala.`,
+        );
+      if (order.status === 'cancelled') throw new ForbiddenException(`La orden ${order.code} fue cancelada`);
+
+      // Solo subproductos: los kg del producto (y de sus otros formatos) se cargan al cerrar,
+      // que es cuando se calcula el costo y se generan los lotes.
+      const esperados = new Map(order.expectedOutputs.map((o) => [o.productId, o]));
+      const outputs: ProductionOutput[] = [];
+      for (const o of input.outputs) {
+        const esperado = esperados.get(o.productId);
+        if (!esperado || esperado.isPrincipal)
+          throw new BadRequestException(
+            'Acá se guardan solo los subproductos (por ejemplo, la crema). Los kg del producto se cargan al cerrar la orden.',
+          );
+        if (o.quantity <= 0) continue;
+        outputs.push({
+          productId: o.productId,
+          productName: esperado.productName,
+          quantity: o.quantity,
+          unit: esperado.unit,
+          bultos: o.bultos,
+          isPrincipal: false,
+        });
+      }
+
+      order.actualOutputs = outputs;
+      // "En curso" = esta orden ya tiene algo anotado. Si se borra todo, vuelve a estar abierta.
+      order.status = outputs.length > 0 ? 'in_progress' : 'open';
+      if (input.notes !== undefined) order.notes = input.notes || null;
+      await repo.save(order);
+      return this.toDto(order);
     });
   }
 

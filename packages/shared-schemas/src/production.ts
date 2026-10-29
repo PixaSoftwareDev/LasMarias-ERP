@@ -172,3 +172,21 @@ export const closeProductionInputSchema = z.object({
   notes: z.string().max(2000).optional(),
 });
 export type CloseProductionInput = z.infer<typeof closeProductionInputSchema>;
+
+// Guardar lo que YA salió, sin cerrar la orden (pedido del dueño, 29/10/2026). En la planta la
+// crema se desnata el MISMO día de la elaboración, pero la masa se pesa recién al día siguiente:
+// antes había que esperar a tener los kg de masa para poder anotar la crema. Con esto el día 1 se
+// guardan los subproductos (la orden queda "en curso") y el día 2 se cierra cargando solo la masa.
+// No toca el stock ni la calculadora de costo: solo anota las cantidades en la orden. Los lotes,
+// los movimientos y el costo se siguen generando al CERRAR (CLAUDE.md §5).
+export const saveProductionProgressInputSchema = z.object({
+  outputs: z.array(
+    z.object({
+      productId: uuidSchema,
+      quantity: z.number().nonnegative(),
+      bultos: bultosSchema,
+    }),
+  ),
+  notes: z.string().max(2000).optional(),
+});
+export type SaveProductionProgressInput = z.infer<typeof saveProductionProgressInputSchema>;
