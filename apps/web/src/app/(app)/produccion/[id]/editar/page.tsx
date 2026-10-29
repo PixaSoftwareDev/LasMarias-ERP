@@ -31,8 +31,9 @@ interface MilkInputRow {
   liters: number;
 }
 
-// 'otro' = un subproducto en stock como origen (crema cruda → crema pasteurizada, suero → ricota).
-type SourceKind = 'leche' | 'masa' | 'otro';
+// 'otro' = un subproducto en stock como origen (crema cruda → crema pasteurizada).
+// 'suero' = sin lote de origen (ricota del suero de la prensa): la orden no consume stock.
+type SourceKind = 'leche' | 'masa' | 'otro' | 'suero';
 
 const SELECT_CLASS =
   'min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-1';
@@ -48,6 +49,7 @@ function inputKind(mi: { batchCode: string; category?: string }): InputKind {
   return mi.batchCode.startsWith('LM-LC') ? 'leche' : 'masa';
 }
 function detectSource(milkInputs: { batchCode: string; category?: string }[]): SourceKind {
+  if (milkInputs.length === 0) return 'suero';
   const kinds = milkInputs.map(inputKind);
   if (kinds.includes('otro')) return 'otro';
   if (kinds.includes('masa') || kinds.includes('reproceso')) return 'masa';
@@ -88,7 +90,7 @@ export default function EditProductionPage() {
   // Lotes en stock que pueden ser origen: masa, queso para reproceso y subproductos (crema).
   const stock = useStockSources();
   const availableBatches: MilkBatch[] =
-    source === 'leche' ? milkBatchesFromReceptions : source === 'masa' ? stock.masa : stock.subproductos;
+    source === 'leche' ? milkBatchesFromReceptions : source === 'masa' ? stock.masa : source === 'otro' ? stock.subproductos : [];
 
   // Los lotes de la orden que NO están en la lista de disponibles se agregan igual, para
   // poder verlos y cambiarlos. Pero hay dos motivos muy distintos por los que un lote no
@@ -209,7 +211,9 @@ export default function EditProductionPage() {
   }
 
   // Todo lo que consume la orden: los lotes del origen elegido + el reproceso (si es masa).
-  const allInputs = [...inputs, ...(source === 'masa' ? reprocesos : [])].filter((i) => i.batchId && i.liters > 0);
+  // Con suero no hay lotes: la orden va vacía a propósito.
+  const allInputs =
+    source === 'suero' ? [] : [...inputs, ...(source === 'masa' ? reprocesos : [])].filter((i) => i.batchId && i.liters > 0);
 
   const save = useMutation({
     mutationFn: () =>
@@ -374,14 +378,22 @@ export default function EditProductionPage() {
             label="¿Con qué se elabora?"
             htmlFor="source"
             required
-            hint="Primero leche → masa; después masa (más reproceso, si hay) → mozzarella o queso. La crema cruda se pasteuriza eligiendo «Crema u otro subproducto»."
+            hint="Primero leche → masa; después masa (más reproceso, si hay) → mozzarella o queso. La crema cruda se pasteuriza eligiendo «Crema u otro subproducto». La ricota va con «Suero»."
           >
             <select className={SELECT_CLASS} value={source} onChange={(e) => changeSource(e.target.value as SourceKind)}>
               <option value="leche">Leche cruda (paso 1: hacer masa)</option>
               <option value="masa">Masa en stock (paso 2: hacer mozzarella o queso)</option>
               <option value="otro">Crema u otro subproducto en stock (ej: pasteurizar crema)</option>
+              <option value="suero">Suero de la prensa, sin lote de origen (ej: ricota)</option>
             </select>
           </Field>
+
+          {source === 'suero' && (
+            <p className="rounded-md bg-info/10 px-3 py-2 text-sm text-info">
+              El suero que sale al prensar la masa no se lleva como stock, así que esta orden no consume ningún lote.
+              El costo del lote es solo el de los insumos de la receta; el suero vale $0.
+            </p>
+          )}
 
           {source === 'leche' && silos.length > 0 && (
             <Field label="Silo de origen" htmlFor="silo" hint="Filtro opcional. Dejá 'Todos los silos' para combinar leche de varios tanques.">
@@ -392,6 +404,7 @@ export default function EditProductionPage() {
             </Field>
           )}
 
+          {source !== 'suero' && (
           <div>
             <div className="mb-2 flex items-center justify-between">
               <p className="text-sm font-medium">
@@ -429,12 +442,13 @@ export default function EditProductionPage() {
               ))}
             </div>
           </div>
+          )}
 
           {source === 'masa' && (
             <ReprocesoRows rows={reprocesos} onChange={setReprocesos} options={reprocesoOptions} />
           )}
 
-          {source !== 'leche' && (
+          {source !== 'leche' && source !== 'suero' && (
             <SinCostoAviso
               batchIds={allInputs.map((i) => i.batchId)}
               options={[...stock.masa, ...stock.reproceso, ...stock.subproductos]}
@@ -546,7 +560,7 @@ export default function EditProductionPage() {
         <Button
           onClick={() => save.mutate()}
           loading={save.isPending}
-          disabled={!recipeId || !startedDate || inputs.every((i) => !i.batchId) || !closedReady}
+          disabled={!recipeId || !startedDate || (source !== 'suero' && inputs.every((i) => !i.batchId)) || !closedReady}
         >
           Guardar cambios
         </Button>

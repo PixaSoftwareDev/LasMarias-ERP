@@ -192,3 +192,29 @@ describe('ProductionService.open — regla de silos', () => {
     await expect(service.open(input as any)).rejects.toThrow(/no tiene suficiente/);
   });
 });
+
+// Pedido del dueño (audio 28/10/2026): la ricota se hace con el suero de la prensa, que no
+// se lleva como stock. La orden tiene que poder abrirse SIN lote de origen.
+describe('ProductionService.open — sin lote de origen (ricota del suero)', () => {
+  it('abre la orden con 0 litros, sin tocar ningún lote ni registrar salidas', async () => {
+    const { service, savedBatches, savedMovements, getOrder } = makeService([]);
+
+    const order = await service.open({
+      recipeId: 'rec-1',
+      operatorId: 'op-1',
+      startedAt: '2026-10-28T12:00:00.000Z',
+      milkInputs: [],
+    } as any);
+
+    expect(order.status).toBe('open');
+    expect(getOrder().milkInputs).toEqual([]);
+    expect(getOrder().totalMilkLiters).toBe('0');
+    // Nada que reservar: ningún lote cambia y no hay movimiento de salida.
+    expect(savedBatches).toHaveLength(0);
+    expect(savedMovements).toHaveLength(0);
+    // El esperado del principal queda en 0 kg (0 L × rendimiento): se conoce al cerrar.
+    const principal = getOrder().expectedOutputs.find((o: any) => o.isPrincipal);
+    expect(principal.quantity).toBe(0);
+  });
+});
+

@@ -741,6 +741,12 @@ export class ProductionService {
         const bpProduct = await manager.getRepository(ProductEntity).findOne({ where: { id: o.productId } });
         if (!bpProduct) continue;
         bpIdx += 1;
+        // Costo del lote de subproducto = su valor de recupero en la receta (lo que se le
+        // descontó al principal). Así, si la crema desnatada se pasteuriza después, entra con
+        // el MISMO $/kg que abarató la masa (costeo encadenado, CLAUDE.md §5.5), aunque el
+        // precio de referencia de la ficha cambie más adelante. Sin recupero cargado queda
+        // null y el cierre siguiente usa la regla de input-cost.ts (ficha → último lote → $0).
+        const recupero = version.byproducts.find((b) => b.destinationProductId === o.productId)?.referenceValuePerUnit;
         const bpBatch = await manager.getRepository(BatchEntity).save(
           manager.getRepository(BatchEntity).create({
             code: `LM-SP-${order.code.replace('OP-', '')}-${bpIdx}`,
@@ -754,7 +760,7 @@ export class ProductionService {
             status: 'activo',
             parentBatchId: productionBatch.id,
             warehouseId: input.warehouseId ?? null,
-            unitCost: null, // el valor del subproducto es el de recupero, no un costo de producción
+            unitCost: recupero != null ? String(recupero) : null,
             notes: `Subproducto de ${order.code}`,
           }),
         );

@@ -118,9 +118,11 @@ export const openProductionInputSchema = z.object({
   recipeId: uuidSchema,
   operatorId: uuidSchema,
   startedAt: z.string().min(1),
-  milkInputs: z
-    .array(z.object({ batchId: uuidSchema, liters: z.number().positive() }))
-    .min(1, 'Tenés que elegir al menos un lote de leche'),
+  // Lotes que consume la orden (leche, masa, reproceso, crema). Puede venir VACÍA: es la
+  // orden "sin lote de origen", para lo que se hace con el suero de la prensa (ricota). El
+  // suero no se lleva como stock, así que la orden arranca con 0 litros y el costo del lote
+  // es solo el de los insumos de la receta (la calculadora ya contempla litros = 0).
+  milkInputs: z.array(z.object({ batchId: uuidSchema, liters: z.number().positive() })),
   notes: z.string().max(2000).optional(),
   // Si el sistema detecta una orden igual (misma receta y mismos lotes) abierta hace pocos
   // minutos, frena y avisa: es casi seguro una doble carga. El front reenvía con este flag

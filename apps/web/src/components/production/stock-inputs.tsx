@@ -138,7 +138,7 @@ export function SinCostoAviso({ batchIds, options }: { batchIds: string[]; optio
           const c = o.entryCost!;
           return (
             <p key={o.id}>
-              El lote <span className="font-mono">{o.code}</span> se cargó a mano y no tiene costo propio.{' '}
+              El lote <span className="font-mono">{o.code}</span> no tiene costo propio.{' '}
               {c.source === 'ficha' && (
                 <>Entra con el costo de referencia del producto: <strong>{formatMoney(c.unitCost)} por kg</strong>.</>
               )}

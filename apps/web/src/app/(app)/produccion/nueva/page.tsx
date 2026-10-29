@@ -28,8 +28,10 @@ interface MilkInputRow {
   liters: number;
 }
 
-// 'otro' = un subproducto en stock como origen (crema cruda → crema pasteurizada, suero → ricota).
-type SourceKind = 'leche' | 'masa' | 'otro';
+// 'otro' = un subproducto en stock como origen (crema cruda → crema pasteurizada).
+// 'suero' = SIN lote de origen: la ricota se hace con el suero de la prensa, que no se lleva
+// como stock. La orden se abre sin lotes (0 litros) y el costo es solo el de los insumos.
+type SourceKind = 'leche' | 'masa' | 'otro' | 'suero';
 
 // Mismo lenguaje visual que el resto de los selects de la app (fondo elevado + foco).
 const SELECT_CLASS =
@@ -80,7 +82,7 @@ export default function NewProductionPage() {
   // El silo es un filtro OPCIONAL: "Todos los silos" (siloId vacío) muestra la leche de
   // todos los tanques y una orden puede combinar lotes de varios para llegar a los litros.
   const milkBatches: MilkBatch[] =
-    source === 'leche' ? milkBatchesFromReceptions : source === 'masa' ? stock.masa : stock.subproductos;
+    source === 'leche' ? milkBatchesFromReceptions : source === 'masa' ? stock.masa : source === 'otro' ? stock.subproductos : [];
   // Reproceso: solo con masa (mozzarella). Se suma a los lotes de la orden al abrirla.
   const [reprocesos, setReprocesos] = useState<InputRow[]>([]);
 
@@ -100,7 +102,9 @@ export default function NewProductionPage() {
   }
 
   // Todo lo que consume la orden: los lotes del origen elegido + el reproceso (si es masa).
-  const allInputs = [...inputs, ...(source === 'masa' ? reprocesos : [])].filter((i) => i.batchId && i.liters > 0);
+  // Con suero no hay lotes: la orden va vacía a propósito.
+  const allInputs =
+    source === 'suero' ? [] : [...inputs, ...(source === 'masa' ? reprocesos : [])].filter((i) => i.batchId && i.liters > 0);
 
   const open = useMutation({
     mutationFn: (confirmDuplicate?: boolean) =>
@@ -156,7 +160,7 @@ export default function NewProductionPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Abrir orden de producción"
-        description="Elegí la receta, el origen (leche, masa o crema) y los lotes a consumir. Las salidas reales se cargan al cerrar."        action={<Button asChild variant="ghost"><Link href="/produccion"><ArrowLeft className="h-4 w-4" /> Volver</Link></Button>}
+        description="Elegí la receta, el origen (leche, masa, crema o suero) y los lotes a consumir. Las salidas reales se cargan al cerrar."        action={<Button asChild variant="ghost"><Link href="/produccion"><ArrowLeft className="h-4 w-4" /> Volver</Link></Button>}
       />
 
       <Card>
@@ -188,14 +192,22 @@ export default function NewProductionPage() {
             label="¿Con qué se elabora?"
             htmlFor="source"
             required
-            hint="Primero leche → masa; después masa (más reproceso, si hay) → mozzarella o queso. La crema cruda se pasteuriza eligiendo «Crema u otro subproducto»."
+            hint="Primero leche → masa; después masa (más reproceso, si hay) → mozzarella o queso. La crema cruda se pasteuriza eligiendo «Crema u otro subproducto». La ricota va con «Suero»."
           >
             <select className={SELECT_CLASS} value={source} onChange={(e) => changeSource(e.target.value as SourceKind)}>
               <option value="leche">Leche cruda (paso 1: hacer masa)</option>
               <option value="masa">Masa en stock (paso 2: hacer mozzarella o queso)</option>
               <option value="otro">Crema u otro subproducto en stock (ej: pasteurizar crema)</option>
+              <option value="suero">Suero de la prensa, sin lote de origen (ej: ricota)</option>
             </select>
           </Field>
+
+          {source === 'suero' && (
+            <p className="rounded-md bg-info/10 px-3 py-2 text-sm text-info">
+              El suero que sale al prensar la masa no se lleva como stock, así que esta orden se abre sin lote.
+              El costo del lote va a ser solo el de los insumos de la receta; el suero vale $0.
+            </p>
+          )}
 
           {source === 'leche' && silos.length > 0 && (
             <Field label="Silo de origen" htmlFor="silo" hint="Filtro opcional. Dejá 'Todos los silos' para combinar leche de varios tanques en la misma orden.">
@@ -206,6 +218,7 @@ export default function NewProductionPage() {
             </Field>
           )}
 
+          {source !== 'suero' && (
           <div>
             <div className="mb-2 flex items-center justify-between">
               <p className="text-sm font-medium">
@@ -254,12 +267,13 @@ export default function NewProductionPage() {
               ))}
             </div>
           </div>
+          )}
 
           {source === 'masa' && (
             <ReprocesoRows rows={reprocesos} onChange={setReprocesos} options={stock.reproceso} />
           )}
 
-          {source !== 'leche' && (
+          {source !== 'leche' && source !== 'suero' && (
             <SinCostoAviso
               batchIds={allInputs.map((i) => i.batchId)}
               options={[...stock.masa, ...stock.reproceso, ...stock.subproductos]}
@@ -288,7 +302,7 @@ export default function NewProductionPage() {
 
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={() => router.push('/produccion')}>Cancelar</Button>
-        <Button onClick={() => open.mutate(undefined)} loading={open.isPending} disabled={!recipeId || !startedDate || allInputs.length === 0}>
+        <Button onClick={() => open.mutate(undefined)} loading={open.isPending} disabled={!recipeId || !startedDate || (source !== 'suero' && allInputs.length === 0)}>
           Abrir orden
         </Button>
       </div>
