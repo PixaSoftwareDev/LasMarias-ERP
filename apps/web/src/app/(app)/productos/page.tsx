@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -41,6 +41,8 @@ export default function ProductsPage() {
   const [categoryFilter, setCategoryFilter] = useState('todas');
 
   const { data = [], isLoading } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
+  // Familias ya usadas, para sugerir la misma ortografía ("Mozzarella" y no "mozarela").
+  const familias = useMemo(() => [...new Set(data.map((p) => p.family).filter((f): f is string => !!f))].sort(), [data]);
 
   const filteredData =
     categoryFilter === 'todas' ? data : data.filter((p) => p.category === categoryFilter);
@@ -77,6 +79,8 @@ export default function ProductsPage() {
         costIvaMode: editing.costIvaMode ?? 'sin_iva',
         // Sin esto, la casilla "Insumo trazable" se destildaba al editar y se perdía la marca.
         requiresLotNumber: editing.requiresLotNumber ?? false,
+        pricedByFat: editing.pricedByFat ?? false,
+        family: editing.family ?? '',
         kgPorBulto: editing.kgPorBulto,
       });
     }
@@ -154,12 +158,23 @@ export default function ProductsPage() {
         <Card>
           <CardHeader><CardTitle>{editing ? 'Editar producto' : 'Nuevo producto'}</CardTitle></CardHeader>
           <CardContent>
-            <form onSubmit={form.handleSubmit((v) => save.mutateAsync(v))} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <form onSubmit={form.handleSubmit((v) => save.mutateAsync({ ...v, pricedByFat: v.category === 'subproducto' ? v.pricedByFat : false }))} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="SKU" htmlFor="sku" required error={form.formState.errors.sku?.message}>
                 <Input autoFocus placeholder="QC-001" {...form.register('sku')} />
               </Field>
               <Field label="Nombre" htmlFor="name" required error={form.formState.errors.name?.message}>
                 <Input placeholder="Queso cremoso 1kg" {...form.register('name')} />
+              </Field>
+              <Field
+                label="Familia"
+                htmlFor="family"
+                hint='Opcional. Stock suma todos los productos de la misma familia (ej. "Mozzarella": todas las marcas, planchas y cilindros).'
+                error={form.formState.errors.family?.message}
+              >
+                <Input id="family" list="familias" placeholder="Ej: Mozzarella" {...form.register('family')} />
+                <datalist id="familias">
+                  {familias.map((f) => <option key={f} value={f} />)}
+                </datalist>
               </Field>
               <Field label="Categoría" htmlFor="category" required error={form.formState.errors.category?.message}>
                 <select id="category" className="min-h-touch w-full rounded-md border border-border px-3" {...form.register('category')}>
@@ -250,6 +265,17 @@ export default function ProductsPage() {
                   <span className="text-sm">
                     Insumo trazable: pedir el <span className="font-medium">N° de lote del proveedor</span> al ingresar stock
                     <span className="block text-xs text-foreground-muted">Para fermentos, calcio, cuajo y demás insumos que controla bromatología.</span>
+                  </span>
+                </label>
+              )}
+              {watchCategory === 'subproducto' && (
+                <label className="flex items-start gap-2 sm:col-span-2">
+                  <input type="checkbox" className="mt-0.5 h-5 w-5" {...form.register('pricedByFat')} />
+                  <span className="text-sm">
+                    Se cobra por <span className="font-medium">% de grasa</span> (crema a granel)
+                    <span className="block text-xs text-foreground-muted">
+                      El precio de lista es por kg de materia grasa. Al vender se carga el % del análisis y el precio por kg sale solo: lista × % ÷ 100.
+                    </span>
                   </span>
                 </label>
               )}

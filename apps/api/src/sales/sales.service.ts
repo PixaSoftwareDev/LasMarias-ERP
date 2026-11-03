@@ -7,6 +7,7 @@ import type {
   CreateReturnInput,
   CreateSalesOrderInput,
   CreditNote,
+  FatPricing,
   SalesOrder,
   SalesOrderLine,
   UpdateSalesOrderDateInput,
@@ -48,6 +49,15 @@ export interface FefoAllocation {
 export interface FefoPlan {
   allocations: FefoAllocation[];
   shortage: number; // cantidad que no se pudo cubrir (0 si alcanzó)
+}
+
+// Crema a granel cobrada por % de grasa (pedido del dueño, audio 26/10/2026): el precio de
+// lista es por kg de MATERIA GRASA y el comprador paga según el % que da su análisis.
+//   precio por kg = precio por kg de grasa × % ÷ 100
+// Verificado contra la venta real DSP-000108: $7.199,50 × 59 ÷ 100 = $4.247,705.
+// Decimal exacto, 4 decimales (en float 7199.5 × 0.59 da 4247.70499…).
+export function precioPorGrasa(fat: FatPricing): number {
+  return new Big(fat.basePrice).times(fat.pct).div(100).round(4).toNumber();
 }
 
 // Las cuentas van en DECIMAL EXACTO (big.js): en float, 869,2 − 709,9 − 159,3 daba
@@ -121,7 +131,9 @@ export class SalesService {
       await lockDuplicateSignature(manager, firma);
 
       const lines: SalesOrderLine[] = [];
-      let total = 0;
+      // Importes en DECIMAL EXACTO (misma cuenta que updateOrderPrices): con precios de 4
+      // decimales (crema por % de grasa) el float resolvía mal los medios centavos.
+      let total = new Big(0);
       for (const l of input.lines) {
         const product = await this.products.get(l.productId);
         // El precio se cotiza por kg/unidad o POR BULTO. El importe siempre termina en
@@ -134,22 +146,29 @@ export class SalesService {
           );
         }
         const cantidadCobrada = priceBasis === 'bulto' ? (l.bultos as number) : l.quantity;
-        const subtotal = Math.round(l.unitPrice * cantidadCobrada * 100) / 100;
-        total += subtotal;
+        // Por % de grasa: la cuenta la hace el backend y pisa el precio que mandó el front.
+        // Se cobra por kg (el % es sobre el kg de crema): por bulto no tiene sentido.
+        if (l.fat && priceBasis === 'bulto') {
+          throw new BadRequestException(`${product.name} se cobra por % de grasa: el precio es por kg, no por bulto.`);
+        }
+        const unitPrice = l.fat ? precioPorGrasa(l.fat) : l.unitPrice;
+        const subtotal = new Big(unitPrice).times(cantidadCobrada).round(2).toNumber();
+        total = total.plus(subtotal);
         lines.push({
           productId: product.id,
           productName: product.name,
           sku: product.sku,
           quantity: l.quantity,
           bultos: l.bultos,
-          unitPrice: l.unitPrice,
+          unitPrice,
           priceBasis,
           unit: product.unit,
           subtotal,
           ...(l.batchId && { batchId: l.batchId }),
+          ...(l.fat && { fatPct: l.fat.pct, fatBasePrice: l.fat.basePrice }),
         });
       }
-      total = Math.round(total * 100) / 100;
+      const totalNum = total.round(2).toNumber();
 
       // Aviso de posible doble-click: mismo cliente, mismo importe y mismas líneas, hace pocos
       // minutos. No bloquea de una (podría ser otra venta real): frena y pide confirmar; el
@@ -164,10 +183,10 @@ export class SalesService {
         const sig = (ls: { productId: string; quantity: number }[]) =>
           ls.map((l) => `${l.productId}:${l.quantity}`).sort().join('|');
         const mySig = sig(lines);
-        const dup = recent.find((o) => Number(o.total) === total && sig(o.lines as any) === mySig);
+        const dup = recent.find((o) => Number(o.total) === totalNum && sig(o.lines as any) === mySig);
         if (dup)
           throw new ConflictException(
-            `Recién cargaste un despacho igual a ${client.businessName} por $${total} (${dup.code}). Si es otra venta real, confirmá para cargarlo igual.`,
+            `Recién cargaste un despacho igual a ${client.businessName} por $${totalNum} (${dup.code}). Si es otra venta real, confirmá para cargarlo igual.`,
           );
       }
 
@@ -182,7 +201,7 @@ export class SalesService {
         clientId: client.id,
         dispatchedAt,
         lines,
-        total: String(total),
+        total: total.round(2).toString(),
         notes: input.notes ?? null,
         documentType: 'remito',
         paymentMode,
@@ -205,7 +224,7 @@ export class SalesService {
         manager.getRepository(AccountMovementEntity).create({
           clientId: client.id,
           kind: 'charge',
-          amount: String(total),
+          amount: total.round(2).toString(),
           referenceType: 'sales_order',
           referenceId: saved.id,
           occurredAt: dispatchedAt,
@@ -216,12 +235,12 @@ export class SalesService {
       );
       // Contado: registramos el cobro de inmediato (saldo 0). No genera ingreso de caja
       // aparte para no duplicar (el cobro al contado es parte del despacho).
-      if (isContado && total > 0) {
+      if (isContado && total.gt(0)) {
         await manager.getRepository(AccountMovementEntity).save(
           manager.getRepository(AccountMovementEntity).create({
             clientId: client.id,
             kind: 'payment',
-            amount: String(total),
+            amount: total.round(2).toString(),
             referenceType: 'sales_order',
             referenceId: saved.id,
             occurredAt: dispatchedAt,
@@ -321,6 +340,7 @@ export class SalesService {
           unitPrice: orderLine.unitPrice,
           priceBasis: basis,
           unit: orderLine.unit,
+          ...(orderLine.fatPct != null && { fatPct: orderLine.fatPct, fatBasePrice: orderLine.fatBasePrice }),
           subtotal,
         });
       }
@@ -559,6 +579,8 @@ export class SalesService {
       if (!order) throw new NotFoundException(`Despacho ${id} no encontrado`);
       if (input.unitPrices.length !== order.lines.length)
         throw new BadRequestException(`Cargá un precio por cada producto de la venta ${order.code}.`);
+      if (input.fat && input.fat.length !== order.lines.length)
+        throw new BadRequestException(`Cargá el % de grasa por cada producto de la venta ${order.code}.`);
       const devoluciones = await manager.getRepository(CreditNoteEntity).count({ where: { salesOrderId: id } });
       if (devoluciones > 0)
         throw new BadRequestException(
@@ -567,11 +589,21 @@ export class SalesService {
 
       let total = new Big(0);
       order.lines = order.lines.map((line, i) => {
-        const unitPrice = input.unitPrices[i]!;
+        const fat = input.fat?.[i] ?? null;
+        if (fat && line.priceBasis === 'bulto')
+          throw new BadRequestException(`${line.productName} se cobra por % de grasa: el precio es por kg, no por bulto.`);
+        const unitPrice = fat ? precioPorGrasa(fat) : input.unitPrices[i]!;
         const cantidadCobrada = line.priceBasis === 'bulto' ? (line.bultos ?? 0) : line.quantity;
         const subtotal = new Big(unitPrice).times(cantidadCobrada).round(2);
         total = total.plus(subtotal);
-        return { ...line, unitPrice, subtotal: subtotal.toNumber() };
+        // Con % de grasa queda registrado el análisis; sin él, se limpia lo que hubiera.
+        const { fatPct: _p, fatBasePrice: _b, ...resto } = line;
+        return {
+          ...resto,
+          unitPrice,
+          subtotal: subtotal.toNumber(),
+          ...(fat && { fatPct: fat.pct, fatBasePrice: fat.basePrice }),
+        };
       });
       const totalStr = total.round(2).toString();
       order.total = totalStr;

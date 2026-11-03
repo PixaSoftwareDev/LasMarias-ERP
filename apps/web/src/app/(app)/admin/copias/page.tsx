@@ -5,8 +5,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertTriangle, Download, DatabaseBackup, HardDriveDownload, Loader2, MonitorCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Field } from '@/components/ui/field';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable, type Column } from '@/components/ui/data-table';
 import { TableSkeleton } from '@/components/ui/skeleton';
@@ -20,15 +18,18 @@ import {
   enableAutoSave,
   isAutoSaveEnabled,
   lastSavedAt,
+  savedBackupIds,
   syncBackupsToThisPc,
 } from '@/hooks/use-backup-auto-save';
 import type { BackupRun } from '@lasmarias/shared-schemas';
 
-// Copias de seguridad de la base. La copia corre SOLA en el servidor (días + hora
-// configurables acá). "Guardar en esta PC" baja las copias nuevas a Descargas cada
-// vez que la app está abierta en esta computadora.
+// Copias de seguridad de la base. La copia corre SOLA en el servidor todos los días a
+// una hora FIJA (no se configura desde acá: pedido del dueño, oct 2026). "Guardar en
+// esta PC" baja las copias nuevas a Descargas cada vez que la app está abierta en esta
+// computadora.
 
 const DAY_LABELS = ['L', 'M', 'M', 'J', 'V', 'S', 'D']; // ISO 1..7
+const DAY_NAMES = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
 
 const formatDateTime = (iso: string) =>
   new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -45,29 +46,37 @@ export default function CopiasPage() {
   const overview = overviewQuery.data;
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['backups'] });
 
-  // --- Config editable (se precarga cuando llega la data) ---
-  const [enabled, setEnabled] = useState(true);
-  const [hour, setHour] = useState('03:00');
+  const servidorPrendido = !!overview?.config.enabled;
+
+  // Días en que se hace la copia (la hora es siempre 03:00). Se guardan al tocarlos.
   const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 7]);
   const [loadedKey, setLoadedKey] = useState('');
   useEffect(() => {
     if (!overview) return;
-    const key = JSON.stringify(overview.config);
+    const key = JSON.stringify(overview.config.days);
     if (key === loadedKey) return;
     setLoadedKey(key);
-    setEnabled(overview.config.enabled);
-    setHour(overview.config.hour);
     setDays(overview.config.days);
   }, [overview, loadedKey]);
 
-  const saveConfig = useMutation({
-    mutationFn: () => backupsApi.updateConfig({ enabled, hour, days: [...days].sort((a, b) => a - b) }),
-    onSuccess: () => {
-      refresh();
-      toast.success('Configuración guardada.');
+  const saveDays = useMutation({
+    mutationFn: (next: number[]) => backupsApi.updateConfig({ enabled: true, days: next }),
+    onSuccess: () => refresh(),
+    onError: (e) => {
+      setDays(overview?.config.days ?? [1, 2, 3, 4, 5, 6, 7]);
+      toast.error(e instanceof ApiError ? e.message : 'No se pudieron guardar los días. Probá de nuevo.');
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar. Probá de nuevo.'),
   });
+
+  function toggleDay(day: number) {
+    const next = days.includes(day) ? days.filter((d) => d !== day) : [...days, day].sort((a, b) => a - b);
+    if (next.length === 0) {
+      toast.error('Tiene que quedar al menos un día con copia.');
+      return;
+    }
+    setDays(next);
+    saveDays.mutate(next);
+  }
 
   const runNow = useMutation({
     mutationFn: () => backupsApi.runNow(),
@@ -83,23 +92,40 @@ export default function CopiasPage() {
   const [autoSave, setAutoSave] = useState(false);
   const [lastLocal, setLastLocal] = useState<string | null>(null);
   const [togglingPc, setTogglingPc] = useState(false);
+  const [enEstaPc, setEnEstaPc] = useState<string[]>([]);
   useEffect(() => {
     setAutoSave(isAutoSaveEnabled());
     setLastLocal(lastSavedAt());
+    setEnEstaPc(savedBackupIds());
   }, []);
 
+  // Un solo interruptor (pedido del dueño, oct 2026): apretar "Guardar copias en esta
+  // PC" prende TAMBIÉN la copia automática del servidor. Apagarlo solo deja de bajar
+  // las copias a esta computadora: el servidor sigue copiando igual.
   async function togglePcSave() {
     if (!overview) return;
     setTogglingPc(true);
     try {
-      if (autoSave) {
+      if (autoSave && overview.config.enabled) {
         disableAutoSave();
         setAutoSave(false);
-        toast.success('Esta PC ya no guarda copias automáticamente.');
+        toast.success('Esta PC ya no guarda copias. El servidor sigue copiando igual.');
       } else {
-        await enableAutoSave(overview);
+        if (!overview.config.enabled) {
+          await backupsApi.updateConfig({ enabled: true, days });
+          // Primera copia ya mismo, para comprobar en el momento que todo anda.
+          const run = await backupsApi.runNow();
+          if (run.status !== 'ok') {
+            toast.error(`La primera copia falló: ${run.error ?? 'error desconocido'}. Revisá el detalle abajo.`);
+          }
+        }
+        const fresh = await backupsApi.overview();
+        await enableAutoSave(fresh);
         setAutoSave(true);
         setLastLocal(lastSavedAt());
+        setEnEstaPc(savedBackupIds());
+        refresh();
+        toast.success('Listo: el servidor copia solo todos los días y esta PC las guarda.');
       }
     } catch {
       toast.error('No se pudo guardar la copia en esta PC. Probá de nuevo.');
@@ -114,6 +140,7 @@ export default function CopiasPage() {
       const n = await syncBackupsToThisPc(overview);
       if (n === 0) toast.success('Esta PC ya tiene todas las copias.');
       setLastLocal(lastSavedAt());
+      setEnEstaPc(savedBackupIds());
     } catch {
       toast.error('No se pudieron bajar las copias. Probá de nuevo.');
     } finally {
@@ -121,39 +148,18 @@ export default function CopiasPage() {
     }
   }
 
+  // "Prendido" de verdad = el servidor copia solo Y esta PC las guarda. Si el
+  // servidor está apagado, el botón vuelve a ser el de arrancar todo.
+  const prendido = servidorPrendido && autoSave;
+
   const download = useMutation({
     mutationFn: (run: BackupRun) => backupsApi.download(run),
-    onSuccess: () => toast.success('Copia descargada.'),
+    onSuccess: () => {
+      setEnEstaPc(savedBackupIds());
+      toast.success('Copia descargada.');
+    },
     onError: () => toast.error('No se pudo descargar esa copia.'),
   });
-
-  // --- Activación con UN botón (pedido del dueño): prende la copia automática del
-  // servidor Y el guardado en ESTA PC, y hace una primera copia ya mismo como prueba.
-  // Se aprieta desde la computadora donde se quieren guardar las copias.
-  const [activating, setActivating] = useState(false);
-  async function activarTodo() {
-    if (!overview) return;
-    setActivating(true);
-    try {
-      await backupsApi.updateConfig({ enabled: true, hour, days: [...days].sort((a, b) => a - b) });
-      const run = await backupsApi.runNow();
-      if (run.status !== 'ok') {
-        toast.error(`La primera copia falló: ${run.error ?? 'error desconocido'}. Revisá el detalle abajo.`);
-      }
-      const fresh = await backupsApi.overview();
-      await enableAutoSave(fresh);
-      setAutoSave(true);
-      setLastLocal(lastSavedAt());
-      refresh();
-      if (run.status === 'ok') {
-        toast.success('Copias activadas: se hacen solas en el servidor y se guardan en esta PC.');
-      }
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : 'No se pudo activar. Probá de nuevo.');
-    } finally {
-      setActivating(false);
-    }
-  }
 
   const columns: Column<BackupRun>[] = [
     {
@@ -171,6 +177,18 @@ export default function CopiasPage() {
           <StatusBadge status="success">OK</StatusBadge>
         ) : (
           <StatusBadge status="danger">Falló</StatusBadge>
+        ),
+    },
+    {
+      key: 'donde',
+      header: 'Guardada en',
+      render: (r) =>
+        r.status !== 'ok' ? (
+          <span className="text-xs text-foreground-muted">—</span>
+        ) : enEstaPc.includes(r.id) ? (
+          <StatusBadge status="success">En esta PC</StatusBadge>
+        ) : (
+          <StatusBadge status="neutral">Solo en el servidor</StatusBadge>
         ),
     },
     {
@@ -211,15 +229,14 @@ export default function CopiasPage() {
     },
   ];
 
-  // Apagado = pantalla de activación (el aviso del server sería redundante ahí).
-  const apagado = !!overview && !overview.config.enabled;
-  const warnings = apagado ? [] : (overview?.warnings ?? []);
+  // Apagado: la tarjeta ya explica que falta prenderlo, así que no repetimos avisos.
+  const warnings = servidorPrendido ? (overview?.warnings ?? []) : [];
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Copias de seguridad"
-        description="La copia de la base se hace sola en el servidor. Desde acá también se descarga a esta PC."
+        description="Un respaldo de toda la información del sistema, hecho solo todos los días y guardado en esta computadora."
         backHref="/admin"
         backLabel="Volver a Datos maestros"
         action={
@@ -239,28 +256,6 @@ export default function CopiasPage() {
         }
       />
 
-      {/* Apagado de fábrica: UN botón lo prende todo, desde la PC donde se guardan. */}
-      {apagado && (
-        <Card className="border-primary-200 bg-primary-50/40">
-          <CardContent className="flex flex-col items-start gap-3 py-6">
-            <p className="flex items-center gap-2 font-medium text-foreground">
-              <HardDriveDownload className="h-5 w-5 text-primary-600" aria-hidden="true" />
-              Las copias de seguridad están apagadas.
-            </p>
-            <p className="text-sm text-foreground-muted">
-              Apretá el botón <span className="font-medium text-foreground">desde la computadora donde
-              quieras que se guarden las copias</span>. A partir de ahí, el servidor hace una copia
-              todos los días a las {hour} h y esta PC las baja solas a Descargas al abrir la
-              aplicación. Se hace una primera copia ya mismo, para comprobar que todo anda.
-            </p>
-            <Button size="lg" onClick={activarTodo} loading={activating} loadingText="Activando…">
-              <DatabaseBackup className="mr-2 h-5 w-5" aria-hidden="true" />
-              Activar copias de seguridad en esta PC
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
       {warnings.length > 0 && (
         <div className="space-y-2" role="alert">
           {warnings.map((w) => (
@@ -272,82 +267,8 @@ export default function CopiasPage() {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Automático en el servidor */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <DatabaseBackup className="h-5 w-5 text-primary-600" aria-hidden="true" />
-              Copia automática en el servidor
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <label className="flex cursor-pointer items-center gap-3">
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={(e) => setEnabled(e.target.checked)}
-                className="h-5 w-5 rounded border-border accent-primary-600"
-              />
-              <span className="text-sm font-medium">Hacer una copia automática</span>
-            </label>
-
-            <Field label="Hora" htmlFor="backup-hour" hint="Hora del servidor. De madrugada no molesta a nadie.">
-              <Input
-                id="backup-hour"
-                type="time"
-                value={hour}
-                onChange={(e) => setHour(e.target.value)}
-                disabled={!enabled}
-                className="max-w-[160px]"
-              />
-            </Field>
-
-            <div>
-              <span className="mb-2 block text-sm font-medium">Días</span>
-              <div className="flex gap-2" role="group" aria-label="Días de la semana">
-                {DAY_LABELS.map((label, i) => {
-                  const day = i + 1;
-                  const active = days.includes(day);
-                  return (
-                    <button
-                      key={day}
-                      type="button"
-                      disabled={!enabled}
-                      aria-pressed={active}
-                      aria-label={['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'][i]}
-                      onClick={() =>
-                        setDays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]))
-                      }
-                      className={cn(
-                        'flex h-10 w-10 items-center justify-center rounded-lg border text-sm font-semibold transition-colors',
-                        active
-                          ? 'border-primary-600 bg-primary-600 text-white'
-                          : 'border-border bg-surface text-foreground-muted hover:border-primary-300',
-                        !enabled && 'opacity-50',
-                      )}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-              {enabled && days.length === 0 && (
-                <p className="mt-1 text-xs text-red-600">Elegí al menos un día.</p>
-              )}
-            </div>
-
-            <Button
-              onClick={() => saveConfig.mutate()}
-              disabled={saveConfig.isPending || (enabled && days.length === 0)}
-              className="w-full sm:w-auto"
-            >
-              {saveConfig.isPending ? 'Guardando…' : 'Guardar configuración'}
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* Guardado en esta PC */}
+      <div className="grid gap-4">
+        {/* Único lugar donde se prende todo: la PC donde se guardan las copias. */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -357,11 +278,45 @@ export default function CopiasPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-foreground-muted">
-              Con esto prendido, cada vez que abras la aplicación en esta computadora las copias
-              nuevas se bajan solas a tu carpeta de Descargas. Si la PC estuvo apagada, se pone al
-              día al abrir y te avisa.
+              {servidorPrendido
+                ? 'Las copias se hacen solas todos los días y quedan guardadas en esta computadora. En el servidor se conserva además la última semana, como respaldo.'
+                : 'Apretá el botón para arrancar las copias de seguridad. A partir de ahí se hacen solas todos los días y se guardan en esta computadora.'}
             </p>
-            {autoSave && (
+            {servidorPrendido && (
+              <div>
+                <span className="mb-2 block text-sm font-medium">Días en que se hace la copia</span>
+                <div className="flex gap-2" role="group" aria-label="Días en que se hace la copia">
+                  {DAY_LABELS.map((label, i) => {
+                    const day = i + 1;
+                    const active = days.includes(day);
+                    return (
+                      <button
+                        key={day}
+                        type="button"
+                        aria-pressed={active}
+                        aria-label={DAY_NAMES[i]}
+                        onClick={() => toggleDay(day)}
+                        disabled={saveDays.isPending}
+                        className={cn(
+                          'flex h-10 w-10 items-center justify-center rounded-lg border text-sm font-semibold transition-colors',
+                          active
+                            ? 'border-primary-600 bg-primary-600 text-white'
+                            : 'border-border bg-surface text-foreground-muted hover:border-primary-300',
+                        )}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-xs text-foreground-muted">
+                  Tocá un día para sacarlo o volver a ponerlo. Si los domingos no se trabaja,
+                  podés dejarlo afuera.
+                </p>
+              </div>
+            )}
+
+            {prendido && (
               <p className="flex items-center gap-2 text-sm text-primary-700">
                 <MonitorCheck className="h-4 w-4" aria-hidden="true" />
                 {lastLocal
@@ -371,7 +326,7 @@ export default function CopiasPage() {
             )}
             <div className="flex flex-wrap gap-2">
               <Button
-                variant={autoSave ? 'secondary' : 'primary'}
+                variant={prendido ? 'secondary' : 'primary'}
                 onClick={togglePcSave}
                 disabled={togglingPc || !overview}
               >
@@ -379,13 +334,13 @@ export default function CopiasPage() {
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> Un momento…
                   </>
-                ) : autoSave ? (
+                ) : prendido ? (
                   'Dejar de guardar en esta PC'
                 ) : (
-                  'Guardar copias en esta PC'
+                  'Activar copias de seguridad en esta PC'
                 )}
               </Button>
-              {autoSave && (
+              {prendido && (
                 <Button variant="ghost" onClick={syncNow} disabled={togglingPc}>
                   Bajar las que falten ahora
                 </Button>
@@ -405,7 +360,7 @@ export default function CopiasPage() {
           pageSize={10}
           emptyIcon={DatabaseBackup}
           emptyTitle="Todavía no hay copias"
-          emptyDescription="La primera se va a hacer sola a la hora configurada, o tocá «Hacer copia ahora»."
+          emptyDescription="La primera se va a hacer sola de madrugada, o tocá «Hacer copia ahora»."
         />
       )}
     </div>

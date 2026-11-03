@@ -67,6 +67,8 @@ export const stockSummarySchema = z.object({
   unit: z.string(),
   // Categoría del producto para agrupar el inventario (materia_prima, intermedio, queso, etc.).
   category: z.string().optional(),
+  // Familia del producto (ej. "Mozzarella") para el subtotal por familia en Stock.
+  family: z.string().optional(),
   totalQuantity: z.number(),
   // Bultos en stock (suma de los lotes que los tienen contados). undefined = este
   // producto no se maneja por bultos; el stock se sigue controlando por totalQuantity.

@@ -118,6 +118,25 @@ function ChipSkeleton() {
 }
 
 // --- Fila de un ítem de stock (lista escaneable) ---
+// Subtotal por familia (ej. "Mozzarella") dentro de una categoría. Solo familias con 2+
+// productos: con uno solo el subtotal repetiría la fila. Los bultos se suman si algún
+// producto los lleva.
+function familySubtotals(items: StockSummary[]): { family: string; unit: string; total: number; bultos: number | null }[] {
+  const byFam = new Map<string, { unit: string; total: number; bultos: number | null; count: number }>();
+  for (const s of items) {
+    if (!s.family) continue;
+    const cur = byFam.get(s.family) ?? { unit: s.unit, total: 0, bultos: null, count: 0 };
+    cur.total = Math.round((cur.total + s.totalQuantity) * 1000) / 1000;
+    if (s.totalBultos != null) cur.bultos = (cur.bultos ?? 0) + s.totalBultos;
+    cur.count += 1;
+    byFam.set(s.family, cur);
+  }
+  return [...byFam.entries()]
+    .filter(([, v]) => v.count >= 2)
+    .map(([family, v]) => ({ family, unit: v.unit, total: v.total, bultos: v.bultos }))
+    .sort((a, b) => a.family.localeCompare(b.family));
+}
+
 function StockRow({
   s,
   icon: Icon,
@@ -869,6 +888,19 @@ export default function InventoryPage() {
                     {meta.label}
                     {quickFilter && <span className="ml-auto text-xs font-normal text-foreground-muted">{items.length} {items.length === 1 ? 'ítem' : 'ítems'}</span>}
                   </button>
+                  {/* Pedido del dueño (27/10/2026): "stock de mozzarella: tantos kg" sumando todas las
+                      marcas y formatos, sin mezclar con tybo, ricota ni crema. Suma por familia del producto. */}
+                  {isOpen && !quickFilter && familySubtotals(items).length > 0 && (
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      {familySubtotals(items).map((f) => (
+                        <div key={f.family} className="flex items-baseline gap-2 rounded-lg border border-border-subtle bg-surface-elevated px-3 py-2 shadow-sm">
+                          <span className="text-sm text-foreground-muted">{f.family} en total</span>
+                          <span className="font-display text-lg font-bold text-foreground">{num(f.total)} {f.unit}</span>
+                          {f.bultos != null && <span className="text-xs text-foreground-muted">· {f.bultos} bultos</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {isOpen && (
                     <Card className="divide-y divide-border-subtle overflow-hidden p-0">
                       {items.map((s) => (

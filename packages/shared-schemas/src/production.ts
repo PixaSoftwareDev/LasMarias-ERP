@@ -28,6 +28,10 @@ export const productionOutputSchema = z.object({
   batchId: uuidSchema.optional(),
   batchCode: z.string().optional(),
   isPrincipal: z.boolean(),
+  // Otro FORMATO de la misma elaboración (pedido del dueño, 27/10/2026): de una tachada de
+  // mozzarella salen planchas y también cilindros. No es un subproducto: es producto, hereda
+  // el mismo costo/kg que el principal y sus kg cuentan para el rendimiento.
+  isFormat: z.boolean().optional(),
 });
 export type ProductionOutput = z.infer<typeof productionOutputSchema>;
 
@@ -114,9 +118,11 @@ export const openProductionInputSchema = z.object({
   recipeId: uuidSchema,
   operatorId: uuidSchema,
   startedAt: z.string().min(1),
-  milkInputs: z
-    .array(z.object({ batchId: uuidSchema, liters: z.number().positive() }))
-    .min(1, 'Tenés que elegir al menos un lote de leche'),
+  // Lotes que consume la orden (leche, masa, reproceso, crema). Puede venir VACÍA: es la
+  // orden "sin lote de origen", para lo que se hace con el suero de la prensa (ricota). El
+  // suero no se lleva como stock, así que la orden arranca con 0 litros y el costo del lote
+  // es solo el de los insumos de la receta (la calculadora ya contempla litros = 0).
+  milkInputs: z.array(z.object({ batchId: uuidSchema, liters: z.number().positive() })),
   notes: z.string().max(2000).optional(),
   // Si el sistema detecta una orden igual (misma receta y mismos lotes) abierta hace pocos
   // minutos, frena y avisa: es casi seguro una doble carga. El front reenvía con este flag
@@ -136,6 +142,7 @@ export const updateProductionInputSchema = openProductionInputSchema.extend({
         quantity: z.number().nonnegative(),
         bultos: bultosSchema,
         isPrincipal: z.boolean(),
+        isFormat: z.boolean().optional(),
       }),
     )
     .optional(),
@@ -152,6 +159,8 @@ export const closeProductionInputSchema = z.object({
       // Bultos (bolsas/cajas) realmente obtenidos. Opcional: no afecta el costo.
       bultos: bultosSchema,
       isPrincipal: z.boolean(),
+      // Otro formato del mismo producto (plancha + cilindro): comparte el costo/kg.
+      isFormat: z.boolean().optional(),
     }),
   ),
   // Cámara/sector donde se almacena el lote de producto resultante (opcional).
@@ -163,3 +172,21 @@ export const closeProductionInputSchema = z.object({
   notes: z.string().max(2000).optional(),
 });
 export type CloseProductionInput = z.infer<typeof closeProductionInputSchema>;
+
+// Guardar lo que YA salió, sin cerrar la orden (pedido del dueño, 29/10/2026). En la planta la
+// crema se desnata el MISMO día de la elaboración, pero la masa se pesa recién al día siguiente:
+// antes había que esperar a tener los kg de masa para poder anotar la crema. Con esto el día 1 se
+// guardan los subproductos (la orden queda "en curso") y el día 2 se cierra cargando solo la masa.
+// No toca el stock ni la calculadora de costo: solo anota las cantidades en la orden. Los lotes,
+// los movimientos y el costo se siguen generando al CERRAR (CLAUDE.md §5).
+export const saveProductionProgressInputSchema = z.object({
+  outputs: z.array(
+    z.object({
+      productId: uuidSchema,
+      quantity: z.number().nonnegative(),
+      bultos: bultosSchema,
+    }),
+  ),
+  notes: z.string().max(2000).optional(),
+});
+export type SaveProductionProgressInput = z.infer<typeof saveProductionProgressInputSchema>;

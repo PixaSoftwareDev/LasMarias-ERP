@@ -1,4 +1,4 @@
-import { planFefoAllocation, SalesService } from './sales.service';
+import { planFefoAllocation, precioPorGrasa, SalesService } from './sales.service';
 import { sortOldestFirst } from '../inventory/oldest-first';
 
 // PEDIDOS DEL DUEÑO (audios 20-21/10/2026), verificados contra la base real:
@@ -296,5 +296,108 @@ describe('corregir precio de una venta (crema por % de grasa)', () => {
   it('exige un precio por cada línea', async () => {
     const { service } = makeService({ order: venta('contado', '100', 1) });
     await expect(service.updateOrderPrices('so-1', { unitPrices: [2, 3] })).rejects.toThrow(/un precio por cada/);
+  });
+});
+
+// AUDIO DEL DUEÑO 26/10/2026: la crema a granel se cobra según el % de grasa del análisis del
+// comprador. Verificado con la venta real DSP-000108 (DE BON LAIT): 869,2 kg, lista $7.199,50
+// por kg de grasa, 59% → $4.247,705 por kg → $3.692.105,19.
+describe('crema por % de grasa (precio = $/kg de grasa × % ÷ 100)', () => {
+  it('a mano: 7.199,50 × 59 ÷ 100 = 4.247,705 (exacto, sin ruido de float)', () => {
+    expect(precioPorGrasa({ basePrice: 7199.5, pct: 59 })).toBe(4247.705);
+    expect(precioPorGrasa({ basePrice: 7199.5, pct: 100 })).toBe(7199.5);
+    expect(precioPorGrasa({ basePrice: 7199.5, pct: 42.5 })).toBe(3059.7875);
+  });
+
+  it('al vender con % de grasa, el backend calcula el precio y pisa el que mandó el front', async () => {
+    const { service } = makeService({
+      batches: [
+        { id: 'crema-1', code: 'LM-IN-1', productionDate: new Date('2026-10-20'), expirationDate: null, status: 'activo', remainingQuantity: '869.2', remainingBultos: null, unit: 'kg' },
+      ],
+    });
+    const venta = await service.createOrder(
+      {
+        clientId: 'cli-1',
+        lines: [{ productId: 'masa', quantity: 869.2, bultos: 62, unitPrice: 1, fat: { pct: 59, basePrice: 7199.5 } }],
+      } as any,
+      'user-1',
+    );
+    expect(venta.lines[0]!.unitPrice).toBe(4247.705);
+    expect(venta.lines[0]!.subtotal).toBe(3692105.19);
+    expect(venta.total).toBe(3692105.19);
+    // El análisis queda congelado en la línea (remito + corrección posterior).
+    expect(venta.lines[0]!.fatPct).toBe(59);
+    expect(venta.lines[0]!.fatBasePrice).toBe(7199.5);
+  });
+
+  it('corregir precio con el % del análisis: recalcula importe y cargo, y anota el %', async () => {
+    const fecha = new Date('2026-10-21T15:00:00Z');
+    const cargo = { kind: 'charge', amount: '6257805.4', occurredAt: fecha };
+    const cobro = { kind: 'payment', amount: '6257805.4', occurredAt: fecha };
+    const { service, savedAccount } = makeService({
+      order: {
+        id: 'so-1',
+        code: 'DSP-000108',
+        clientId: 'cli-1',
+        client: { businessName: 'DE BON LAIT SRL' },
+        dispatchedAt: fecha,
+        paymentMode: 'contado',
+        currency: 'ARS',
+        exchangeRate: '1',
+        notes: null,
+        total: '6257805.4',
+        createdAt: fecha,
+        updatedAt: fecha,
+        // Se retiró sin análisis: quedó al precio de lista (100% de grasa).
+        lines: [{ productId: 'crema', productName: 'Crema', sku: 'CLNP', quantity: 869.2, unitPrice: 7199.5, unit: 'kg', subtotal: 6257805.4 }],
+      },
+      accountMovements: [cargo, cobro],
+    });
+    const r = await service.updateOrderPrices('so-1', {
+      unitPrices: [7199.5],
+      fat: [{ pct: 59, basePrice: 7199.5 }],
+      reason: 'Análisis del comprador',
+    });
+    expect(r.lines[0]!.unitPrice).toBe(4247.705);
+    expect(r.lines[0]!.fatPct).toBe(59);
+    expect(r.total).toBe(3692105.19);
+    expect(savedAccount.map((m) => [m.kind, m.amount])).toEqual([
+      ['charge', '3692105.19'],
+      ['payment', '3692105.19'],
+    ]);
+  });
+
+  it('exige una entrada de grasa por línea si se manda el arreglo', async () => {
+    const { service } = makeService({
+      order: { id: 'so-1', code: 'DSP-1', clientId: 'c', client: {}, dispatchedAt: new Date(), paymentMode: 'contado', total: '1', lines: [{ productId: 'p', quantity: 1, unitPrice: 1, unit: 'kg', subtotal: 1 }] },
+    });
+    await expect(
+      service.updateOrderPrices('so-1', { unitPrices: [1], fat: [null, { pct: 1, basePrice: 1 }] }),
+    ).rejects.toThrow(/% de grasa por cada/);
+  });
+});
+
+describe('crema por % de grasa: bordes', () => {
+  const lote = [{ id: 'c', code: 'LM-IN-1', productionDate: new Date('2026-10-20'), expirationDate: null, status: 'activo', remainingQuantity: '1000', remainingBultos: null, unit: 'kg' }];
+
+  it('el medio centavo se redondea igual al vender y al corregir (603,3725 × 2 = 1.206,75)', async () => {
+    const { service } = makeService({ batches: lote });
+    const venta = await service.createOrder(
+      { clientId: 'cli-1', lines: [{ productId: 'masa', quantity: 2, unitPrice: 0, fat: { pct: 59.6, basePrice: 1012.37 } }] } as any,
+      'user-1',
+    );
+    expect(venta.lines[0]!.unitPrice).toBe(603.3725);
+    expect(venta.lines[0]!.subtotal).toBe(1206.75);
+    expect(venta.total).toBe(1206.75);
+  });
+
+  it('por % de grasa no se puede cobrar por bulto', async () => {
+    const { service } = makeService({ batches: lote });
+    await expect(
+      service.createOrder(
+        { clientId: 'cli-1', lines: [{ productId: 'masa', quantity: 10, bultos: 2, unitPrice: 0, priceBasis: 'bulto', fat: { pct: 59, basePrice: 7199.5 } }] } as any,
+        'user-1',
+      ),
+    ).rejects.toThrow(/por kg, no por bulto/);
   });
 });

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, CheckCircle2, GitBranch, Lock, Package, ShoppingCart } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, GitBranch, Lock, Package, Save, ShoppingCart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -16,6 +16,7 @@ import { productionApi, inventoryApi, productsApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { type ProductionOrder } from '@lasmarias/shared-schemas';
 import { OutputFields } from '@/components/production/output-fields';
+import { FormatOutputs, type FormatRow } from '@/components/production/format-outputs';
 
 // Pantalla de cierre de orden (CLAUDE.md §4.3): se cargan las salidas reales por producto
 // y al cerrar se muestra el panel de costo. El cierre es definitivo.
@@ -47,6 +48,8 @@ export default function CloseProductionPage({ params }: { params: { id: string }
   const [quantities, setQuantities] = useState<Record<string, number | undefined>>({});
   // Bultos (bolsas/cajas) por producto. Opcional: si no se cargan, el lote va sin bultos.
   const [bultos, setBultos] = useState<Record<string, number | undefined>>({});
+  // Otros formatos de la misma tachada (plancha + cilindro). Cada uno hace su lote al cerrar.
+  const [formatos, setFormatos] = useState<FormatRow[]>([]);
   // Cámara/sector destino de los lotes de producto generados al cerrar (opcional).
   const [warehouseId, setWarehouseId] = useState<string>('');
   // Rendimiento ESPERADO (kg/litro) cargado a mano al cerrar (opcional). Si se carga,
@@ -54,6 +57,26 @@ export default function CloseProductionPage({ params }: { params: { id: string }
   const [expectedYield, setExpectedYield] = useState<string>('');
   // La orden cerrada (con costBreakdown) tras un cierre exitoso.
   const [closedOrder, setClosedOrder] = useState<ProductionOrder | null>(null);
+
+  // Precarga lo que ya se anotó en la orden sin cerrarla (la crema guardada el día de la
+  // elaboración). Así, al día siguiente, el operario solo escribe los kg de masa.
+  const [prefilled, setPrefilled] = useState(false);
+  useEffect(() => {
+    if (!order || prefilled || order.status === 'closed') return;
+    if (order.actualOutputs.length > 0) {
+      setQuantities((q) => ({
+        ...q,
+        ...Object.fromEntries(order.actualOutputs.map((o) => [o.productId, o.quantity])),
+      }));
+      setBultos((b) => ({
+        ...b,
+        ...Object.fromEntries(
+          order.actualOutputs.filter((o) => o.bultos != null).map((o) => [o.productId, o.bultos]),
+        ),
+      }));
+    }
+    setPrefilled(true);
+  }, [order, prefilled]);
 
   // Si la orden ya está cerrada, mostramos directo su panel de costo.
   useEffect(() => {
@@ -65,12 +88,21 @@ export default function CloseProductionPage({ params }: { params: { id: string }
   const close = useMutation({
     mutationFn: () =>
       productionApi.close(id, {
-        actualOutputs: (order?.expectedOutputs ?? []).map((o) => ({
-          productId: o.productId,
-          quantity: Number(quantities[o.productId] ?? 0),
-          bultos: bultos[o.productId] != null ? Number(bultos[o.productId]) : undefined,
-          isPrincipal: o.isPrincipal,
-        })),
+        actualOutputs: [
+          ...(order?.expectedOutputs ?? []).map((o) => ({
+            productId: o.productId,
+            quantity: Number(quantities[o.productId] ?? 0),
+            bultos: bultos[o.productId] != null ? Number(bultos[o.productId]) : undefined,
+            isPrincipal: o.isPrincipal,
+          })),
+          ...formatosValidos.map((f) => ({
+            productId: f.productId,
+            quantity: Number(f.kg),
+            bultos: f.bultos != null ? Number(f.bultos) : undefined,
+            isPrincipal: false,
+            isFormat: true,
+          })),
+        ],
         warehouseId: warehouseId || undefined,
         expectedYieldKgPerLiter:
           expectedYield !== '' && Number(expectedYield) > 0 ? Number(expectedYield) : undefined,
@@ -84,6 +116,26 @@ export default function CloseProductionPage({ params }: { params: { id: string }
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo cerrar la orden'),
   });
 
+  // Guardar lo que salió HOY sin cerrar: la crema se desnata el día de la elaboración y la
+  // masa se pesa al día siguiente (pedido del dueño, 29/10/2026). No genera lotes ni costo.
+  const guardarAvance = useMutation({
+    mutationFn: () =>
+      productionApi.saveProgress(id, {
+        outputs: byproducts.map((o) => ({
+          productId: o.productId,
+          quantity: Number(quantities[o.productId] ?? 0),
+          bultos: bultos[o.productId] != null ? Number(bultos[o.productId]) : undefined,
+        })),
+      }),
+    onSuccess: (r) => {
+      queryClient.invalidateQueries({ queryKey: ['production-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['production-order', id] });
+      toast.success(`Guardado en la orden ${r.code}. Queda en curso: cuando peses el producto, cerrala.`);
+      router.push('/produccion');
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar'),
+  });
+
   const principal = useMemo(
     () => (order?.expectedOutputs ?? []).filter((o) => o.isPrincipal),
     [order],
@@ -93,10 +145,17 @@ export default function CloseProductionPage({ params }: { params: { id: string }
     [order],
   );
 
-  const canClose = principal.some((o) => Number(quantities[o.productId] ?? 0) > 0);
+  // Formatos con producto y kg cargados (los vacíos se ignoran).
+  const formatosValidos = formatos.filter((f) => f.productId && f.kg != null && f.kg > 0);
+  const formatoIncompleto = formatos.some((f) => f.productId && !(f.kg != null && f.kg > 0));
+  const canClose = principal.some((o) => Number(quantities[o.productId] ?? 0) > 0) && !formatoIncompleto;
+  // Para guardar sin cerrar alcanza con que haya un subproducto cargado.
+  const hayAlgoQueGuardar = byproducts.some((o) => Number(quantities[o.productId] ?? 0) > 0);
 
-  // Rendimiento real EN VIVO = kg de producto principal ÷ litros de leche de la orden.
-  const principalKg = principal.reduce((a, o) => a + Number(quantities[o.productId] ?? 0), 0);
+  // Rendimiento real EN VIVO = kg de producto (principal + otros formatos) ÷ litros de la orden.
+  const principalKg =
+    principal.reduce((a, o) => a + Number(quantities[o.productId] ?? 0), 0) +
+    formatosValidos.reduce((a, f) => a + Number(f.kg), 0);
   const realYield = order && order.totalMilkLiters > 0 && principalKg > 0 ? principalKg / order.totalMilkLiters : null;
 
   if (orderQuery.isLoading) {
@@ -219,12 +278,34 @@ export default function CloseProductionPage({ params }: { params: { id: string }
         </CardContent>
       </Card>
 
+      {principal[0] && (
+        <Card>
+          <CardHeader>
+            <CardTitle>¿Salió también en otro formato?</CardTitle>
+            <p className="text-sm text-foreground-muted">
+              Si de esta misma tachada salieron, por ejemplo, planchas y también cilindros, cargá acá los kg del otro formato. Comparte el mismo costo por kg y suma al rendimiento.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <FormatOutputs
+              rows={formatos}
+              onChange={setFormatos}
+              products={productsQuery.data ?? []}
+              principalProductId={principal[0].productId}
+            />
+            {formatoIncompleto && (
+              <p className="mt-2 text-xs font-medium text-amber-700">Cargá los kg del formato agregado (o quitalo).</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {byproducts.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Subproductos</CardTitle>
             <p className="text-sm text-foreground-muted">
-              Ricota, suero u otros. Cargá lo que realmente se obtuvo (su valor baja el costo del producto principal).
+              Crema, ricota, suero u otros. Cargá lo que realmente se obtuvo (su valor baja el costo del producto principal).
             </p>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -240,6 +321,24 @@ export default function CloseProductionPage({ params }: { params: { id: string }
                 onBultos={(v) => setBultos((b) => ({ ...b, [o.productId]: v }))}
               />
             ))}
+
+            {/* ¿La crema sale hoy y el producto se pesa mañana? Se guarda lo de hoy y la orden
+                queda en curso; al día siguiente solo se cargan los kg y se cierra. */}
+            <div className="flex flex-col gap-3 rounded-lg border border-border-subtle bg-surface-subtle p-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-foreground-muted">
+                ¿Hoy sacaste la crema y el producto lo pesás mañana? Guardá lo que salió hoy sin cerrar la orden: queda <span className="font-medium text-foreground">en curso</span> y mañana cargás solo los kg.
+              </p>
+              <Button
+                variant="secondary"
+                onClick={() => guardarAvance.mutate()}
+                loading={guardarAvance.isPending}
+                loadingText="Guardando..."
+                disabled={!hayAlgoQueGuardar}
+                className="sm:flex-shrink-0"
+              >
+                <Save className="h-4 w-4" /> Guardar lo de hoy
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}

@@ -33,6 +33,10 @@ function makeService(
     milkUnitCost?: string | null;
     // Último lote PRODUCIDO (con costo) del mismo producto que el lote de origen.
     lastProducedLot?: { unitCost: string; code: string } | null;
+    // true = orden SIN lote de origen (ricota del suero): 0 litros, milkInputs vacío.
+    sinLote?: boolean;
+    // Subproductos de la versión de receta (por defecto ninguno).
+    byproducts?: any[];
   } = {},
 ) {
   // Producto de cada input (para valuar masa a precio manual). Por defecto la leche es
@@ -52,10 +56,18 @@ function makeService(
     updatedAt: new Date('2026-05-30T08:00:00Z'),
     operatorId: 'op-1',
     operator: { fullName: 'Juan' },
-    totalMilkLiters: '1000',
-    milkInputs: [{ batchId: 'milk-1', batchCode: 'LM-LE-1', liters: 1000 }],
+    totalMilkLiters: opts.sinLote ? '0' : '1000',
+    milkInputs: opts.sinLote ? [] : [{ batchId: 'milk-1', batchCode: 'LM-LE-1', liters: 1000 }],
     expectedOutputs: [
       { productId: PRINCIPAL_PRODUCT_ID, productName: 'Mozzarella', quantity: 100, unit: 'kg', isPrincipal: true },
+      // Igual que al abrir: cada subproducto con producto destino aparece en las salidas esperadas.
+      ...(opts.byproducts ?? []).map((bp: any) => ({
+        productId: bp.destinationProductId,
+        productName: bp.name,
+        quantity: 0,
+        unit: bp.unit,
+        isPrincipal: false,
+      })),
     ],
     actualOutputs: [],
     recipe: { id: 'rec-1', productId: PRINCIPAL_PRODUCT_ID, name: 'Mozzarella' },
@@ -71,7 +83,7 @@ function makeService(
         // fermento: 0.2 $/L de leche → 1000 × 0.2 = $200... usamos quantity por litro
         { productName: 'Fermento', quantity: 1, unitCost: 0.5, basis: 'per_liter_milk' },
       ],
-      byproducts: [],
+      byproducts: opts.byproducts ?? [],
     },
   };
 
@@ -516,4 +528,195 @@ describe('ProductionService.close', () => {
     const salida = savedMovements.find((m) => m.type === 'out' && m.reason === 'production');
     expect(salida.bultos).toBe(40);
   });
+
+  // PEDIDO DEL DUEÑO (audio 27/10/2026): de una misma tachada salen planchas Y cilindros.
+  // Los dos son producto (no subproducto): el costo se divide por los kg TOTALES y cada
+  // formato se lleva su lote con el MISMO costo/kg. A mano: $10.500 ÷ (100 + 40) kg = $75/kg.
+  describe('otros formatos de la misma elaboración', () => {
+    const products = {
+      'prod-mozza': { id: 'prod-mozza', name: 'Mozzarella plancha', category: 'queso', defaultCost: null },
+      'prod-cil': { id: 'prod-cil', name: 'Mozzarella cilindro', category: 'queso', defaultCost: null },
+      'prod-ricota': { id: 'prod-ricota', name: 'Ricota', category: 'subproducto', defaultCost: null },
+    };
+
+    it('reparte el costo por los kg totales y los dos lotes heredan el mismo costo/kg', async () => {
+      const { service, savedBatches, getOrder } = makeService({ products });
+      await service.close('order-1', {
+        actualOutputs: [
+          { productId: PRINCIPAL_PRODUCT_ID, quantity: 100, bultos: 10, isPrincipal: true },
+          { productId: 'prod-cil', quantity: 40, bultos: 8, isPrincipal: false, isFormat: true },
+        ],
+      } as any);
+      const order = getOrder();
+      expect(order.unitCost).toBe('75.0000');
+      expect(order.totalPrincipalKg).toBe('140');
+      expect(order.costBreakdown.real.rendimiento).toBe('0.1400');
+      const plancha = savedBatches.find((b) => b.productId === PRINCIPAL_PRODUCT_ID);
+      const cilindro = savedBatches.find((b) => b.productId === 'prod-cil');
+      expect(plancha.unitCost).toBe('75.0000');
+      expect(cilindro.unitCost).toBe('75.0000');
+      expect(cilindro.code).toBe('LM-PP-20260530-0001-F1');
+      expect(cilindro.initialQuantity).toBe('40');
+      expect(cilindro.remainingBultos).toBe(8);
+      // Queda en la orden como salida con su lote, marcada como formato.
+      const salida = order.actualOutputs.find((o: any) => o.productId === 'prod-cil');
+      expect(salida.isFormat).toBe(true);
+      expect(salida.productName).toBe('Mozzarella cilindro');
+      expect(salida.batchCode).toBe('LM-PP-20260530-0001-F1');
+    });
+
+    it('los insumos "por kg de producto" se consumen sobre los kg totales', async () => {
+      const { service, savedMovements } = makeService({
+        products,
+        ingredients: [{ productId: 'ins-sal', productName: 'Sal', quantity: 0.01, unitCost: 100, basis: 'per_kg_product' }],
+        insumoLots: [{ id: 'sal-1', productId: 'ins-sal', remainingQuantity: '50', status: 'activo', unit: 'kg' }],
+      });
+      await service.close('order-1', {
+        actualOutputs: [
+          { productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true },
+          { productId: 'prod-cil', quantity: 40, isPrincipal: false, isFormat: true },
+        ],
+      } as any);
+      const sal = savedMovements.find((m) => m.productId === 'ins-sal' && m.reason === 'consumption');
+      expect(Number(sal.quantity)).toBeCloseTo(1.4, 6); // 0,01 × 140 kg
+    });
+
+    it('un formato en 0 kg no genera lote ni queda en la orden', async () => {
+      const { service, savedBatches, getOrder } = makeService({ products });
+      await service.close('order-1', {
+        actualOutputs: [
+          { productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true },
+          { productId: 'prod-cil', quantity: 0, isPrincipal: false, isFormat: true },
+        ],
+      } as any);
+      expect(savedBatches.find((b) => b.productId === 'prod-cil')).toBeUndefined();
+      expect(getOrder().unitCost).toBe('105.0000');
+      expect(getOrder().actualOutputs.some((o: any) => o.productId === 'prod-cil')).toBe(false);
+    });
+
+    it('rechaza un formato de otra categoría y el mismo producto principal repetido', async () => {
+      const { service } = makeService({ products });
+      await expect(
+        service.close('order-1', {
+          actualOutputs: [
+            { productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true },
+            { productId: 'prod-ricota', quantity: 10, isPrincipal: false, isFormat: true },
+          ],
+        } as any),
+      ).rejects.toThrow(/misma categoría/);
+      await expect(
+        service.close('order-1', {
+          actualOutputs: [
+            { productId: PRINCIPAL_PRODUCT_ID, quantity: 100, isPrincipal: true },
+            { productId: PRINCIPAL_PRODUCT_ID, quantity: 10, isPrincipal: false, isFormat: true },
+          ],
+        } as any),
+      ).rejects.toThrow(/ya es el producto principal/);
+    });
+  });
 });
+
+// Pedido del dueño (audio 28/10/2026): ricota del suero de la prensa. La orden no tiene lote de
+// origen (0 litros): el costo del lote es SOLO la suma de los insumos de la receta. Verificable
+// a mano: 200 kg de ricota; sal "por kg" 0,02 kg × $500 × 200 = $2.000; bolsa "por kg" 1 × $50
+// × 200 = $10.000; mano de obra "fijo" $30.000; fermento "por litro" $0,5 × 0 L = $0.
+// Total $42.000 → $210,0000/kg. El rendimiento (kg/litro) no existe: aviso LITROS_CERO.
+describe('ProductionService.close — orden sin lote de origen (ricota del suero)', () => {
+  const ingredients = [
+    { productName: 'Sal', quantity: 0.02, unitCost: 500, basis: 'per_kg_product' },
+    { productName: 'Bolsa', quantity: 1, unitCost: 50, basis: 'per_kg_product' },
+    { productName: 'Mano de obra', quantity: 1, unitCost: 30000, basis: 'fixed_per_order' },
+    { productName: 'Fermento', quantity: 1, unitCost: 0.5, basis: 'per_liter_milk' },
+  ];
+
+  it('costo = insumos, sin dividir por litros, con aviso LITROS_CERO y lote sin padre', async () => {
+    const { service, savedBatches, savedMovements, getOrder } = makeService({
+      sinLote: true,
+      baseYieldKgPerLiter: null,
+      ingredients,
+    });
+
+    await service.close('order-1', {
+      actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 200, isPrincipal: true }],
+    } as any);
+
+    const order = getOrder();
+    expect(order.status).toBe('closed');
+    expect(order.costBreakdown.real.costoInsumos).toBe('42000.00');
+    expect(order.costBreakdown.real.costoNeto).toBe('42000.00');
+    expect(order.costBreakdown.real.costoPorKg).toBe('210.0000');
+    expect(order.costBreakdown.real.rendimiento).toBeNull();
+    expect(order.costBreakdown.real.warnings).toContain('LITROS_CERO');
+    expect(order.totalCost).toBe('42000.00');
+    expect(order.unitCost).toBe('210.0000');
+    // Sin estándar: no hay rendimiento esperado posible con 0 litros.
+    expect(order.costBreakdown.estandar).toBeNull();
+
+    // Lote de ricota creado con su costo y SIN lote padre (no sale de ningún stock).
+    const lote = savedBatches.find((b) => b.productId === PRINCIPAL_PRODUCT_ID);
+    expect(lote.unitCost).toBe('210.0000');
+    expect(lote.parentBatchId).toBeNull();
+    // Ningún movimiento de salida de leche/masa: solo la entrada del producto.
+    expect(savedMovements.filter((m) => m.type === 'out')).toHaveLength(0);
+    expect(savedMovements.filter((m) => m.type === 'in')).toHaveLength(1);
+  });
+});
+
+// Crema desnatada al hacer masa (audio del dueño 28/10/2026): el subproducto va a su propio
+// lote de stock (CLNP) y ese lote nace con el valor de recupero como costo, para que al
+// pasteurizarla después entre con el MISMO $/kg que abarató la masa (costeo encadenado).
+// A mano: leche 1.000 L × $10 = $10.000; fermento $0,5 × 1.000 L = $500; bruto $10.500;
+// crema 6 kg × $5 = $30 de recupero → neto $10.470 → $95,1818/kg sobre 110 kg.
+describe('ProductionService.close — subproducto con producto destino (crema de la masa)', () => {
+  const crema = {
+    name: 'CREMA CRUDA',
+    unit: 'kg',
+    basis: 'per_liter_milk',
+    expectedYield: 0.005,
+    destination: 'product',
+    destinationProductId: 'prod-crema',
+    referenceValuePerUnit: 5,
+  };
+
+  it('genera el lote LM-SP con costo = valor de recupero y descuenta ese valor del principal', async () => {
+    const { service, savedBatches, getOrder } = makeService({
+      byproducts: [crema],
+      products: { 'prod-crema': { id: 'prod-crema', category: 'subproducto', unit: 'kg', defaultCost: '4165' } },
+    });
+
+    await service.close('order-1', {
+      actualOutputs: [
+        { productId: PRINCIPAL_PRODUCT_ID, quantity: 110, isPrincipal: true },
+        { productId: 'prod-crema', quantity: 6, isPrincipal: false },
+      ],
+    } as any);
+
+    const order = getOrder();
+    expect(order.costBreakdown.real.valorSubproductos).toBe('30.00');
+    expect(order.costBreakdown.real.costoNeto).toBe('10470.00');
+    expect(order.costBreakdown.real.costoPorKg).toBe('95.1818');
+
+    const lote = savedBatches.find((b) => b.productId === 'prod-crema');
+    expect(lote.code).toMatch(/^LM-SP-/);
+    expect(lote.initialQuantity).toBe('6');
+    // Costo propio = recupero ($5), NO el precio de la ficha ($4.165): es lo que se le descontó a la masa.
+    expect(lote.unitCost).toBe('5');
+    expect(lote.parentBatchId).toBe('prod-batch-1');
+  });
+
+  it('sin valor de recupero cargado, el lote queda sin costo propio (lo resuelve la ficha al usarlo)', async () => {
+    const { service, savedBatches } = makeService({
+      byproducts: [{ ...crema, referenceValuePerUnit: undefined }],
+      products: { 'prod-crema': { id: 'prod-crema', category: 'subproducto', unit: 'kg', defaultCost: '4165' } },
+    });
+    await service.close('order-1', {
+      actualOutputs: [
+        { productId: PRINCIPAL_PRODUCT_ID, quantity: 110, isPrincipal: true },
+        { productId: 'prod-crema', quantity: 6, isPrincipal: false },
+      ],
+    } as any);
+    const lote = savedBatches.find((b) => b.productId === 'prod-crema');
+    expect(lote.unitCost).toBeNull();
+  });
+});
+

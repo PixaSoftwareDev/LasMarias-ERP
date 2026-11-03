@@ -2,9 +2,11 @@ import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, UseGu
 import {
   closeProductionInputSchema,
   openProductionInputSchema,
+  saveProductionProgressInputSchema,
   updateProductionInputSchema,
   type CloseProductionInput,
   type OpenProductionInput,
+  type SaveProductionProgressInput,
   type UpdateProductionInput,
 } from '@lasmarias/shared-schemas';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -52,6 +54,17 @@ export class ProductionController {
   @Roles('admin', 'gerente', 'operario')
   remove(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.production.remove(id);
+  }
+
+  // Guardar lo que ya salió (la crema del día) sin cerrar la orden: la masa se pesa al día
+  // siguiente. No toca stock ni costo; la orden queda "en curso".
+  @Post(':id/progress')
+  @Roles('admin', 'gerente', 'operario')
+  saveProgress(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(saveProductionProgressInputSchema)) body: SaveProductionProgressInput,
+  ) {
+    return this.production.saveProgress(id, body);
   }
 
   @Post(':id/close')

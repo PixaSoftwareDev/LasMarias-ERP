@@ -29,8 +29,24 @@ export const salesOrderLineSchema = z.object({
   // que te dé la opción de elegir"). Ausente = automático, el más viejo primero.
   batchId: uuidSchema.optional(),
   batchCode: z.string().optional(),
+  // Crema a granel cobrada por % de grasa: queda congelado el % del análisis y el precio por
+  // kg de materia grasa con el que se calculó (unitPrice = fatBasePrice × fatPct ÷ 100), así
+  // el remito y una corrección posterior muestran de dónde salió el precio.
+  fatPct: z.number().optional(),
+  fatBasePrice: z.number().optional(),
 });
 export type SalesOrderLine = z.infer<typeof salesOrderLineSchema>;
+
+// % de grasa del análisis (0 < % ≤ 100) + precio por kg de materia grasa. Con esto el
+// backend calcula el precio por kg: base × % ÷ 100 (decimal exacto, 4 decimales).
+export const fatPricingSchema = z.object({
+  pct: z
+    .number()
+    .positive('Cargá el % de grasa del análisis')
+    .max(100, 'El % de grasa no puede pasar de 100'),
+  basePrice: z.number().nonnegative('El precio por kg de grasa no puede ser negativo'),
+});
+export type FatPricing = z.infer<typeof fatPricingSchema>;
 
 export const salesOrderSchema = z.object({
   id: uuidSchema,
@@ -69,6 +85,9 @@ export const createSalesOrderInputSchema = z.object({
         // Lote del que sale TODA la línea. Si se omite, sale del más viejo (y sigue con el
         // siguiente si no alcanza). Para repartir entre dos lotes elegidos: dos líneas.
         batchId: uuidSchema.optional(),
+        // Crema por % de grasa: si viene, el backend calcula unitPrice = basePrice × pct ÷ 100
+        // y pisa el unitPrice enviado (la cuenta vive en un solo lugar).
+        fat: fatPricingSchema.optional(),
       }),
     )
     .min(1, 'Cargá al menos un ítem'),
@@ -102,6 +121,9 @@ export type UpdateSalesOrderDateInput = z.infer<typeof updateSalesOrderDateInput
 // recalculan. El stock no se toca. `reason` queda anotado en la venta (ej: "Análisis 42% grasa").
 export const updateSalesOrderPricesInputSchema = z.object({
   unitPrices: z.array(z.number().nonnegative('El precio no puede ser negativo')).min(1),
+  // Una entrada por línea (mismo orden). Donde viene, el precio sale de basePrice × pct ÷ 100
+  // y pisa el de unitPrices; null = la línea se cobra a mano como siempre.
+  fat: z.array(fatPricingSchema.nullable()).optional(),
   reason: z.string().max(300).optional(),
 });
 export type UpdateSalesOrderPricesInput = z.infer<typeof updateSalesOrderPricesInputSchema>;

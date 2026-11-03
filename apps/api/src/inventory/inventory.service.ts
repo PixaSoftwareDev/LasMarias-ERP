@@ -135,6 +135,7 @@ export class InventoryService {
       .addSelect('p.sku', 'sku')
       .addSelect('p.unit', 'unit')
       .addSelect('p.category', 'category')
+      .addSelect('p.family', 'family')
       .addSelect('p.min_stock_level', 'minStockLevel')
       .addSelect('SUM(b.remaining_quantity)', 'totalQuantity')
       // Bultos en stock. NULL si ningún lote del producto los lleva contados: ahí la
@@ -157,6 +158,7 @@ export class InventoryService {
       .addGroupBy('p.sku')
       .addGroupBy('p.unit')
       .addGroupBy('p.category')
+      .addGroupBy('p.family')
       .addGroupBy('p.min_stock_level')
       .orderBy('p.name', 'ASC')
       .getRawMany();
@@ -175,6 +177,7 @@ export class InventoryService {
         sku: r.sku as string,
         unit: r.unit as string,
         category: (r.category as string) ?? undefined,
+        family: (r.family as string) ?? undefined,
         totalQuantity,
         totalBultos: r.totalBultos != null ? Number(r.totalBultos) : undefined,
         batchCount: Number(r.batchCount),
@@ -238,6 +241,7 @@ export class InventoryService {
         sku: p.sku,
         unit: p.unit,
         category: p.category,
+        family: p.family ?? undefined,
         totalQuantity: 0,
         batchCount: 0,
         nearestExpiration: undefined,

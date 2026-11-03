@@ -268,6 +268,11 @@ export default function ComprobantePage() {
                     <span className="block text-xs text-foreground-muted">
                       por {l.priceBasis === 'bulto' ? 'bulto' : l.unit}
                     </span>
+                    {l.fatPct != null && l.fatBasePrice != null && (
+                      <span className="block text-xs text-foreground-muted">
+                        {qty(l.fatPct)}% grasa × {money(l.fatBasePrice)} por kg de grasa
+                      </span>
+                    )}
                   </td>
                 )}
                 {verPrecios && <td className="py-2.5 text-right font-medium">{money(l.subtotal)}</td>}

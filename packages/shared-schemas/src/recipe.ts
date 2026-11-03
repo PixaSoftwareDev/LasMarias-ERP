@@ -41,7 +41,13 @@ export const recipeByproductSchema = z.object({
   destination: byproductDestinationSchema,
   destinationProductId: uuidSchema.optional(),
   referenceValuePerUnit: z.number().nonnegative().optional(),
-});
+})
+  // Destino "otro producto" sin producto elegido = subproducto que no va a ningún lado: al
+  // cerrar la orden no generaría lote y su valor de recupero no descontaría nada.
+  .refine((b) => b.destination !== 'product' || !!b.destinationProductId, {
+    message: 'Elegí a qué producto va el subproducto',
+    path: ['destinationProductId'],
+  });
 export type RecipeByproduct = z.infer<typeof recipeByproductSchema>;
 
 export const recipeVersionSchema = z.object({

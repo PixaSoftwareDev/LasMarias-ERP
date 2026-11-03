@@ -17,6 +17,7 @@ import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
 import { DobleCostoAviso, ReprocesoRows, SinCostoAviso, useStockSources, type InputRow } from '@/components/production/stock-inputs';
 import { OutputFields } from '@/components/production/output-fields';
+import { FormatOutputs, type FormatRow } from '@/components/production/format-outputs';
 
 interface MilkBatch {
   id: string;
@@ -30,8 +31,9 @@ interface MilkInputRow {
   liters: number;
 }
 
-// 'otro' = un subproducto en stock como origen (crema cruda → crema pasteurizada, suero → ricota).
-type SourceKind = 'leche' | 'masa' | 'otro';
+// 'otro' = un subproducto en stock como origen (crema cruda → crema pasteurizada).
+// 'suero' = sin lote de origen (ricota del suero de la prensa): la orden no consume stock.
+type SourceKind = 'leche' | 'masa' | 'otro' | 'suero';
 
 const SELECT_CLASS =
   'min-h-touch w-full rounded-md border border-border bg-surface-elevated px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-1';
@@ -47,6 +49,7 @@ function inputKind(mi: { batchCode: string; category?: string }): InputKind {
   return mi.batchCode.startsWith('LM-LC') ? 'leche' : 'masa';
 }
 function detectSource(milkInputs: { batchCode: string; category?: string }[]): SourceKind {
+  if (milkInputs.length === 0) return 'suero';
   const kinds = milkInputs.map(inputKind);
   if (kinds.includes('otro')) return 'otro';
   if (kinds.includes('masa') || kinds.includes('reproceso')) return 'masa';
@@ -87,7 +90,7 @@ export default function EditProductionPage() {
   // Lotes en stock que pueden ser origen: masa, queso para reproceso y subproductos (crema).
   const stock = useStockSources();
   const availableBatches: MilkBatch[] =
-    source === 'leche' ? milkBatchesFromReceptions : source === 'masa' ? stock.masa : stock.subproductos;
+    source === 'leche' ? milkBatchesFromReceptions : source === 'masa' ? stock.masa : source === 'otro' ? stock.subproductos : [];
 
   // Los lotes de la orden que NO están en la lista de disponibles se agregan igual, para
   // poder verlos y cambiarlos. Pero hay dos motivos muy distintos por los que un lote no
@@ -148,6 +151,8 @@ export default function EditProductionPage() {
   // lote nuevo los perdía (bug corregido oct 2026).
   const [quantities, setQuantities] = useState<Record<string, number | undefined>>({});
   const [bultos, setBultos] = useState<Record<string, number | undefined>>({});
+  // Otros formatos de la misma tachada (plancha + cilindro), precargados de la orden cerrada.
+  const [formatos, setFormatos] = useState<FormatRow[]>([]);
   const [warehouseId, setWarehouseId] = useState('');
   const [expectedYield, setExpectedYield] = useState('');
 
@@ -188,6 +193,9 @@ export default function EditProductionPage() {
           order.actualOutputs.filter((o) => o.bultos != null).map((o) => [o.productId, o.bultos]),
         ),
       );
+      setFormatos(
+        order.actualOutputs.filter((o) => o.isFormat).map((o) => ({ productId: o.productId, kg: o.quantity, bultos: o.bultos })),
+      );
       setWarehouseId(order.warehouseId ?? '');
       const std = order.costBreakdown?.estandar?.rendimiento;
       if (std) setExpectedYield(std);
@@ -203,7 +211,9 @@ export default function EditProductionPage() {
   }
 
   // Todo lo que consume la orden: los lotes del origen elegido + el reproceso (si es masa).
-  const allInputs = [...inputs, ...(source === 'masa' ? reprocesos : [])].filter((i) => i.batchId && i.liters > 0);
+  // Con suero no hay lotes: la orden va vacía a propósito.
+  const allInputs =
+    source === 'suero' ? [] : [...inputs, ...(source === 'masa' ? reprocesos : [])].filter((i) => i.batchId && i.liters > 0);
 
   const save = useMutation({
     mutationFn: () =>
@@ -217,12 +227,21 @@ export default function EditProductionPage() {
         // Solo si la orden estaba cerrada: mandar la producción real para recalcular el costo.
         ...(wasClosed
           ? {
-              actualOutputs: (orderQuery.data?.expectedOutputs ?? []).map((o) => ({
-                productId: o.productId,
-                quantity: Number(quantities[o.productId] ?? 0),
-                bultos: bultos[o.productId] != null ? Number(bultos[o.productId]) : undefined,
-                isPrincipal: o.isPrincipal,
-              })),
+              actualOutputs: [
+                ...(orderQuery.data?.expectedOutputs ?? []).map((o) => ({
+                  productId: o.productId,
+                  quantity: Number(quantities[o.productId] ?? 0),
+                  bultos: bultos[o.productId] != null ? Number(bultos[o.productId]) : undefined,
+                  isPrincipal: o.isPrincipal,
+                })),
+                ...formatosValidos.map((f) => ({
+                  productId: f.productId,
+                  quantity: Number(f.kg),
+                  bultos: f.bultos != null ? Number(f.bultos) : undefined,
+                  isPrincipal: false,
+                  isFormat: true,
+                })),
+              ],
               warehouseId: warehouseId || undefined,
               expectedYieldKgPerLiter:
                 expectedYield !== '' && Number(expectedYield) > 0 ? Number(expectedYield) : undefined,
@@ -287,8 +306,11 @@ export default function EditProductionPage() {
 
   const principalOutputs = (order.expectedOutputs ?? []).filter((o) => o.isPrincipal);
   const byproductOutputs = (order.expectedOutputs ?? []).filter((o) => !o.isPrincipal);
+  const formatosValidos = formatos.filter((f) => f.productId && f.kg != null && f.kg > 0);
+  const formatoIncompleto = formatos.some((f) => f.productId && !(f.kg != null && f.kg > 0));
   // Para una orden cerrada necesitamos al menos un kg de producto principal para poder recalcular.
-  const closedReady = !wasClosed || principalOutputs.some((o) => Number(quantities[o.productId] ?? 0) > 0);
+  const closedReady =
+    !wasClosed || (principalOutputs.some((o) => Number(quantities[o.productId] ?? 0) > 0) && !formatoIncompleto);
 
   return (
     <div className="flex flex-col gap-6">
@@ -356,14 +378,22 @@ export default function EditProductionPage() {
             label="¿Con qué se elabora?"
             htmlFor="source"
             required
-            hint="Primero leche → masa; después masa (más reproceso, si hay) → mozzarella o queso. La crema cruda se pasteuriza eligiendo «Crema u otro subproducto»."
+            hint="Primero leche → masa; después masa (más reproceso, si hay) → mozzarella o queso. La crema cruda se pasteuriza eligiendo «Crema u otro subproducto». La ricota va con «Suero»."
           >
             <select className={SELECT_CLASS} value={source} onChange={(e) => changeSource(e.target.value as SourceKind)}>
               <option value="leche">Leche cruda (paso 1: hacer masa)</option>
               <option value="masa">Masa en stock (paso 2: hacer mozzarella o queso)</option>
               <option value="otro">Crema u otro subproducto en stock (ej: pasteurizar crema)</option>
+              <option value="suero">Suero de la prensa, sin lote de origen (ej: ricota)</option>
             </select>
           </Field>
+
+          {source === 'suero' && (
+            <p className="rounded-md bg-info/10 px-3 py-2 text-sm text-info">
+              El suero que sale al prensar la masa no se lleva como stock, así que esta orden no consume ningún lote.
+              El costo del lote es solo el de los insumos de la receta; el suero vale $0.
+            </p>
+          )}
 
           {source === 'leche' && silos.length > 0 && (
             <Field label="Silo de origen" htmlFor="silo" hint="Filtro opcional. Dejá 'Todos los silos' para combinar leche de varios tanques.">
@@ -374,6 +404,7 @@ export default function EditProductionPage() {
             </Field>
           )}
 
+          {source !== 'suero' && (
           <div>
             <div className="mb-2 flex items-center justify-between">
               <p className="text-sm font-medium">
@@ -411,12 +442,13 @@ export default function EditProductionPage() {
               ))}
             </div>
           </div>
+          )}
 
           {source === 'masa' && (
             <ReprocesoRows rows={reprocesos} onChange={setReprocesos} options={reprocesoOptions} />
           )}
 
-          {source !== 'leche' && (
+          {source !== 'leche' && source !== 'suero' && (
             <SinCostoAviso
               batchIds={allInputs.map((i) => i.batchId)}
               options={[...stock.masa, ...stock.reproceso, ...stock.subproductos]}
@@ -465,6 +497,22 @@ export default function EditProductionPage() {
               />
             ))}
 
+            {principalOutputs[0] && (
+              <div className="flex flex-col gap-3 border-t border-border-subtle pt-4">
+                <p className="text-sm font-medium text-foreground">Otros formatos de la misma tachada (opcional)</p>
+                <p className="text-xs text-foreground-muted">Ej: planchas y también cilindros. Comparten el costo por kg.</p>
+                <FormatOutputs
+                  rows={formatos}
+                  onChange={setFormatos}
+                  products={productsQuery.data ?? []}
+                  principalProductId={principalOutputs[0].productId}
+                />
+                {formatoIncompleto && (
+                  <p className="text-xs font-medium text-amber-700">Cargá los kg del formato agregado (o quitalo).</p>
+                )}
+              </div>
+            )}
+
             {byproductOutputs.length > 0 && (
               <div className="flex flex-col gap-4 border-t border-border-subtle pt-4">
                 <p className="text-sm font-medium text-foreground">Subproductos (opcional)</p>
@@ -512,7 +560,7 @@ export default function EditProductionPage() {
         <Button
           onClick={() => save.mutate()}
           loading={save.isPending}
-          disabled={!recipeId || !startedDate || inputs.every((i) => !i.batchId) || !closedReady}
+          disabled={!recipeId || !startedDate || (source !== 'suero' && inputs.every((i) => !i.batchId)) || !closedReady}
         >
           Guardar cambios
         </Button>
