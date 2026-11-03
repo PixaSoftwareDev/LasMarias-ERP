@@ -124,7 +124,7 @@ export default function ConfigPage() {
                 <Input id="cfg-address" placeholder="Ruta 8 km 220" value={address} onChange={(e) => setAddress(e.target.value)} />
               </Field>
               <Field label="Localidad" htmlFor="cfg-city">
-                <Input id="cfg-city" placeholder="Pergamino, Buenos Aires" value={city} onChange={(e) => setCity(e.target.value)} />
+                <Input id="cfg-city" placeholder="General Gelly, Santa Fe" value={city} onChange={(e) => setCity(e.target.value)} />
               </Field>
               <Field label="Teléfono" htmlFor="cfg-phone">
                 <Input id="cfg-phone" placeholder="02477 12-3456" value={phone} onChange={(e) => setPhone(e.target.value)} />

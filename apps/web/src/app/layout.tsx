@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     default: 'Lácteos Las Marías',
     template: '%s · Lácteos Las Marías',
   },
-  description: 'Sistema de gestión integral — Industria Láctea Especializada (Pergamino, Argentina).',
+  description: 'Sistema de gestión integral — Industria Láctea Especializada (General Gelly, Santa Fe, Argentina).',
   applicationName: 'Lácteos Las Marías',
 };
 
