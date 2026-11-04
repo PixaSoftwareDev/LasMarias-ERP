@@ -264,6 +264,34 @@ export class ProductionService {
     if (movements.length > 0) await movementRepo.remove(movements);
   }
 
+  // Revierte los lotes de subproducto que "guardar lo de hoy" creó en una orden NO cerrada
+  // (sus entradas). Se usa al borrar la orden o al cambiarle la receta. Si el lote ya se usó
+  // (la crema ya se pasteurizó o se vendió), se rechaza: borrarlo rompería la trazabilidad.
+  private async revertProgressLots(
+    manager: import('typeorm').EntityManager,
+    order: ProductionOrderEntity,
+  ): Promise<void> {
+    const movementRepo = manager.getRepository(InventoryMovementEntity);
+    const batchRepo = manager.getRepository(BatchEntity);
+    const movements = await movementRepo.find({
+      where: { referenceType: 'production_order', referenceId: order.id, type: 'in' },
+    });
+    if (movements.length === 0) return;
+    await lockBatches(manager, movements.map((m) => m.batchId));
+    for (const m of movements) {
+      const batch = await batchRepo.findOne({ where: { id: m.batchId } });
+      if (batch) {
+        const consumido = Math.round((Number(batch.initialQuantity) - Number(batch.remainingQuantity)) * 1000) / 1000;
+        if (consumido > 0)
+          throw new BadRequestException(
+            `No se puede: el lote ${batch.code} (guardado sin cerrar en la orden ${order.code}) ya se usó en una venta u otra elaboración. Anulá primero ese movimiento.`,
+          );
+        await batchRepo.remove(batch);
+      }
+      await movementRepo.remove(m);
+    }
+  }
+
   // Firma de una orden para detectar la doble carga: misma receta + mismos lotes con los
   // mismos litros. La fecha no entra: cargar dos veces la elaboración del mismo día es
   // justamente el error que queremos frenar.
@@ -366,6 +394,13 @@ export class ProductionService {
       } else {
         // Abierta/en curso: la leche estaba reservada (descontada) → se devuelve al silo.
         await this.releaseReservedMilk(manager, order);
+        // Si cambia la RECETA, lo guardado sin cerrar (la crema) era de la receta anterior:
+        // se revierte su lote (con guard si ya se usó) y la orden vuelve a estar abierta.
+        if (input.recipeId !== order.recipeId) {
+          await this.revertProgressLots(manager, order);
+          order.actualOutputs = [];
+          if (order.status === 'in_progress') order.status = 'open';
+        }
       }
 
       // Reservar los nuevos lotes (descuenta el stock) y recalcular las salidas esperadas.
@@ -427,8 +462,13 @@ export class ProductionService {
   // Guarda lo que YA salió de una orden abierta, SIN cerrarla (pedido del dueño, 29/10/2026).
   // En la planta la crema se desnata el mismo día de la elaboración, pero la masa se pesa recién
   // al día siguiente: antes había que esperar a tener los kg de masa para poder anotar la crema.
-  // Acá se guardan solo las cantidades de los SUBPRODUCTOS y la orden pasa a "en curso". No mueve
-  // stock, no crea lotes y no corre la calculadora: todo eso sigue siendo al CERRAR (CLAUDE.md §5).
+  // Acá se guardan solo las cantidades de los SUBPRODUCTOS y la orden pasa a "en curso".
+  //
+  // Desde el pedido del dueño del 04/11/2026, el subproducto guardado SÍ entra al stock en el
+  // acto: genera su lote LM-SP (con costo = valor de recupero, igual que al cerrar), porque la
+  // crema se pasteuriza EL MISMO DÍA que se desnata y necesita elegirse como origen de la orden
+  // de crema antes de que la masa se cierre. El CIERRE después REUSA ese lote (no crea otro).
+  // La calculadora no se toca: el costo de la orden se sigue calculando solo al cerrar.
   async saveProgress(orderId: string, input: SaveProductionProgressInput): Promise<ProductionOrder> {
     return this.dataSource.transaction(async (manager) => {
       // Mismo candado que cerrar/editar: si llega un cierre a la vez, se serializan.
@@ -436,7 +476,7 @@ export class ProductionService {
       const repo = manager.getRepository(ProductionOrderEntity);
       const order = await repo.findOne({
         where: { id: orderId },
-        relations: { recipe: true, operator: true },
+        relations: { recipe: true, operator: true, recipeVersion: true },
       });
       if (!order) throw new NotFoundException(`Orden ${orderId} no encontrada`);
       if (order.status === 'closed')
@@ -446,9 +486,10 @@ export class ProductionService {
       if (order.status === 'cancelled') throw new ForbiddenException(`La orden ${order.code} fue cancelada`);
 
       // Solo subproductos: los kg del producto (y de sus otros formatos) se cargan al cerrar,
-      // que es cuando se calcula el costo y se generan los lotes.
+      // que es cuando se calcula el costo y se generan los lotes de producto.
       const esperados = new Map(order.expectedOutputs.map((o) => [o.productId, o]));
-      const outputs: ProductionOutput[] = [];
+      const principalProductId = order.expectedOutputs.find((o) => o.isPrincipal)?.productId;
+      const deseados: { productId: string; quantity: number; bultos?: number }[] = [];
       for (const o of input.outputs) {
         const esperado = esperados.get(o.productId);
         if (!esperado || esperado.isPrincipal)
@@ -456,6 +497,122 @@ export class ProductionService {
             'Acá se guardan solo los subproductos (por ejemplo, la crema). Los kg del producto se cargan al cerrar la orden.',
           );
         if (o.quantity <= 0) continue;
+        deseados.push(o);
+      }
+
+      // Lotes que un "guardar lo de hoy" anterior ya creó para esta orden (sus entradas).
+      const movementRepo = manager.getRepository(InventoryMovementEntity);
+      const batchRepo = manager.getRepository(BatchEntity);
+      const previos = await movementRepo.find({
+        where: { referenceType: 'production_order', referenceId: order.id, type: 'in' },
+      });
+      // CANDADO sobre esos lotes: una venta puede estar consumiéndolos en este momento.
+      await lockBatches(manager, previos.map((m) => m.batchId));
+      const lotePorProducto = new Map<string, { mov: InventoryMovementEntity; batch: BatchEntity }>();
+      for (const m of previos) {
+        const b = await batchRepo.findOne({ where: { id: m.batchId } });
+        if (b && m.productId) lotePorProducto.set(m.productId, { mov: m, batch: b });
+      }
+
+      // Numeración de los lotes LM-SP de esta orden: sigue después del mayor ya creado.
+      const base = order.code.replace('OP-', '');
+      let nextIdx = 1;
+      for (const { batch } of lotePorProducto.values()) {
+        const m = batch.code.match(/-(\d+)$/);
+        if (m) nextIdx = Math.max(nextIdx, Number(m[1]) + 1);
+      }
+
+      const round3 = (n: number) => Math.round(n * 1000) / 1000;
+      const outputs: ProductionOutput[] = [];
+      for (const o of deseados) {
+        const esperado = esperados.get(o.productId)!;
+        // Subproducto "sin producto propio" (receta vieja con el productId del principal):
+        // solo descuenta costo al cerrar, no tiene lote. Se anota la cantidad y listo.
+        if (o.productId === principalProductId) {
+          outputs.push({
+            productId: o.productId,
+            productName: esperado.productName,
+            quantity: o.quantity,
+            unit: esperado.unit,
+            bultos: o.bultos,
+            isPrincipal: false,
+          });
+          continue;
+        }
+
+        const previo = lotePorProducto.get(o.productId);
+        if (previo) {
+          // Re-guardado del mismo día: se AJUSTA el lote existente (no se duplica). Si ya se
+          // usó parte (ej: la crema ya se pasteurizó), no se puede bajar de lo consumido.
+          lotePorProducto.delete(o.productId);
+          const { mov, batch } = previo;
+          const consumido = round3(Number(batch.initialQuantity) - Number(batch.remainingQuantity));
+          if (o.quantity < consumido)
+            throw new BadRequestException(
+              `Del lote ${batch.code} ya se usaron ${consumido} ${batch.unit} (venta u otra elaboración): no podés dejarlo en ${o.quantity}.`,
+            );
+          const bultosConsumidos = (batch.initialBultos ?? 0) - (batch.remainingBultos ?? 0);
+          batch.initialQuantity = String(o.quantity);
+          batch.remainingQuantity = String(round3(o.quantity - consumido));
+          batch.initialBultos = o.bultos ?? null;
+          batch.remainingBultos = o.bultos != null ? Math.max(o.bultos - bultosConsumidos, 0) : null;
+          batch.status = Number(batch.remainingQuantity) > 0 ? 'activo' : 'agotado';
+          await batchRepo.save(batch);
+          mov.quantity = String(o.quantity);
+          mov.bultos = o.bultos ?? null;
+          await movementRepo.save(mov);
+          outputs.push({
+            productId: o.productId,
+            productName: esperado.productName,
+            quantity: o.quantity,
+            unit: esperado.unit,
+            bultos: o.bultos,
+            isPrincipal: false,
+            batchId: batch.id,
+            batchCode: batch.code,
+          });
+          continue;
+        }
+
+        // Lote nuevo: mismo código, costo y regla que el que generaría el cierre (sección 4b
+        // de applyClose). Costo del lote = valor de recupero de la receta: lo que se le va a
+        // descontar al principal, así la crema entra a la orden siguiente con el MISMO $/kg.
+        const recupero = order.recipeVersion?.byproducts?.find(
+          (b) => b.destinationProductId === o.productId,
+        )?.referenceValuePerUnit;
+        const batch = await batchRepo.save(
+          batchRepo.create({
+            code: `LM-SP-${base}-${nextIdx}`,
+            productId: o.productId,
+            productionDate: order.startedAt,
+            initialQuantity: String(o.quantity),
+            remainingQuantity: String(o.quantity),
+            initialBultos: o.bultos ?? null,
+            remainingBultos: o.bultos ?? null,
+            unit: esperado.unit,
+            status: 'activo',
+            // Todavía no existe el lote de producto principal: cuelga del lote de origen.
+            // Al cerrar, applyClose lo recuelga del lote de producto (trazabilidad completa).
+            parentBatchId: order.milkInputs[0]?.batchId ?? null,
+            unitCost: recupero != null ? String(recupero) : null,
+            notes: `Subproducto de ${order.code} (guardado sin cerrar la orden)`,
+          }),
+        );
+        nextIdx += 1;
+        await movementRepo.save(
+          movementRepo.create({
+            batchId: batch.id,
+            productId: o.productId,
+            type: 'in',
+            reason: 'production',
+            quantity: String(o.quantity),
+            unit: esperado.unit,
+            bultos: o.bultos ?? null,
+            referenceType: 'production_order',
+            referenceId: order.id,
+            createdById: order.operatorId,
+          }),
+        );
         outputs.push({
           productId: o.productId,
           productName: esperado.productName,
@@ -463,7 +620,21 @@ export class ProductionService {
           unit: esperado.unit,
           bultos: o.bultos,
           isPrincipal: false,
+          batchId: batch.id,
+          batchCode: batch.code,
         });
+      }
+
+      // Lo que estaba guardado y ahora quedó en 0 (o afuera): se revierte, salvo que ya se
+      // haya usado — ahí se pide corregir la cantidad en vez de borrarla.
+      for (const { mov, batch } of lotePorProducto.values()) {
+        const consumido = round3(Number(batch.initialQuantity) - Number(batch.remainingQuantity));
+        if (consumido > 0)
+          throw new BadRequestException(
+            `Del lote ${batch.code} ya se usaron ${consumido} ${batch.unit} (venta u otra elaboración): no podés borrarlo. Corregí la cantidad en vez de dejarla en 0.`,
+          );
+        await movementRepo.remove(mov);
+        await batchRepo.remove(batch);
       }
 
       order.actualOutputs = outputs;
@@ -707,6 +878,21 @@ export class ProductionService {
         variance = computeElaborationVariance(estandarCost, realCost);
       }
 
+      // --- 3b. Lotes de subproducto que "guardar lo de hoy" YA creó para esta orden: el
+      // cierre los REUSA (ajusta cantidades) en vez de crear otros. Hay que buscarlos ANTES
+      // de crear los lotes de producto: hasta acá, las únicas ENTRADAS de la orden son esas.
+      const movementRepo = manager.getRepository(InventoryMovementEntity);
+      const batchRepo = manager.getRepository(BatchEntity);
+      const entradasPrevias = await movementRepo.find({
+        where: { referenceType: 'production_order', referenceId: order.id, type: 'in' },
+      });
+      await lockBatches(manager, entradasPrevias.map((m) => m.batchId));
+      const lotePrevioPorProducto = new Map<string, { mov: InventoryMovementEntity; batch: BatchEntity }>();
+      for (const m of entradasPrevias) {
+        const b = await batchRepo.findOne({ where: { id: m.batchId } });
+        if (b && m.productId) lotePrevioPorProducto.set(m.productId, { mov: m, batch: b });
+      }
+
       // --- 4. Crear el lote de producto, sellando su costo/kg (encadena los dos pasos) ---
       // Bultos del producto principal (bolsas de masa / cajas de queso). Opcional: si el
       // operario no los cargó, el lote queda sin bultos y todo funciona igual que antes.
@@ -786,10 +972,45 @@ export class ProductionService {
 
       // --- 4b. Subproductos con producto del catálogo (ej. suero) → generan su lote de stock ---
       const byproductBatch = new Map<string, { id: string; code: string }>();
+      const round3bp = (n: number) => Math.round(n * 1000) / 1000;
+      // La numeración sigue después del mayor lote LM-SP ya creado por "guardar lo de hoy".
       let bpIdx = 0;
+      for (const { batch } of lotePrevioPorProducto.values()) {
+        const m = batch.code.match(/-(\d+)$/);
+        if (m) bpIdx = Math.max(bpIdx, Number(m[1]));
+      }
       for (const o of input.actualOutputs) {
         if (o.isPrincipal || o.isFormat || o.quantity <= 0) continue;
         if (o.productId === principalProductId) continue; // sin producto propio: solo descuenta costo
+
+        // Lote ya creado por "guardar lo de hoy": se ajusta a la cantidad final y se recuelga
+        // del lote de producto. Pudo haberse consumido en el medio (la crema ya pasteurizada):
+        // no se puede cerrar con menos de lo que ya salió de él.
+        const previo = lotePrevioPorProducto.get(o.productId);
+        if (previo) {
+          lotePrevioPorProducto.delete(o.productId);
+          const { mov, batch } = previo;
+          const consumido = round3bp(Number(batch.initialQuantity) - Number(batch.remainingQuantity));
+          if (o.quantity < consumido)
+            throw new BadRequestException(
+              `Del lote ${batch.code} ya se usaron ${consumido} ${batch.unit} (venta u otra elaboración): no podés cerrar la orden con ${o.quantity}.`,
+            );
+          const bultosConsumidos = (batch.initialBultos ?? 0) - (batch.remainingBultos ?? 0);
+          batch.initialQuantity = String(o.quantity);
+          batch.remainingQuantity = String(round3bp(o.quantity - consumido));
+          batch.initialBultos = o.bultos ?? null;
+          batch.remainingBultos = o.bultos != null ? Math.max(o.bultos - bultosConsumidos, 0) : null;
+          batch.status = Number(batch.remainingQuantity) > 0 ? 'activo' : 'agotado';
+          batch.parentBatchId = productionBatch.id;
+          if (input.warehouseId) batch.warehouseId = input.warehouseId;
+          await batchRepo.save(batch);
+          mov.quantity = String(o.quantity);
+          mov.bultos = o.bultos ?? null;
+          await movementRepo.save(mov);
+          byproductBatch.set(o.productId, { id: batch.id, code: batch.code });
+          continue;
+        }
+
         const bpProduct = await manager.getRepository(ProductEntity).findOne({ where: { id: o.productId } });
         if (!bpProduct) continue;
         bpIdx += 1;
@@ -831,6 +1052,18 @@ export class ProductionService {
           }),
         );
         byproductBatch.set(o.productId, { id: bpBatch.id, code: bpBatch.code });
+      }
+
+      // Lo guardado sin cerrar que al final quedó en 0: se revierte, salvo que ya se haya
+      // usado — ahí el cierre se frena y pide corregir la cantidad en vez de borrarla.
+      for (const { mov, batch } of lotePrevioPorProducto.values()) {
+        const consumido = round3bp(Number(batch.initialQuantity) - Number(batch.remainingQuantity));
+        if (consumido > 0)
+          throw new BadRequestException(
+            `Cargaste 0 de ${batch.code}, pero de ese lote ya se usaron ${consumido} ${batch.unit} (venta u otra elaboración). Corregí la cantidad en vez de dejarla en 0.`,
+          );
+        await movementRepo.remove(mov);
+        await batchRepo.remove(batch);
       }
 
       // --- 4c. Descontar insumos del stock por FEFO. No bloquea si falta (solo descuenta lo
@@ -934,6 +1167,9 @@ export class ProductionService {
       if (!order) throw new NotFoundException(`Orden de producción ${id} no encontrada`);
 
       if (order.status === 'open' || order.status === 'in_progress') {
+        // Si "guardar lo de hoy" ya creó lotes de subproducto (la crema), se revierten
+        // primero (con guard: si ya se usaron, no se puede borrar la orden).
+        await this.revertProgressLots(manager, order);
         // La leche reservada (descontada) vuelve al silo.
         await this.releaseReservedMilk(manager, order);
         await orderRepo.remove(order);

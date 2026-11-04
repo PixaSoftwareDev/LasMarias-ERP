@@ -50,8 +50,8 @@ function makeService(fx: Fixture) {
     }),
   };
   const movementRepo = {
-    find: jest.fn(({ where: { referenceId } }: any) =>
-      Promise.resolve(fx.movements.filter((m) => m.referenceId === referenceId)),
+    find: jest.fn(({ where: { referenceId, type } }: any) =>
+      Promise.resolve(fx.movements.filter((m) => m.referenceId === referenceId && (!type || m.type === type))),
     ),
     remove: jest.fn((ms: any[]) => {
       removedMovements.push(...ms);

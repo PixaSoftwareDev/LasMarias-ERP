@@ -117,7 +117,9 @@ export default function CloseProductionPage({ params }: { params: { id: string }
   });
 
   // Guardar lo que salió HOY sin cerrar: la crema se desnata el día de la elaboración y la
-  // masa se pesa al día siguiente (pedido del dueño, 29/10/2026). No genera lotes ni costo.
+  // masa se pesa al día siguiente (pedido del dueño, 29/10/2026). Desde el 04/11/2026 el
+  // subproducto guardado entra al stock en el acto (genera su lote), así la crema se puede
+  // pasteurizar el mismo día. El costo de la orden se sigue calculando al cerrar.
   const guardarAvance = useMutation({
     mutationFn: () =>
       productionApi.saveProgress(id, {
@@ -130,7 +132,12 @@ export default function CloseProductionPage({ params }: { params: { id: string }
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ['production-orders'] });
       queryClient.invalidateQueries({ queryKey: ['production-order', id] });
-      toast.success(`Guardado en la orden ${r.code}. Queda en curso: cuando peses el producto, cerrala.`);
+      // Lo guardado ya está en el stock: refrescar las pantallas que lo muestran.
+      queryClient.invalidateQueries({ queryKey: ['stock'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      queryClient.invalidateQueries({ queryKey: ['consumable-batches'] });
+      queryClient.invalidateQueries({ queryKey: ['product-batches'] });
+      toast.success(`Guardado en la orden ${r.code}: lo de hoy ya está en el stock. Cuando peses el producto, cerrala.`);
       router.push('/produccion');
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar'),
@@ -322,11 +329,11 @@ export default function CloseProductionPage({ params }: { params: { id: string }
               />
             ))}
 
-            {/* ¿La crema sale hoy y el producto se pesa mañana? Se guarda lo de hoy y la orden
-                queda en curso; al día siguiente solo se cargan los kg y se cierra. */}
+            {/* ¿La crema sale hoy y el producto se pesa mañana? Se guarda lo de hoy, entra al
+                stock en el acto (se puede pasteurizar ya) y la orden queda en curso. */}
             <div className="flex flex-col gap-3 rounded-lg border border-border-subtle bg-surface-subtle p-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-foreground-muted">
-                ¿Hoy sacaste la crema y el producto lo pesás mañana? Guardá lo que salió hoy sin cerrar la orden: queda <span className="font-medium text-foreground">en curso</span> y mañana cargás solo los kg.
+                ¿Hoy sacaste la crema y el producto lo pesás mañana? Guardá lo que salió hoy sin cerrar la orden: <span className="font-medium text-foreground">entra al stock ya</span> (la podés usar en otra elaboración) y mañana cargás solo los kg.
               </p>
               <Button
                 variant="secondary"
