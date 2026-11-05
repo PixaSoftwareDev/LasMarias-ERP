@@ -21,6 +21,7 @@ import {
   registerPaymentInputSchema,
   updateSalesOrderDateInputSchema,
   updateSalesOrderPricesInputSchema,
+  updateSalesOrderTransportInputSchema,
   upsertPriceListInputSchema,
   type ClientType,
   type CreateReturnInput,
@@ -28,6 +29,7 @@ import {
   type RegisterPaymentInput,
   type UpdateSalesOrderDateInput,
   type UpdateSalesOrderPricesInput,
+  type UpdateSalesOrderTransportInput,
   type UpsertPriceListInput,
 } from '@lasmarias/shared-schemas';
 import { z } from 'zod';
@@ -81,6 +83,16 @@ export class SalesController {
     @Body(new ZodValidationPipe(updateSalesOrderDateInputSchema)) body: UpdateSalesOrderDateInput,
   ) {
     return this.sales.updateOrderDate(id, body);
+  }
+
+  // Cargar o corregir el transporte de un despacho ya hecho (sale en el remito).
+  @Patch('orders/:id/transport')
+  @Roles('admin', 'gerente', 'vendedor')
+  updateOrderTransport(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(updateSalesOrderTransportInputSchema)) body: UpdateSalesOrderTransportInput,
+  ) {
+    return this.sales.updateOrderTransport(id, body);
   }
 
   // Corregir los precios de un despacho ya cargado (crema por % de grasa del análisis).

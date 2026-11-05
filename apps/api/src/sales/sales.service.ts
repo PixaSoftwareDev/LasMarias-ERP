@@ -11,6 +11,7 @@ import type {
   SalesOrder,
   SalesOrderLine,
   UpdateSalesOrderDateInput,
+  UpdateSalesOrderTransportInput,
   UpdateSalesOrderPricesInput,
 } from '@lasmarias/shared-schemas';
 import { SalesOrderEntity } from './sales-order.entity';
@@ -203,6 +204,7 @@ export class SalesService {
         lines,
         total: total.round(2).toString(),
         notes: input.notes ?? null,
+        transport: input.transport || null,
         documentType: 'remito',
         paymentMode,
         currency: orderCurrency,
@@ -537,6 +539,20 @@ export class SalesService {
   // remitos de varios días juntos y quedaron todos con la fecha de carga). Mueve con ella el
   // cargo de cuenta corriente (manteniendo el plazo del cliente) y el cobro al contado, que
   // nacen con la misma fecha del despacho. Los cobros posteriores y el stock no se tocan.
+  // Solo cambia el dato del transporte: no toca stock, importes ni cuenta corriente.
+  async updateOrderTransport(id: string, input: UpdateSalesOrderTransportInput): Promise<SalesOrder> {
+    return this.dataSource.transaction(async (manager) => {
+      await lockRow(manager, 'sales_orders', id);
+      const orderRepo = manager.getRepository(SalesOrderEntity);
+      const order = await orderRepo.findOne({ where: { id } });
+      if (!order) throw new NotFoundException(`Despacho ${id} no encontrado`);
+      order.transport = input.transport || null;
+      await orderRepo.save(order);
+      const reloaded = await orderRepo.findOne({ where: { id }, relations: { client: true } });
+      return this.orderToDto(reloaded!);
+    });
+  }
+
   async updateOrderDate(id: string, input: UpdateSalesOrderDateInput): Promise<SalesOrder> {
     const nuevaFecha = new Date(input.dispatchedAt);
     assertNotFuture(nuevaFecha);
@@ -749,6 +765,7 @@ export class SalesService {
       lines: o.lines,
       total: Number(o.total),
       notes: o.notes ?? undefined,
+      transport: o.transport ?? undefined,
       documentType: 'remito',
       paymentMode: o.paymentMode === 'contado' || o.paymentMode === 'cuenta_corriente' ? o.paymentMode : undefined,
       currency: (o.currency as Currency) ?? 'ARS',

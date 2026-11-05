@@ -185,6 +185,7 @@ export default function SalesPage() {
   const [clientId, setClientId] = useState('');
   const [lines, setLines] = useState<Line[]>([{ ...EMPTY_LINE }]);
   const [notes, setNotes] = useState('');
+  const [transport, setTransport] = useState('');
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('contado');
   // Fecha real del despacho: por defecto hoy, editable para pasar remitos de otros días.
   const [dispatchDate, setDispatchDate] = useState(todayLocal());
@@ -300,6 +301,7 @@ export default function SalesPage() {
     setClientId('');
     setLines([{ ...EMPTY_LINE }]);
     setNotes('');
+    setTransport('');
     setPaymentMode('contado');
     setDispatchDate(todayLocal());
   }
@@ -318,6 +320,7 @@ export default function SalesPage() {
           ...(l.fatPct && l.fatBasePrice != null && { fat: { pct: l.fatPct, basePrice: l.fatBasePrice } }),
         })),
         notes: notes || undefined,
+        transport: transport.trim() || undefined,
         paymentMode,
         // Mediodía local: evita que el huso horario corra la fecha al día anterior/siguiente.
         dispatchedAt: new Date(`${dispatchDate}T12:00:00`).toISOString(),
@@ -743,8 +746,15 @@ export default function SalesPage() {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle>Notas</CardTitle></CardHeader>
-            <CardContent>
+            <CardHeader><CardTitle>Transporte y notas</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              <Input
+                aria-label="Transporte"
+                maxLength={200}
+                placeholder="Transporte o patente (opcional, sale en el remito)"
+                value={transport}
+                onChange={(e) => setTransport(e.target.value)}
+              />
               <textarea
                 aria-label="Notas"
                 className="w-full rounded-md border border-border bg-surface-elevated px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600"
