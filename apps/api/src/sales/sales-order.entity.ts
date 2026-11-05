@@ -31,6 +31,10 @@ export class SalesOrderEntity extends BaseEntity {
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
 
+  // Transporte que lleva la mercadería (nombre, patente...). Texto libre: sale en el remito.
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  transport!: string | null;
+
   // Tipo de comprobante. Por ahora siempre 'remito' (interno, NO fiscal).
   @Column({ type: 'varchar', length: 16, name: 'document_type', default: 'remito' })
   documentType!: string;

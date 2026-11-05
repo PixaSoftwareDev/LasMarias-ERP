@@ -57,6 +57,8 @@ export const salesOrderSchema = z.object({
   lines: z.array(salesOrderLineSchema),
   total: z.number().nonnegative(),
   notes: z.string().max(1000).optional(),
+  // Transporte que lleva la mercadería (nombre, patente, lo que sea): sale en el remito.
+  transport: z.string().max(200).optional(),
   documentType: z.enum(['remito']).default('remito'), // remito interno (NO fiscal)
   // Forma de pago con la que se registró la venta (informativo). Nullable en ventas viejas.
   paymentMode: z.enum(['contado', 'cuenta_corriente']).nullable().optional(),
@@ -92,6 +94,8 @@ export const createSalesOrderInputSchema = z.object({
     )
     .min(1, 'Cargá al menos un ítem'),
   notes: z.string().max(1000).optional(),
+  // Texto libre, opcional (pedido del dueño, 05/11/2026). Se puede cargar o corregir después.
+  transport: z.string().trim().max(200).optional(),
   // Condición de pago de este despacho. Si se omite, se usa la del cliente
   // (paymentTermDays). Si es contado, además se registra el cobro → saldo 0.
   paymentMode: z.enum(['contado', 'cuenta_corriente']).optional(),
@@ -114,6 +118,12 @@ export const updateSalesOrderDateInputSchema = z.object({
   dispatchedAt: isoDateTimeSchema,
 });
 export type UpdateSalesOrderDateInput = z.infer<typeof updateSalesOrderDateInputSchema>;
+
+// Cargar o corregir el transporte de una venta ya hecha. Vacío = la venta queda sin transporte.
+export const updateSalesOrderTransportInputSchema = z.object({
+  transport: z.string().trim().max(200),
+});
+export type UpdateSalesOrderTransportInput = z.infer<typeof updateSalesOrderTransportInputSchema>;
 
 // Corregir el precio de una venta ya cargada. Caso típico: la crema a granel se cobra según el
 // % de grasa del análisis del comprador, que llega días después del retiro. Un precio por línea

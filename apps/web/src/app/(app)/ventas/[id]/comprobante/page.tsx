@@ -3,10 +3,12 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { ArrowLeft, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { ApiError } from '@/lib/api-client';
 import { clientsApi, salesApi, settingsApi } from '@/features/api';
 import { formatMoney as money, formatQuantity as qty, formatDate } from '@/lib/utils';
 import type { SalesOrder } from '@lasmarias/shared-schemas';
@@ -62,6 +64,8 @@ export default function ComprobantePage() {
   const params = useParams<{ id: string }>();
   const [opciones, setOpciones] = useState<OpcionesRemito>(OPCIONES_POR_DEFECTO);
   const [fecha, setFecha] = useState<string>('');
+  const [transporte, setTransporte] = useState<string>('');
+  const queryClient = useQueryClient();
 
   // Preferencias guardadas del navegador (si están rotas, seguimos con las por defecto).
   useEffect(() => {
@@ -98,6 +102,23 @@ export default function ComprobantePage() {
   useEffect(() => {
     if (dispatchedAt) setFecha(aInputDate(new Date(dispatchedAt)));
   }, [dispatchedAt]);
+
+  // Transporte: a diferencia de la fecha del papel, este dato queda guardado en la venta.
+  const transporteGuardado = orderQuery.data?.transport ?? '';
+  useEffect(() => {
+    setTransporte(transporteGuardado);
+  }, [transporteGuardado]);
+
+  const guardarTransporte = useMutation({
+    mutationFn: (valor: string) => salesApi.updateOrderTransport(params.id, { transport: valor }),
+    onSuccess: (o) => {
+      queryClient.setQueryData(['sales-order', params.id], o);
+      toast.success('Transporte guardado en la venta.');
+    },
+    onError: (e) => {
+      toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar el transporte. Probá de nuevo.');
+    },
+  });
 
   if (orderQuery.isLoading) {
     return (
@@ -176,6 +197,31 @@ export default function ComprobantePage() {
         </div>
 
         <div className="mt-4">
+          <label htmlFor="transporte-remito" className="text-sm font-medium">
+            Transporte
+          </label>
+          <input
+            id="transporte-remito"
+            type="text"
+            maxLength={200}
+            placeholder="Nombre del transporte, patente..."
+            value={transporte}
+            onChange={(e) => setTransporte(e.target.value)}
+            onBlur={() => {
+              const valor = transporte.trim();
+              if (valor !== transporteGuardado) guardarTransporte.mutate(valor);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+            }}
+            className="mt-1 block h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm"
+          />
+          <p className="mt-1 text-xs text-foreground-muted">
+            Queda guardado en la venta. Si lo dejás vacío, no sale en el papel.
+          </p>
+        </div>
+
+        <div className="mt-4">
           <label htmlFor="fecha-remito" className="text-sm font-medium">
             Fecha del remito
           </label>
@@ -219,6 +265,12 @@ export default function ComprobantePage() {
                 {client?.taxId && <p className="text-sm text-foreground-muted">CUIT: {client.taxId}</p>}
                 {client?.address && <p className="text-sm text-foreground-muted">{client.address}</p>}
                 {client?.city && <p className="text-sm text-foreground-muted">{client.city}</p>}
+              </>
+            )}
+            {transporte.trim() && (
+              <>
+                <p className="mt-3 text-xs uppercase tracking-wide text-foreground-muted">Transporte</p>
+                <p className="font-medium">{transporte.trim()}</p>
               </>
             )}
           </div>

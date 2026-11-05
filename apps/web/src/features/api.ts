@@ -12,6 +12,7 @@ import type {
   CreateSalesOrderInput,
   UpdateSalesOrderDateInput,
   UpdateSalesOrderPricesInput,
+  UpdateSalesOrderTransportInput,
   UpdateClientInput,
   UpdateProductInput,
   InventoryMovement,
@@ -374,6 +375,9 @@ export const salesApi = {
   // Corregir la fecha de una venta ya cargada (mueve también su cargo/cobro en cuenta).
   updateOrderDate: (id: string, input: UpdateSalesOrderDateInput) =>
     api<SalesOrder>(`/api/sales/orders/${id}/date`, { method: 'PATCH', body: input }),
+  // Cargar o corregir el transporte de una venta ya hecha (sale en el remito).
+  updateOrderTransport: (id: string, input: UpdateSalesOrderTransportInput) =>
+    api<SalesOrder>(`/api/sales/orders/${id}/transport`, { method: 'PATCH', body: input }),
   // Corregir los precios de una venta ya cargada (crema por % de grasa del análisis).
   updateOrderPrices: (id: string, input: UpdateSalesOrderPricesInput) =>
     api<SalesOrder>(`/api/sales/orders/${id}/prices`, { method: 'PATCH', body: input }),

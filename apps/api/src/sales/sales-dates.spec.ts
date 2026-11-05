@@ -90,6 +90,64 @@ function makeService(opts: { order?: any; accountMovements?: any[]; paymentTermD
 
 const linea = { productId: 'masa', quantity: 10, unitPrice: 1000 };
 
+// TRANSPORTE (pedido del dueño, 05/11/2026): texto libre que sale en el remito. Es solo un dato:
+// cargarlo o corregirlo no mueve stock, importes ni cuenta corriente.
+describe('SalesService — transporte del remito', () => {
+  it('al crear la venta guarda el transporte', async () => {
+    const { service } = makeService({ paymentTermDays: null });
+
+    const o = await service.createOrder(
+      { clientId: 'cli-1', lines: [linea], transport: 'Transportes Pérez AB123CD' } as any,
+      'user-1',
+    );
+
+    expect(o.transport).toBe('Transportes Pérez AB123CD');
+  });
+
+  it('sin transporte, la venta se crea igual y el dato queda vacío', async () => {
+    const { service, savedOrders } = makeService({ paymentTermDays: null });
+
+    const o = await service.createOrder({ clientId: 'cli-1', lines: [linea] } as any, 'user-1');
+
+    expect(o.transport).toBeUndefined();
+    expect(savedOrders[0].transport).toBeNull();
+  });
+
+  function ventaHecha(transport: string | null) {
+    return {
+      id: 'so-1',
+      code: 'DSP-000001',
+      clientId: 'cli-1',
+      client: { businessName: 'Cliente SA' },
+      dispatchedAt: new Date('2026-11-05T12:00:00Z'),
+      lines: [],
+      total: '10000',
+      transport,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+  }
+
+  it('se puede cargar en una venta ya hecha, sin tocar el importe ni la cuenta corriente', async () => {
+    const { service, savedAccount } = makeService({ order: ventaHecha(null) });
+
+    const o = await service.updateOrderTransport('so-1', { transport: 'Camión ABC123' });
+
+    expect(o.transport).toBe('Camión ABC123');
+    expect(o.total).toBe(10000);
+    expect(savedAccount).toHaveLength(0);
+  });
+
+  it('dejarlo vacío borra el transporte', async () => {
+    const { service, savedOrders } = makeService({ order: ventaHecha('Camión ABC123') });
+
+    const o = await service.updateOrderTransport('so-1', { transport: '' });
+
+    expect(savedOrders[0].transport).toBeNull();
+    expect(o.transport).toBeUndefined();
+  });
+});
+
 describe('SalesService.createOrder — fecha real del despacho', () => {
   it('carga atrasada: el despacho, el cargo y su vencimiento salen de la fecha elegida', async () => {
     const { service, savedAccount } = makeService({ paymentTermDays: 30 });
