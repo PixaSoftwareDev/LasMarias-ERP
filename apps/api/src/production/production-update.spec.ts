@@ -86,8 +86,8 @@ function makeService(existingOrder: any, milkBatches: any[]) {
     referenceId: existingOrder.id,
   }));
   const movementRepo = {
-    find: jest.fn(({ where: { referenceId } }: any) =>
-      Promise.resolve(orderMovements.filter((m) => m.referenceId === referenceId)),
+    find: jest.fn(({ where: { referenceId, type } }: any) =>
+      Promise.resolve(orderMovements.filter((m) => m.referenceId === referenceId && (!type || m.type === type))),
     ),
     create: jest.fn().mockImplementation((m) => ({ ...m })),
     save: jest.fn().mockResolvedValue(undefined),

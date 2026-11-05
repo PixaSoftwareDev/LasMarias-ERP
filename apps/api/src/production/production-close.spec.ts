@@ -37,6 +37,9 @@ function makeService(
     sinLote?: boolean;
     // Subproductos de la versión de receta (por defecto ninguno).
     byproducts?: any[];
+    // Lotes de subproducto que "guardar lo de hoy" ya creó (con su movimiento de entrada):
+    // el cierre debe REUSARLOS en vez de crear otros.
+    previos?: { batch: any; mov: any }[];
   } = {},
 ) {
   // Producto de cada input (para valuar masa a precio manual). Por defecto la leche es
@@ -98,25 +101,40 @@ function makeService(
   };
 
   const savedBatches: any[] = [];
+  const removedBatches: any[] = [];
   const savedMovements: any[] = [];
+  const removedMovements: any[] = [];
   let savedOrder: any = null;
+
+  const previos = opts.previos ?? [];
+  const previoById: Record<string, any> = Object.fromEntries(previos.map((p) => [p.batch.id, p.batch]));
 
   const batchRepo = {
     findOneByOrFail: jest.fn().mockResolvedValue(milkBatch),
-    // Último lote producido del producto de origen (respaldo de costo).
-    findOne: jest.fn().mockResolvedValue(opts.lastProducedLot ?? null),
+    // Por id: lote de "guardar lo de hoy". Si no, el último lote producido (respaldo de costo).
+    findOne: jest.fn(({ where }: any) => Promise.resolve(previoById[where?.id] ?? opts.lastProducedLot ?? null)),
     create: jest.fn().mockImplementation((b) => ({ ...b, id: 'prod-batch-1' })),
     save: jest.fn().mockImplementation((b) => {
       savedBatches.push(b);
+      return Promise.resolve(b);
+    }),
+    remove: jest.fn().mockImplementation((b) => {
+      removedBatches.push(b);
       return Promise.resolve(b);
     }),
     // Lotes de insumo para el descuento FEFO (vacío por defecto → no descuenta).
     find: jest.fn().mockResolvedValue(opts.insumoLots ?? []),
   };
   const movementRepo = {
+    // Entradas previas de la orden = lotes creados por "guardar lo de hoy".
+    find: jest.fn().mockResolvedValue(previos.map((p) => p.mov)),
     create: jest.fn().mockImplementation((m) => m),
     save: jest.fn().mockImplementation((m) => {
       savedMovements.push(m);
+      return Promise.resolve(m);
+    }),
+    remove: jest.fn().mockImplementation((m) => {
+      removedMovements.push(m);
       return Promise.resolve(m);
     }),
     // Detección de retrocompat: ¿la orden ya registró la salida de leche al reservar? Por defecto
@@ -162,7 +180,16 @@ function makeService(
     exchangeRates as any,
   );
 
-  return { service, milkBatch, savedBatches, savedMovements, exchangeRates, getOrder: () => savedOrder };
+  return {
+    service,
+    milkBatch,
+    savedBatches,
+    removedBatches,
+    savedMovements,
+    removedMovements,
+    exchangeRates,
+    getOrder: () => savedOrder,
+  };
 }
 
 describe('ProductionService.close', () => {
@@ -717,6 +744,130 @@ describe('ProductionService.close — subproducto con producto destino (crema de
     } as any);
     const lote = savedBatches.find((b) => b.productId === 'prod-crema');
     expect(lote.unitCost).toBeNull();
+  });
+});
+
+// "Guardar lo de hoy" ya creó el lote de crema (entró al stock el mismo día, pedido del dueño
+// 04/11/2026). El cierre tiene que REUSAR ese lote: ajustarlo a la cantidad final, recolgarlo
+// del lote de producto y NO crear un duplicado. Y la calculadora da exactamente lo mismo que
+// si el lote lo creara el cierre: crema 6 kg × $5 = $30 de recupero → neto $10.470.
+describe('ProductionService.close — reusa el lote creado por "guardar lo de hoy"', () => {
+  const crema = {
+    name: 'CREMA CRUDA',
+    unit: 'kg',
+    basis: 'per_liter_milk',
+    expectedYield: 0.005,
+    destination: 'product',
+    destinationProductId: 'prod-crema',
+    referenceValuePerUnit: 5,
+  };
+  const products = { 'prod-crema': { id: 'prod-crema', category: 'subproducto', unit: 'kg', defaultCost: '4165' } };
+
+  function previoDeCrema(over: Partial<any> = {}) {
+    const batch = {
+      id: 'sp-1',
+      code: 'LM-SP-20260530-0001-1',
+      productId: 'prod-crema',
+      initialQuantity: '5',
+      remainingQuantity: '5',
+      initialBultos: null,
+      remainingBultos: null,
+      unit: 'kg',
+      status: 'activo',
+      unitCost: '5',
+      ...over,
+    };
+    const mov = { id: 'mov-sp-1', batchId: 'sp-1', productId: 'prod-crema', type: 'in', quantity: '5', bultos: null };
+    return { batch, mov };
+  }
+
+  it('ajusta el lote existente a la cantidad final, lo recuelga del producto y no crea otro', async () => {
+    const p = previoDeCrema();
+    const { service, savedBatches, savedMovements, getOrder } = makeService({
+      byproducts: [crema],
+      products,
+      previos: [p],
+    });
+
+    await service.close('order-1', {
+      actualOutputs: [
+        { productId: PRINCIPAL_PRODUCT_ID, quantity: 110, isPrincipal: true },
+        { productId: 'prod-crema', quantity: 6, isPrincipal: false },
+      ],
+    } as any);
+
+    // Un solo lote de crema: el MISMO sp-1, ajustado de 5 a 6 kg y colgado del lote de masa.
+    const lotesDeCrema = savedBatches.filter((b) => b.productId === 'prod-crema');
+    expect(lotesDeCrema).toHaveLength(1);
+    expect(lotesDeCrema[0].id).toBe('sp-1');
+    expect(lotesDeCrema[0].initialQuantity).toBe('6');
+    expect(lotesDeCrema[0].remainingQuantity).toBe('6');
+    expect(lotesDeCrema[0].parentBatchId).toBe('prod-batch-1');
+    // Su movimiento de entrada queda en la cantidad final.
+    const entradaCrema = savedMovements.find((m) => m.id === 'mov-sp-1');
+    expect(entradaCrema.quantity).toBe('6');
+
+    // La calculadora da lo mismo que si el lote lo creara el cierre (verificable a mano):
+    // leche $10.000 + fermento $500 − crema 6×$5 = $10.470 → $95,1818/kg sobre 110 kg.
+    const order = getOrder();
+    expect(order.costBreakdown.real.valorSubproductos).toBe('30.00');
+    expect(order.costBreakdown.real.costoNeto).toBe('10470.00');
+    expect(order.costBreakdown.real.costoPorKg).toBe('95.1818');
+    // Y la salida de la orden apunta al lote reusado.
+    const salida = order.actualOutputs.find((o: any) => o.productId === 'prod-crema');
+    expect(salida.batchCode).toBe('LM-SP-20260530-0001-1');
+  });
+
+  it('si la crema ya se usó en parte, el cierre respeta lo consumido (y rechaza quedarse corto)', async () => {
+    // De 5 kg guardados ya se pasteurizaron 3 (quedan 2). Cerrar con 6 → quedan 6 − 3 = 3.
+    const p = previoDeCrema({ remainingQuantity: '2' });
+    const { service, savedBatches } = makeService({ byproducts: [crema], products, previos: [p] });
+
+    await service.close('order-1', {
+      actualOutputs: [
+        { productId: PRINCIPAL_PRODUCT_ID, quantity: 110, isPrincipal: true },
+        { productId: 'prod-crema', quantity: 6, isPrincipal: false },
+      ],
+    } as any);
+    const lote = savedBatches.find((b) => b.productId === 'prod-crema');
+    expect(lote.remainingQuantity).toBe('3');
+
+    // Cerrar con MENOS de lo ya consumido se rechaza con aviso claro.
+    const p2 = previoDeCrema({ remainingQuantity: '2' });
+    const otra = makeService({ byproducts: [crema], products, previos: [p2] });
+    await expect(
+      otra.service.close('order-1', {
+        actualOutputs: [
+          { productId: PRINCIPAL_PRODUCT_ID, quantity: 110, isPrincipal: true },
+          { productId: 'prod-crema', quantity: 2, isPrincipal: false },
+        ],
+      } as any),
+    ).rejects.toThrow(/ya se usaron 3/);
+  });
+
+  it('cerrar con la crema en 0 borra el lote guardado (si está intacto); si ya se usó, se frena', async () => {
+    const p = previoDeCrema();
+    const { service, removedBatches, removedMovements } = makeService({ byproducts: [crema], products, previos: [p] });
+
+    await service.close('order-1', {
+      actualOutputs: [
+        { productId: PRINCIPAL_PRODUCT_ID, quantity: 110, isPrincipal: true },
+        { productId: 'prod-crema', quantity: 0, isPrincipal: false },
+      ],
+    } as any);
+    expect(removedBatches.map((b) => b.id)).toEqual(['sp-1']);
+    expect(removedMovements.map((m) => m.id)).toEqual(['mov-sp-1']);
+
+    const p2 = previoDeCrema({ remainingQuantity: '2' });
+    const otra = makeService({ byproducts: [crema], products, previos: [p2] });
+    await expect(
+      otra.service.close('order-1', {
+        actualOutputs: [
+          { productId: PRINCIPAL_PRODUCT_ID, quantity: 110, isPrincipal: true },
+          { productId: 'prod-crema', quantity: 0, isPrincipal: false },
+        ],
+      } as any),
+    ).rejects.toThrow(/Cargaste 0/);
   });
 });
 
