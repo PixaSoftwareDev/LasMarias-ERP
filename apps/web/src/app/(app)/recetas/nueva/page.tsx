@@ -94,6 +94,10 @@ export default function NewRecipePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const products = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
+  // Recetas existentes, para "copiar de otra receta" (pedido del dueño 06/11/2026: cheddar x5 y
+  // x10, mozzarella plancha y cilindro tienen la misma fórmula y la cargaba dos veces a mano).
+  const recipes = useQuery({ queryKey: ['recipes'], queryFn: () => recipesApi.list() });
+  const [copiedFrom, setCopiedFrom] = useState('');
   // Última cotización cargada, para mostrar el equivalente en pesos al cargar costos en USD/EUR.
   const latestRate = useQuery({ queryKey: ['exchange-rate-latest'], queryFn: () => exchangeRatesApi.latest() });
   const form = useForm<FormValues>({
@@ -202,6 +206,46 @@ export default function NewRecipePage() {
     create.mutateAsync(v);
   }
 
+  // Vuelca la versión vigente de otra receta (insumos, subproductos y datos avanzados) en el
+  // formulario. El producto y el nombre NO se copian: son justamente lo que cambia. Todo queda
+  // editable, así se corrige lo distinto (ej. el balde de 5 kg en vez del de 10).
+  function copyFromRecipe(id: string) {
+    setCopiedFrom(id);
+    const src = recipes.data?.find((r) => r.id === id);
+    const v = src?.activeVersion;
+    if (!src || !v) return;
+    form.setValue('baselineFatPercent', v.baselineFatPercent);
+    form.setValue('baselineProteinPercent', v.baselineProteinPercent);
+    form.setValue('standardWastePercent', v.standardWastePercent);
+    setIngredients(
+      v.ingredients.map((i) => {
+        // El monto en su moneda original (si se cargó en USD/EUR), no el $ congelado.
+        const original = i.originalUnitCost ?? i.unitCost;
+        return {
+          productId: i.productId,
+          quantity: String(i.quantity),
+          unit: i.unit,
+          basis: i.basis,
+          unitCost: original == null ? '' : String(original),
+          currency: i.currency ?? 'ARS',
+        };
+      }),
+    );
+    setByproducts(
+      v.byproducts.map((b) => ({
+        name: b.name,
+        expectedYield: String(b.expectedYield),
+        unit: b.unit,
+        basis: b.basis,
+        destination: b.destination,
+        destinationProductId: b.destinationProductId ?? '',
+        referenceValuePerUnit: b.referenceValuePerUnit == null ? '' : String(b.referenceValuePerUnit),
+      })),
+    );
+    setTouched(new Set());
+    toast.success(`Copiado de ${src.name}. Cambiá lo que sea distinto, por ejemplo el envase.`);
+  }
+
   function updateIngredient(idx: number, patch: Partial<IngredientRow>) {
     setIngredients((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
@@ -249,6 +293,21 @@ export default function NewRecipePage() {
             </Field>
             <Field label="Descripción" htmlFor="description" className="sm:col-span-2">
               <Input {...form.register('description')} />
+            </Field>
+            <Field
+              label="Copiar de otra receta (opcional)"
+              htmlFor="copyFrom"
+              className="sm:col-span-2"
+              hint="Si es la misma fórmula que otro producto (ej. otro tamaño de balde), elegila: se cargan sus insumos y subproductos y cambiás solo lo distinto."
+            >
+              <select id="copyFrom" className={selectClass} value={copiedFrom} onChange={(e) => copyFromRecipe(e.target.value)}>
+                <option value="">Elegí una receta para copiar</option>
+                {recipes.data
+                  ?.filter((r) => r.isActive && r.activeVersion)
+                  .map((r) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+              </select>
             </Field>
           </CardContent>
         </Card>

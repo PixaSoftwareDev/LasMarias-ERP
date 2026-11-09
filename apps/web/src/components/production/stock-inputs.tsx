@@ -13,6 +13,8 @@ import { insumosDuplicados } from '@/lib/doble-costo';
 // (audios 20-21/10/2026):
 //   - masa → mozzarella, sumando REPROCESO: queso que no se vendió y vuelve a fundirse.
 //   - crema cruda → crema pasteurizada (y suero → ricota): un subproducto como origen.
+// Y (audio 06/11/2026) el cheddar en salsa: masa + crema + ricota en la misma orden. Por eso
+// los "extras" que acompañan a la masa son queso (reproceso) y también subproductos.
 // El backend ya acepta cualquier lote como origen: descuenta su stock y lo costea con el
 // costo del lote (o el de referencia de la ficha si el lote no tiene, ej. stock inicial).
 
@@ -24,6 +26,7 @@ export interface StockOption {
   productId: string;
   unitCost: number | null;
   entryCost?: ConsumableBatch['entryCost'];
+  category?: string;
 }
 
 export interface InputRow {
@@ -50,19 +53,30 @@ export function useStockSources() {
       productId: b.productId,
       unitCost: b.unitCost,
       entryCost: b.entryCost,
+      category: b.category,
     });
     const all = batchesQuery.data ?? [];
     return {
       masa: all.filter((b) => b.category === 'intermedio').map(toOption),
       reproceso: all.filter((b) => b.category === 'queso').map(toOption),
       subproductos: all.filter((b) => b.category === 'subproducto').map(toOption),
+      // Lo que puede sumarse a la masa: queso para reproceso, crema, ricota, etc.
+      extras: all.filter((b) => b.category === 'queso' || b.category === 'subproducto').map(toOption),
       products: productsQuery.data ?? [],
     };
   }, [batchesQuery.data, productsQuery.data]);
 }
 
-// Filas de "reproceso": lotes de queso que vuelven a la hilada junto con la masa. Se
-// descuentan solos del stock y su costo entra al lote nuevo, así el rendimiento da el real.
+// Filas de "extras" que se suman a la masa: queso que vuelve a la hilada (reproceso) o
+// subproductos en stock (crema, ricota: cheddar en salsa). Se descuentan solos del stock y
+// su costo entra al lote nuevo, así el costo y el rendimiento dan los reales.
+// Grupos del selector. Un lote sin categoría (el de una orden vieja que ya no está en stock)
+// cae en "Queso para reproceso", que es lo único que había antes.
+const EXTRA_GROUPS: { label: string; match: (category?: string) => boolean }[] = [
+  { label: 'Queso para reproceso', match: (c) => c !== 'subproducto' },
+  { label: 'Crema, ricota y otros subproductos', match: (c) => c === 'subproducto' },
+];
+
 export function ReprocesoRows({
   rows,
   onChange,
@@ -76,43 +90,51 @@ export function ReprocesoRows({
     <div>
       <div className="mb-2 flex items-center justify-between gap-2">
         <div>
-          <p className="text-sm font-medium">Reproceso (opcional)</p>
-          <p className="text-sm text-foreground-muted">Queso en stock que vuelve a fundirse con esta masa.</p>
+          <p className="text-sm font-medium">Reproceso, crema, ricota u otro (opcional)</p>
+          <p className="text-sm text-foreground-muted">Lo que se suma a la masa: queso que vuelve a fundirse, crema, ricota…</p>
         </div>
         <Button type="button" size="sm" variant="secondary" onClick={() => onChange([...rows, { ...EMPTY_ROW }])}>
-          <Plus className="h-4 w-4" /> Agregar reproceso
+          <Plus className="h-4 w-4" /> Agregar
         </Button>
       </div>
       {rows.length > 0 && options.length === 0 && (
-        <p className="rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">No hay queso en stock para reprocesar.</p>
+        <p className="rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">No hay queso, crema ni ricota en stock.</p>
       )}
       <div className="space-y-2">
         {rows.map((row, idx) => (
           <div key={idx} className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr),140px,auto]">
             <select
-              aria-label="Lote de queso para reprocesar"
+              aria-label="Lote a sumar a la masa"
               className="min-h-touch rounded-md border border-border px-3"
               value={row.batchId}
               onChange={(e) => onChange(rows.map((r, i) => (i === idx ? { ...r, batchId: e.target.value } : r)))}
             >
-              <option value="">Elegí el queso a reprocesar</option>
-              {options.map((b) => (
-                <option key={b.id} value={b.id}>{b.label}</option>
-              ))}
+              <option value="">Elegí qué se suma</option>
+              {EXTRA_GROUPS.map((g) => {
+                const opts = options.filter((b) => g.match(b.category));
+                if (opts.length === 0) return null;
+                return (
+                  <optgroup key={g.label} label={g.label}>
+                    {opts.map((b) => (
+                      <option key={b.id} value={b.id}>{b.label}</option>
+                    ))}
+                  </optgroup>
+                );
+              })}
             </select>
             <Input
               type="number"
               inputMode="decimal"
               step="0.1"
               placeholder="Kg"
-              aria-label="Kg de reproceso"
+              aria-label="Kg a sumar"
               value={row.liters || ''}
               onChange={(e) => onChange(rows.map((r, i) => (i === idx ? { ...r, liters: Number(e.target.value) } : r)))}
             />
             <button
               type="button"
               onClick={() => onChange(rows.filter((_, i) => i !== idx))}
-              aria-label="Quitar reproceso"
+              aria-label="Quitar"
               className="flex min-h-touch min-w-touch items-center justify-center rounded-md text-foreground-muted transition-colors hover:bg-red-50 hover:text-red-600"
             >
               <Trash2 className="h-4 w-4" aria-hidden="true" />
