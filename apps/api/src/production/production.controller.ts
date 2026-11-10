@@ -67,6 +67,20 @@ export class ProductionController {
     return this.production.saveProgress(id, body);
   }
 
+  // Recalcular con la receta corregida: GET = vista previa (no guarda), POST = aplicar.
+  // Solo cambia el costo de la orden y de sus lotes; stock, ventas y kg no se tocan.
+  @Get(':id/recalculate')
+  @Roles('admin', 'gerente')
+  recalcPreview(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.production.recalcPreview(id);
+  }
+
+  @Post(':id/recalculate')
+  @Roles('admin', 'gerente')
+  recalcApply(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.production.recalcApply(id);
+  }
+
   @Post(':id/close')
   @Roles('admin', 'gerente', 'operario')
   close(

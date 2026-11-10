@@ -18,6 +18,7 @@ import type {
   InventoryMovement,
   Product,
   ProductionOrder,
+  ProductionRecalcPreview,
   Recipe,
   RecipeSimulationResult,
   RecipeVersion,
@@ -219,6 +220,9 @@ export const productionApi = {
   ) => api<ProductionOrder>(`/api/production-orders/${id}`, { method: 'PATCH', body: input }),
   // Guardar lo que ya salió (los subproductos del día) sin cerrar la orden: la crema se saca
   // hoy y la masa se pesa mañana. La orden queda "en curso" y al cerrar ya viene cargada.
+  // Recalcular con la receta corregida: vista previa (no guarda) y aplicar (solo cambia el costo).
+  recalcPreview: (id: string) => api<ProductionRecalcPreview>(`/api/production-orders/${id}/recalculate`),
+  recalcApply: (id: string) => api<ProductionOrder>(`/api/production-orders/${id}/recalculate`, { method: 'POST' }),
   saveProgress: (id: string, input: { outputs: { productId: string; quantity: number; bultos?: number }[]; notes?: string }) =>
     api<ProductionOrder>(`/api/production-orders/${id}/progress`, { method: 'POST', body: input }),
   close: (id: string, input: { actualOutputs: { productId: string; quantity: number; bultos?: number; isPrincipal: boolean; isFormat?: boolean }[]; warehouseId?: string; expectedYieldKgPerLiter?: number; notes?: string }) =>

@@ -17,6 +17,7 @@ import { ApiError } from '@/lib/api-client';
 import { type ProductionOrder } from '@lasmarias/shared-schemas';
 import { OutputFields } from '@/components/production/output-fields';
 import { FormatOutputs, type FormatRow } from '@/components/production/format-outputs';
+import { RecalcularReceta } from '@/components/production/recalcular-receta';
 
 // Pantalla de cierre de orden (CLAUDE.md §4.3): se cargan las salidas reales por producto
 // y al cerrar se muestra el panel de costo. El cierre es definitivo.
@@ -202,6 +203,8 @@ export default function CloseProductionPage({ params }: { params: { id: string }
             Esta orden no tiene desglose de costo disponible.
           </Card>
         )}
+
+        <RecalcularReceta order={closedOrder} onDone={setClosedOrder} />
 
         {/* Entrada natural a la trazabilidad: seguir cada lote producido. */}
         {closedOrder.actualOutputs.some((o) => o.batchId) && (

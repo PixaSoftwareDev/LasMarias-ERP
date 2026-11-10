@@ -15,6 +15,7 @@ import type {
   ProductionMilkInput,
   ProductionOrder,
   ProductionOutput,
+  ProductionRecalcPreview,
   SaveProductionProgressInput,
   UpdateProductionInput,
 } from '@lasmarias/shared-schemas';
@@ -25,12 +26,8 @@ import { ProductEntity } from '../products/product.entity';
 import { RecipeEntity, RecipeVersionEntity } from '../recipes/recipe.entity';
 import { InventoryMovementEntity } from '../inventory/inventory-movement.entity';
 import { computeByproducts, computeYield } from '../recipes/yield-calculator';
-import {
-  computeElaborationCost,
-  computeElaborationVariance,
-  type IngredientCost,
-  type PrimaryInput,
-} from './elaboration-cost';
+import type { CostDetailLine, IngredientCost, PrimaryInput } from './elaboration-cost';
+import { computeOrderCost, expectedYieldFromBreakdown, primaryInputsFromBreakdown } from './order-cost';
 import { UsersService } from '../users/users.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import { bultosForQuantity } from '../inventory/bultos-allocation';
@@ -795,88 +792,29 @@ export class ProductionService {
       // si está en USD/EUR). El congelado en la versión de receta queda solo de respaldo,
       // para insumos sin precio en la ficha o sin producto asociado. Así el administrativo
       // actualiza un precio en UN solo lugar y las próximas elaboraciones lo toman solas.
-      const ingredients: IngredientCost[] = [];
-      for (const ing of version.ingredients) {
-        let unitCost = String(ing.unitCost ?? 0);
-        if (ing.productId) {
-          const ingProduct = await manager
-            .getRepository(ProductEntity)
-            .findOne({ where: { id: ing.productId } });
-          if (ingProduct && ingProduct.defaultCost != null && String(ingProduct.defaultCost) !== '') {
-            const currency = (ingProduct.defaultCostCurrency ?? 'ARS') as Currency;
-            unitCost =
-              currency === 'ARS'
-                ? String(ingProduct.defaultCost)
-                : String(await this.exchangeRates.toArs(ingProduct.defaultCost, currency, order.startedAt));
-          }
-        }
-        ingredients.push({
-          name: ing.productName,
-          quantity: String(ing.quantity),
-          unitCost,
-          basis: ing.basis,
-        });
-      }
+      const ingredients = await this.priceIngredients(manager, version, order.startedAt);
 
       // Cantidades reales de subproductos (por nombre, desde lo que carga el operario).
-      const byproductActuals: Record<string, number> = {};
-      for (const o of input.actualOutputs) {
-        if (!o.isPrincipal && !o.isFormat) {
-          // Solo entre los subproductos: una receta vieja podía dejar el subproducto con el
-          // mismo productId que el principal, y entonces se tomaba el nombre equivocado.
-          const exp = order.expectedOutputs.find((e) => !e.isPrincipal && e.productId === o.productId);
-          if (exp?.productName) byproductActuals[exp.productName] = o.quantity;
-        }
-      }
-
-      const realCost = computeElaborationCost({
-        mode: 'real',
-        litros: String(totalLiters),
-        productKg: kgProductoTotal,
-        primaryInputs,
-        ingredients,
-        byproducts: version.byproducts.map((bp) => ({
-          name: bp.name,
-          quantity: String(byproductActuals[bp.name] ?? 0),
-          valorRecupero: bp.referenceValuePerUnit != null ? String(bp.referenceValuePerUnit) : null,
-        })),
-      });
+      const byproductActuals = this.byproductActuals(order, input.actualOutputs);
 
       // Estándar: solo si hay rendimiento esperado. Se carga a mano AL CERRAR (pedido #12);
       // si la receta vieja todavía traía uno, se usa como fallback. Sin esperado → solo real.
       const expectedYield =
         input.expectedYieldKgPerLiter ??
         (version.baseYieldKgPerLiter != null ? Number(version.baseYieldKgPerLiter) : null);
-      let estandarCost: ReturnType<typeof computeElaborationCost> | null = null;
-      let variance: ReturnType<typeof computeElaborationVariance> | null = null;
-      if (expectedYield != null) {
-        const expectedYieldKg = computeYield({
-          liters: totalLiters,
-          baseYieldKgPerLiter: expectedYield,
-          yieldSensitivityFat: Number(version.yieldSensitivityFat),
-          yieldSensitivityProtein: Number(version.yieldSensitivityProtein),
-          baselineFatPercent: Number(version.baselineFatPercent),
-          baselineProteinPercent: Number(version.baselineProteinPercent),
-          standardWastePercent: Number(version.standardWastePercent),
-        }).expectedYieldKg;
-        const expectedByproducts = computeByproducts(totalLiters, expectedYieldKg, version.byproducts);
-        estandarCost = computeElaborationCost({
-          mode: 'estandar',
-          litros: String(totalLiters),
-          productKg: String(expectedYieldKg),
-          primaryInputs,
-          ingredients,
-          byproducts: version.byproducts.map((bp) => {
-            const exp = expectedByproducts.find((e) => e.name === bp.name);
-            return {
-              name: bp.name,
-              quantity: String(exp?.expectedQuantity ?? 0),
-              valorRecupero: bp.referenceValuePerUnit != null ? String(bp.referenceValuePerUnit) : null,
-            };
-          }),
-        });
-        variance = computeElaborationVariance(estandarCost, realCost);
-      }
+      const {
+        real: realCost,
+        estandar: estandarCost,
+        variance,
+      } = computeOrderCost({
+        totalLiters,
+        kgProductoTotal,
+        primaryInputs,
+        ingredients,
+        version,
+        byproductActuals,
+        expectedYield,
+      });
 
       // --- 3b. Lotes de subproducto que "guardar lo de hoy" YA creó para esta orden: el
       // cierre los REUSA (ajusta cantidades) en vez de crear otros. Hay que buscarlos ANTES
@@ -1146,7 +1084,8 @@ export class ProductionService {
       order.totalPrincipalKg = kgProductoTotal;
       order.totalCost = realCost.costoNeto;
       order.unitCost = realCost.costoPorKg;
-      order.costBreakdown = { real: realCost, estandar: estandarCost, variance };
+      // El rendimiento esperado se guarda para poder recalcular más adelante con la receta corregida.
+      order.costBreakdown = { real: realCost, estandar: estandarCost, variance, expectedYieldKgPerLiter: expectedYield };
       if (input.notes) order.notes = input.notes;
       await manager.getRepository(ProductionOrderEntity).save(order);
   }
@@ -1237,6 +1176,193 @@ export class ProductionService {
 
     if (movements.length > 0) await movementRepo.remove(movements);
     if (producedBatchIds.length > 0) await batchRepo.delete(producedBatchIds);
+  }
+
+  // Precio de cada insumo de la receta. Vive en la FICHA del producto (Datos maestros →
+  // Productos): se usa el precio vigente de la ficha (convertido a $ del día de elaboración si
+  // está en USD/EUR). El congelado en la versión de receta queda solo de respaldo, para insumos
+  // sin precio en la ficha o sin producto asociado. Así el administrativo actualiza un precio en
+  // UN solo lugar y las próximas elaboraciones lo toman solas.
+  // `previos` (al recalcular): el insumo que ya estaba en el cierre conserva el precio con que se
+  // cerró, así lo único que cambia es la receta y no los precios de hoy.
+  private async priceIngredients(
+    manager: import('typeorm').EntityManager,
+    version: RecipeVersionEntity,
+    startedAt: Date,
+    previos: CostDetailLine[] = [],
+  ): Promise<IngredientCost[]> {
+    const ingredients: IngredientCost[] = [];
+    for (const ing of version.ingredients) {
+      let unitCost = String(ing.unitCost ?? 0);
+      const previo = previos.find((p) => p.name === ing.productName);
+      if (previo) {
+        unitCost = previo.unitCost;
+      } else if (ing.productId) {
+        const ingProduct = await manager.getRepository(ProductEntity).findOne({ where: { id: ing.productId } });
+        if (ingProduct && ingProduct.defaultCost != null && String(ingProduct.defaultCost) !== '') {
+          const currency = (ingProduct.defaultCostCurrency ?? 'ARS') as Currency;
+          unitCost =
+            currency === 'ARS'
+              ? String(ingProduct.defaultCost)
+              : String(await this.exchangeRates.toArs(ingProduct.defaultCost, currency, startedAt));
+        }
+      }
+      ingredients.push({ name: ing.productName, quantity: String(ing.quantity), unitCost, basis: ing.basis });
+    }
+    return ingredients;
+  }
+
+  // Kg reales de cada subproducto, por nombre (lo que carga el operario al cerrar).
+  private byproductActuals(order: ProductionOrderEntity, actualOutputs: CloseProductionInput['actualOutputs']) {
+    const actuals: Record<string, number> = {};
+    for (const o of actualOutputs) {
+      if (o.isPrincipal || o.isFormat) continue;
+      // Solo entre los subproductos: una receta vieja podía dejar el subproducto con el
+      // mismo productId que el principal, y entonces se tomaba el nombre equivocado.
+      const exp = order.expectedOutputs.find((e) => !e.isPrincipal && e.productId === o.productId);
+      if (exp?.productName) actuals[exp.productName] = o.quantity;
+    }
+    return actuals;
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // Recalcular con la receta corregida (pedido del dueño, 09/11/2026).
+  // Una orden cerrada queda atada a la versión de receta con que se hizo (así un cambio de
+  // receta no altera lotes viejos, CLAUDE.md §5.4). Pero si esa versión tenía un ERROR de
+  // carga y el producto ya se vendió, editar/borrar está bloqueado. Esto vuelve a correr la
+  // calculadora con la versión ACTIVA de la receta, con los mismos lotes de origen, los mismos
+  // kg y los mismos precios del cierre. Cambia SOLO el costo (orden + sus lotes); stock,
+  // ventas y kg quedan igual. La rentabilidad se corrige sola (lee el costo del lote).
+  // No se permite si lo producido ya entró a otra elaboración (habría que recalcularla también).
+  // ---------------------------------------------------------------------------------------
+  async recalcPreview(id: string): Promise<ProductionRecalcPreview> {
+    return this.dataSource.transaction(async (manager) => (await this.recalcPlan(manager, id)).preview);
+  }
+
+  async recalcApply(id: string): Promise<ProductionOrder> {
+    return this.dataSource.transaction(async (manager) => {
+      await lockRow(manager, 'production_orders', id);
+      const { preview, order, version, cost } = await this.recalcPlan(manager, id);
+      if (preview.bloqueo) throw new BadRequestException(preview.bloqueo);
+
+      const productBatchIds = order.actualOutputs.filter((o) => o.isPrincipal || o.isFormat).map((o) => o.batchId);
+      await lockBatches(manager, order.actualOutputs.map((o) => o.batchId).filter(Boolean) as string[]);
+      const batchRepo = manager.getRepository(BatchEntity);
+      for (const batchId of productBatchIds) {
+        if (batchId) await batchRepo.update({ id: batchId }, { unitCost: cost.real.costoPorKg });
+      }
+      // Lotes de subproducto: su costo es el valor de recupero de la receta (igual que al cerrar).
+      for (const o of order.actualOutputs) {
+        if (o.isPrincipal || o.isFormat || !o.batchId) continue;
+        const bp = version.byproducts.find((b) => b.destinationProductId === o.productId);
+        if (bp?.referenceValuePerUnit != null)
+          await batchRepo.update({ id: o.batchId }, { unitCost: String(bp.referenceValuePerUnit) });
+      }
+
+      await manager.getRepository(ProductionOrderEntity).update(
+        { id },
+        {
+          recipeVersionId: version.id,
+          totalCost: cost.real.costoNeto,
+          unitCost: cost.real.costoPorKg,
+          costBreakdown: {
+            real: cost.real,
+            estandar: cost.estandar,
+            variance: cost.variance,
+            expectedYieldKgPerLiter: cost.expectedYield,
+          },
+        },
+      );
+
+      const reloaded = await manager.getRepository(ProductionOrderEntity).findOne({
+        where: { id },
+        relations: { recipe: true, operator: true },
+      });
+      return this.toDto(reloaded!);
+    });
+  }
+
+  private async recalcPlan(manager: import('typeorm').EntityManager, id: string) {
+    const order = await manager.getRepository(ProductionOrderEntity).findOne({
+      where: { id },
+      relations: { recipe: true, recipeVersion: true },
+    });
+    if (!order) throw new NotFoundException(`Orden de producción ${id} no encontrada`);
+    if (order.status !== 'closed' || !order.costBreakdown)
+      throw new BadRequestException(`La orden ${order.code} no está cerrada: el costo se calcula al cerrarla.`);
+    const version = await manager
+      .getRepository(RecipeVersionEntity)
+      .findOne({ where: { recipeId: order.recipeId, isActive: true } });
+    if (!version) throw new BadRequestException(`La receta ${order.recipe?.name ?? ''} no tiene una versión activa.`);
+    if (version.id === order.recipeVersionId)
+      throw new BadRequestException(
+        `La orden ${order.code} ya usa la receta vigente. Si la receta tiene un error, corregila primero (Recetas → Nueva versión).`,
+      );
+
+    // Guardia: lo producido no tiene que haber entrado a otra elaboración.
+    let bloqueo: string | null = null;
+    const producidos = order.actualOutputs.map((o) => o.batchId).filter(Boolean) as string[];
+    if (producidos.length > 0) {
+      const usado = await manager
+        .getRepository(InventoryMovementEntity)
+        .createQueryBuilder('m')
+        .innerJoin(BatchEntity, 'b', 'b.id = m.batch_id')
+        .select('b.code', 'code')
+        .where('m.batch_id IN (:...ids)', { ids: producidos })
+        .andWhere("m.type = 'out'")
+        .andWhere("m.reference_type = 'production_order'")
+        .andWhere('m.reference_id IS DISTINCT FROM :orderId', { orderId: order.id })
+        .getRawOne<{ code: string }>();
+      if (usado)
+        bloqueo = `No se puede recalcular: el lote ${usado.code} ya se usó en otra elaboración, y esa también habría que recalcularla. Avisá a sistemas.`;
+    }
+
+    const old = order.costBreakdown;
+    const detalleInputs = old.real.detalleInputs;
+    const detalleInsumos = old.real.detalleInsumos;
+    if (!detalleInputs || !detalleInsumos)
+      throw new BadRequestException(
+        `La orden ${order.code} es de antes de que se guardara el detalle del costo: no se puede recalcular sola.`,
+      );
+    const totalLiters = Number(order.totalMilkLiters);
+    const kgProductoTotal = String(order.totalPrincipalKg ?? 0);
+    const ingredients = await this.priceIngredients(manager, version, order.startedAt, detalleInsumos);
+    const expectedYield = expectedYieldFromBreakdown(old, order.recipeVersion?.standardWastePercent ?? 0);
+    const cost = {
+      ...computeOrderCost({
+        totalLiters,
+        kgProductoTotal,
+        primaryInputs: primaryInputsFromBreakdown(detalleInputs),
+        ingredients,
+        version,
+        byproductActuals: this.byproductActuals(order, order.actualOutputs),
+        expectedYield,
+      }),
+      expectedYield,
+    };
+
+    // Insumos que cambian (comparando el detalle real de antes y de después).
+    const linea = (l: CostDetailLine | undefined) => (l ? { cantidad: l.cantidad, subtotal: l.subtotal } : null);
+    const nombres = [
+      ...new Set([...detalleInsumos.map((l) => l.name), ...cost.real.detalleInsumos.map((l) => l.name)]),
+    ];
+    const cambios = nombres
+      .map((name) => ({
+        name,
+        antes: linea(detalleInsumos.find((l) => l.name === name)),
+        despues: linea(cost.real.detalleInsumos.find((l) => l.name === name)),
+      }))
+      .filter((c) => c.antes?.cantidad !== c.despues?.cantidad || c.antes?.subtotal !== c.despues?.subtotal);
+
+    const preview: ProductionRecalcPreview = {
+      versionActual: order.recipeVersion?.versionNumber ?? 0,
+      versionNueva: version.versionNumber,
+      antes: { costoNeto: old.real.costoNeto, costoPorKg: old.real.costoPorKg },
+      despues: { costoNeto: cost.real.costoNeto, costoPorKg: cost.real.costoPorKg },
+      cambios,
+      bloqueo,
+    };
+    return { preview, order, version, cost };
   }
 
   // Secuencia atómica por día con pg_advisory_xact_lock (mismo patrón que recepciones).
