@@ -1,3 +1,4 @@
+import { milkPricesSinMeses } from './milk-prices.test-helper';
 import { MilkReceptionsService } from './milk-receptions.service';
 
 // Tests del aviso de DOBLE CARGA en la recepción de leche: mismo tambo, mismo día y mismos
@@ -53,6 +54,7 @@ function makeService(sameDayReceptions: any[]) {
     settings as any,
     exchangeRates as any,
     dataSource as any,
+    milkPricesSinMeses(),
   );
   return { service, manager };
 }

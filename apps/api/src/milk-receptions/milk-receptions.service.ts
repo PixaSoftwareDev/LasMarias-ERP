@@ -20,8 +20,7 @@ import { evaluateMilkQuality } from './milk-quality-limits';
 import { formatMilkBatchCode } from './batch-code';
 import { SettingsService } from '../settings/settings.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
-import { applyIva } from '../common/iva';
-import type { Currency, IvaMode } from '@lasmarias/shared-schemas';
+import { MilkPricesService } from './milk-prices.service';
 
 @Injectable()
 export class MilkReceptionsService {
@@ -32,6 +31,7 @@ export class MilkReceptionsService {
     private readonly settings: SettingsService,
     private readonly exchangeRates: ExchangeRatesService,
     private readonly dataSource: DataSource,
+    private readonly milkPrices: MilkPricesService,
   ) {}
 
   async list(): Promise<MilkReception[]> {
@@ -93,20 +93,13 @@ export class MilkReceptionsService {
     let totalCost = new Big(0); // pesos
     for (const pl of producersInput) {
       const producer = await this.producers.get(pl.producerId);
-      const pricePerLiter =
-        producer.agreedPricePerLiter != null
-          ? Number(
-              applyIva(
-                await this.exchangeRates.toArs(
-                  producer.agreedPricePerLiter,
-                  (producer.priceCurrency as Currency) ?? 'ARS',
-                  receivedAt,
-                ),
-                (producer.priceIvaMode as IvaMode) ?? 'sin_iva',
-                ivaRate,
-              ),
-            )
-          : 0;
+      // Precio del MES de la recepción (si se cargó), si no el acordado del tambo.
+      const pricePerLiter = await this.milkPrices.precioPesos(
+        producer,
+        await this.milkPrices.precioBase(producer, receivedAt),
+        receivedAt,
+        ivaRate,
+      );
       lines.push({
         producerId: producer.id,
         producerName: producer.name,
@@ -376,6 +369,9 @@ export class MilkReceptionsService {
             .where('m.batch_id IN (:...ids)', { ids: batchIds })
             .getMany();
           if (adjustments.length > 0) await movementRepo.remove(adjustments);
+          // Soltar primero el vínculo recepción → lote: si no, la base no deja borrar el lote
+          // (FK batch_id) y editar una recepción sin usar daba error 500.
+          await receptionRepo.update({ id: reception.id }, { batchId: null });
           await batchRepo.delete(batchIds);
         }
 

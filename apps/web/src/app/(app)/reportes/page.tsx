@@ -10,6 +10,7 @@ import {
   Factory,
   ShoppingCart,
   TrendingUp,
+  TriangleAlert,
   type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -21,10 +22,12 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { PageHeader } from '@/components/page-header';
 import { DateRangeFilter } from '@/components/ui/date-range';
-import { reportsApi } from '@/features/api';
+import { fixedCostsApi, reportsApi } from '@/features/api';
+import { sinCubrirDelPeriodo } from '@lasmarias/shared-schemas';
 import { ApiError } from '@/lib/api-client';
 import { formatMoney as money, formatDate } from '@/lib/utils';
 import type {
+  CostPerKgRow,
   ProductionReportRow,
   ProfitabilityRow,
   SalesByClientRow,
@@ -183,6 +186,39 @@ function ProductionSection({ from, to }: { from: string; to: string }) {
           { key: 'cost', header: 'Costo total', align: 'right', render: (r: ProductionReportRow) => money(r.totalCost), sortValue: (r: ProductionReportRow) => r.totalCost },
         ]}
       />
+
+      <CostPerKgTable from={from} to={to} />
+    </div>
+  );
+}
+
+// Costo por kg de cada producto: lo que sirve para fijar precios. Promedio de los lotes cerrados
+// del período, ya con los costos fijos que cargó cada lote.
+function CostPerKgTable({ from, to }: { from: string; to: string }) {
+  const query = useQuery({ queryKey: ['report', 'cost-per-kg', from, to], queryFn: () => reportsApi.costPerKg(from, to) });
+  const rows = query.data ?? [];
+  if (query.isLoading) return <LoadingCard />;
+  if (query.isError) return <ErrorCard />;
+  if (rows.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      <h2 className="text-xl font-semibold">Costo por kg de cada producto</h2>
+      <p className="text-sm text-foreground-muted">
+        Promedio de los lotes cerrados en el período (leche, insumos y costos fijos, menos subproductos). Sirve para fijar precios.
+        Los lotes cerrados antes de cargar los costos fijos no los incluyen: para precios, mirá un período reciente.
+      </p>
+      <DataTable
+        data={rows}
+        getKey={(r) => r.productId}
+        getSearchText={(r: CostPerKgRow) => r.productName}
+        searchPlaceholder="Buscar producto…"
+        columns={[
+          { key: 'product', header: 'Producto', primary: true, render: (r: CostPerKgRow) => r.productName, sortValue: (r: CostPerKgRow) => r.productName },
+          { key: 'lots', header: 'Lotes', align: 'right', render: (r: CostPerKgRow) => num(r.lots), sortValue: (r: CostPerKgRow) => r.lots },
+          { key: 'kg', header: 'Kg', align: 'right', render: (r: CostPerKgRow) => num(r.kg, 1), sortValue: (r: CostPerKgRow) => r.kg },
+          { key: 'costPerKg', header: 'Costo por kg', align: 'right', render: (r: CostPerKgRow) => <strong>{money(r.costPerKg)}</strong>, sortValue: (r: CostPerKgRow) => r.costPerKg },
+        ]}
+      />
     </div>
   );
 }
@@ -335,6 +371,8 @@ function SalesSection({ from, to }: { from: string; to: string }) {
   );
 }
 
+const mesCorto = (m: string) => new Date(`${m}-15T12:00:00`).toLocaleDateString('es-AR', { month: 'short', year: 'numeric' });
+
 // ─── Pestaña Rentabilidad por cliente ─────────────────────────────────────────
 function ProfitabilitySection({ from, to }: { from: string; to: string }) {
   const query = useQuery({
@@ -344,6 +382,13 @@ function ProfitabilitySection({ from, to }: { from: string; to: string }) {
 
   const rows = query.data ?? [];
   const anyMissingCost = rows.some((r) => r.hasMissingCost);
+  // Costos fijos sin cubrir (no quedaron en el costo de lo producido) en los meses del período: se restan del margen para
+  // ver lo que realmente se ganó. Solo lo ven los que ven Costos fijos (admin / gerente).
+  const fixedQuery = useQuery({ queryKey: ['fixed-costs'], queryFn: () => fixedCostsApi.overview(), retry: false });
+  const fijos = useMemo(
+    () => (fixedQuery.data && fixedQuery.data.months.length > 0 ? sinCubrirDelPeriodo(fixedQuery.data.months, from, to, fixedQuery.data.mesActual) : null),
+    [fixedQuery.data, from, to],
+  );
 
   // Totales solo sobre filas con costo cargado (las demás no son comparables).
   const totals = useMemo(() => {
@@ -417,6 +462,43 @@ function ProfitabilitySection({ from, to }: { from: string; to: string }) {
           />
         )}
       </KpiRow>
+
+      {fijos && (fijos.meses.length > 0 || fijos.sinCargar.length > 0 || fijos.enCurso) && (
+        <Card>
+          <CardContent className="flex flex-col gap-1 pt-6 text-sm">
+            {fijos.meses.length > 0 && (
+              <>
+                <p className="flex justify-between gap-2">
+                  <span className="text-foreground-muted">Margen total</span>
+                  <span className="whitespace-nowrap">{`${totals.margin < 0 ? '−' : ''}${money(Math.abs(totals.margin))}`}</span>
+                </p>
+                <p className="flex justify-between gap-2">
+                  <span className="text-foreground-muted">
+                    {fijos.total >= 0 ? '− Costos fijos sin cubrir' : '+ Costos fijos cubiertos de más'} (
+                    {fijos.meses.map(mesCorto).join(', ')})
+                  </span>
+                  <span className="whitespace-nowrap">{money(Math.abs(fijos.total))}</span>
+                </p>
+                <p className="mt-1 flex justify-between gap-2 border-t border-border-subtle pt-2 text-base">
+                  <strong>Lo que realmente se ganó</strong>
+                  <strong className={totals.margin - fijos.total < 0 ? 'whitespace-nowrap text-red-600' : 'whitespace-nowrap text-emerald-600'}>
+                    {`${totals.margin - fijos.total < 0 ? '−' : ''}${money(Math.abs(totals.margin - fijos.total))}`}
+                  </strong>
+                </p>
+              </>
+            )}
+            {fijos.sinCargar.length > 0 && (
+              <p className="flex items-start gap-2 text-foreground">
+                <TriangleAlert className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" aria-hidden="true" />
+                Sin costos fijos cargados en {fijos.sinCargar.map(mesCorto).join(', ')}: ese margen todavía no los descuenta.
+              </p>
+            )}
+            {fijos.enCurso && (
+              <p className="text-foreground-muted">El mes en curso no se cuenta: todavía faltan elaboraciones.</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <DataTable
         data={rows}

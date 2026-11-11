@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import Link from 'next/link';
-import { ArrowLeft, Milk, Pencil, Plus, Power } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Milk, Pencil, Plus, Power } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -142,7 +142,15 @@ export default function ProducersPage() {
       </Button>
       <PageHeader
         title="Productores de leche"
-        description="Tambos que entregan leche cruda a la planta."        action={<Button onClick={() => (showForm ? closeForm() : setShowForm(true))}><Plus className="h-4 w-4" /> {showForm ? 'Cerrar' : 'Nuevo productor'}</Button>}
+        description="Tambos que entregan leche cruda a la planta."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="secondary">
+              <Link href="/productores/precios"><CalendarDays className="h-4 w-4" aria-hidden="true" /> Precio por mes</Link>
+            </Button>
+            <Button onClick={() => (showForm ? closeForm() : setShowForm(true))}><Plus className="h-4 w-4" /> {showForm ? 'Cerrar' : 'Nuevo productor'}</Button>
+          </div>
+        }
       />
 
       {showForm && (

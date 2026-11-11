@@ -14,6 +14,7 @@ import { PageHeader } from '@/components/page-header';
 import { inventoryApi, productionApi, recipesApi } from '@/features/api';
 import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
+import { MetaLitrosField, MetaLitrosResumen, litrosSugeridos } from '@/components/production/meta-litros';
 import { DobleCostoAviso, ReprocesoRows, SinCostoAviso, useStockSources, type InputRow } from '@/components/production/stock-inputs';
 
 interface MilkBatch {
@@ -83,7 +84,7 @@ export default function NewProductionPage() {
   // todos los tanques y una orden puede combinar lotes de varios para llegar a los litros.
   const milkBatches: MilkBatch[] =
     source === 'leche' ? milkBatchesFromReceptions : source === 'masa' ? stock.masa : source === 'otro' ? stock.subproductos : [];
-  // Reproceso: solo con masa (mozzarella). Se suma a los lotes de la orden al abrirla.
+  // Extras de la masa (reproceso, crema, ricota): solo con masa. Se suman a los lotes de la orden.
   const [reprocesos, setReprocesos] = useState<InputRow[]>([]);
 
   const [recipeId, setRecipeId] = useState('');
@@ -92,6 +93,9 @@ export default function NewProductionPage() {
   const [startedDate, setStartedDate] = useState(todayLocal);
   const [notes, setNotes] = useState('');
   const [inputs, setInputs] = useState<MilkInputRow[]>([{ batchId: '', liters: 0 }]);
+  // Litros a elaborar (solo con leche): ayuda de carga, no se guarda (ver meta-litros.tsx).
+  const [meta, setMeta] = useState('');
+  const metaLeche = source === 'leche' ? Number(meta) : 0;
 
   // Al cambiar de origen, reseteamos las filas para no enviar lotes de la otra fuente.
   function changeSource(next: SourceKind) {
@@ -192,7 +196,7 @@ export default function NewProductionPage() {
             label="¿Con qué se elabora?"
             htmlFor="source"
             required
-            hint="Primero leche → masa; después masa (más reproceso, si hay) → mozzarella o queso. La crema cruda se pasteuriza eligiendo «Crema u otro subproducto». La ricota va con «Suero»."
+            hint="Primero leche → masa; después masa (más reproceso, crema o ricota, si lleva) → mozzarella o queso. La crema cruda se pasteuriza eligiendo «Crema u otro subproducto». La ricota va con «Suero»."
           >
             <select className={SELECT_CLASS} value={source} onChange={(e) => changeSource(e.target.value as SourceKind)}>
               <option value="leche">Leche cruda (paso 1: hacer masa)</option>
@@ -217,6 +221,8 @@ export default function NewProductionPage() {
               </select>
             </Field>
           )}
+
+          {source === 'leche' && <MetaLitrosField value={meta} onChange={setMeta} unit="L" />}
 
           {source !== 'suero' && (
           <div>
@@ -246,7 +252,13 @@ export default function NewProductionPage() {
                     className="min-h-touch rounded-md border border-border px-3"
                     value={row.batchId}
                     onChange={(e) => {
-                      const next = [...inputs]; next[idx]!.batchId = e.target.value; setInputs(next);
+                      const next = [...inputs]; next[idx]!.batchId = e.target.value;
+                      // Con meta cargada, una fila vacía se completa sola con lo que falta (sin
+                      // pasarse de lo que tiene el lote). Se puede corregir a mano.
+                      const lote = milkBatches.find((b) => b.id === e.target.value);
+                      const sugeridos = e.target.value ? litrosSugeridos(next, idx, metaLeche, lote?.remainingQuantity) : null;
+                      if (sugeridos != null) next[idx]!.liters = sugeridos;
+                      setInputs(next);
                     }}
                   >
                     <option value="">Elegí un lote</option>
@@ -266,11 +278,14 @@ export default function NewProductionPage() {
                 </div>
               ))}
             </div>
+            <div className="mt-2">
+              <MetaLitrosResumen rows={inputs} meta={metaLeche} unit="L" />
+            </div>
           </div>
           )}
 
           {source === 'masa' && (
-            <ReprocesoRows rows={reprocesos} onChange={setReprocesos} options={stock.reproceso} />
+            <ReprocesoRows rows={reprocesos} onChange={setReprocesos} options={stock.extras} />
           )}
 
           {source !== 'leche' && source !== 'suero' && (
@@ -282,8 +297,8 @@ export default function NewProductionPage() {
 
           <DobleCostoAviso
             ingredients={recipes.data?.find((r) => r.id === recipeId)?.activeVersion?.ingredients ?? []}
-            originProductIds={[...stock.masa, ...stock.subproductos]
-              .filter((o) => inputs.some((i) => i.batchId === o.id))
+            originProductIds={[...stock.masa, ...stock.extras]
+              .filter((o) => allInputs.some((i) => i.batchId === o.id))
               .map((o) => o.productId)}
             products={stock.products}
           />

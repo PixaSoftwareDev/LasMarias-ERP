@@ -4,6 +4,7 @@ import { Between, Repository } from 'typeorm';
 import type {
   ProductionReportRow,
   ProfitabilityRow,
+  CostPerKgRow,
   ReportGranularity,
   SalesByClientRow,
   SalesByPeriodRow,
@@ -140,6 +141,33 @@ export class ReportsService {
         costBreakdown: o.costBreakdown,
       }),
     );
+  }
+
+  // Costo por kg de cada producto: Σ costo neto ÷ Σ kg de las órdenes cerradas en el rango
+  // (closedAt). Promedio ponderado por kg, a centavos. Órdenes con 0 kg no entran (no dividen).
+  async costPerKg(from: Date, to: Date): Promise<CostPerKgRow[]> {
+    const rows: { productId: string; productName: string; lots: string; kg: string; totalCost: string; costPerKg: string }[] =
+      await this.productionRepo.query(
+        `SELECT p.id AS "productId", p.name AS "productName", COUNT(*) AS lots,
+                SUM(o.total_principal_kg) AS kg, ROUND(SUM(o.total_cost), 2) AS "totalCost",
+                ROUND(SUM(o.total_cost) / SUM(o.total_principal_kg), 2) AS "costPerKg"
+           FROM production_orders o
+           JOIN recipes r ON r.id = o.recipe_id
+           JOIN products p ON p.id = r.product_id
+          WHERE o.status = 'closed' AND o.closed_at BETWEEN $1 AND $2
+            AND o.total_principal_kg > 0 AND o.total_cost IS NOT NULL
+          GROUP BY p.id, p.name
+          ORDER BY p.name`,
+        [from, to],
+      );
+    return rows.map((r) => ({
+      productId: r.productId,
+      productName: r.productName,
+      lots: Number(r.lots),
+      kg: Number(r.kg),
+      totalCost: Number(r.totalCost),
+      costPerKg: Number(r.costPerKg),
+    }));
   }
 
   // Rentabilidad por cliente: ingresos (Σ total despachos, neto de NC) − costo de lo

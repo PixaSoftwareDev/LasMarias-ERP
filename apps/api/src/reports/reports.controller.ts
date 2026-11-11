@@ -72,6 +72,12 @@ export class ReportsController {
     return this.reports.yield(q.from, q.to);
   }
 
+  // Costo por kg de cada producto (promedio de los lotes cerrados del rango).
+  @Get('cost-per-kg')
+  costPerKg(@Query(new ZodValidationPipe(dateRangeSchema)) q: { from: Date; to: Date }) {
+    return this.reports.costPerKg(q.from, q.to);
+  }
+
   @Get('profitability')
   profitability(@Query(new ZodValidationPipe(dateRangeSchema)) q: { from: Date; to: Date }) {
     return this.reports.profitability(q.from, q.to);

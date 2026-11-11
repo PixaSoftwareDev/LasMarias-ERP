@@ -18,6 +18,7 @@ import type {
   InventoryMovement,
   Product,
   ProductionOrder,
+  ProductionRecalcPreview,
   Recipe,
   RecipeSimulationResult,
   RecipeVersion,
@@ -67,6 +68,7 @@ import type {
   CreateChequeInput,
   UpdateChequeStatusInput,
   ProfitabilityRow,
+  CostPerKgRow,
   HomeSummary,
   HomeCalendar,
   ProducerBalance,
@@ -92,6 +94,13 @@ import type {
   SupplierPayment,
   RegisterSupplierPaymentInput,
   SupplierBalance,
+  FixedCostsOverview,
+  MilkMonthPrices,
+  SaveMilkMonthPricesInput,
+  SaveMilkMonthPricesResult,
+  FixedCostType,
+  FixedCostTypeInput,
+  SaveFixedCostMonthInput,
 } from '@lasmarias/shared-schemas';
 import type { ProducerDto } from './receptions/types';
 import { api, downloadFile } from '@/lib/api-client';
@@ -219,6 +228,9 @@ export const productionApi = {
   ) => api<ProductionOrder>(`/api/production-orders/${id}`, { method: 'PATCH', body: input }),
   // Guardar lo que ya salió (los subproductos del día) sin cerrar la orden: la crema se saca
   // hoy y la masa se pesa mañana. La orden queda "en curso" y al cerrar ya viene cargada.
+  // Recalcular con la receta corregida: vista previa (no guarda) y aplicar (solo cambia el costo).
+  recalcPreview: (id: string) => api<ProductionRecalcPreview>(`/api/production-orders/${id}/recalculate`),
+  recalcApply: (id: string) => api<ProductionOrder>(`/api/production-orders/${id}/recalculate`, { method: 'POST' }),
   saveProgress: (id: string, input: { outputs: { productId: string; quantity: number; bultos?: number }[]; notes?: string }) =>
     api<ProductionOrder>(`/api/production-orders/${id}/progress`, { method: 'POST', body: input }),
   close: (id: string, input: { actualOutputs: { productId: string; quantity: number; bultos?: number; isPrincipal: boolean; isFormat?: boolean }[]; warehouseId?: string; expectedYieldKgPerLiter?: number; notes?: string }) =>
@@ -316,6 +328,8 @@ export const reportsApi = {
   salesByPeriod: (from: string, to: string, granularity: ReportGranularity) =>
     api<SalesByPeriodRow[]>(`/api/reports/sales-by-period?${reportQs({ from, to, granularity })}`),
   yield: (from: string, to: string) => api<YieldReportRow[]>(`/api/reports/yield?${reportQs({ from, to })}`),
+  // Costo por kg de cada producto (promedio de los lotes cerrados del rango).
+  costPerKg: (from: string, to: string) => api<CostPerKgRow[]>(`/api/reports/cost-per-kg?${reportQs({ from, to })}`),
   // Rentabilidad por cliente (ingresos − costo de lo despachado).
   profitability: (from: string, to: string) =>
     api<ProfitabilityRow[]>(`/api/reports/profitability?${reportQs({ from, to })}`),
@@ -396,4 +410,27 @@ export const salesApi = {
     api<CreditNote>(`/api/sales/orders/${orderId}/returns`, { method: 'POST', body: input }),
   exportAccountsXlsx: () => downloadFile('/api/sales/export/accounts.xlsx', 'cuentas-corrientes.xlsx'),
   exportPriceListXlsx: () => downloadFile('/api/sales/export/price-list.xlsx', 'listas-de-precios.xlsx'),
+};
+
+export const milkPricesApi = {
+  get: (month: string) => api<MilkMonthPrices>(`/api/milk-receptions/prices/${month}`),
+  save: (month: string, input: SaveMilkMonthPricesInput) =>
+    api<SaveMilkMonthPricesResult>(`/api/milk-receptions/prices/${month}`, { method: 'PUT', body: input }),
+};
+
+export const fixedCostsApi = {
+  overview: () => api<FixedCostsOverview>('/api/fixed-costs'),
+  save: (month: string, input: SaveFixedCostMonthInput) =>
+    api<FixedCostsOverview>(`/api/fixed-costs/${month}`, { method: 'PUT', body: input }),
+  createType: (input: FixedCostTypeInput) =>
+    api<FixedCostType>('/api/fixed-costs/types', { method: 'POST', body: input }),
+  updateType: (id: string, input: FixedCostTypeInput) =>
+    api<FixedCostType>(`/api/fixed-costs/types/${id}`, { method: 'PUT', body: input }),
+  removeType: (id: string) => api<{ deleted: true }>(`/api/fixed-costs/types/${id}`, { method: 'DELETE' }),
+  setLitrosNormales: (litros: number | null) =>
+    api<FixedCostsOverview>('/api/fixed-costs/litros-normales', { method: 'PUT', body: { litros } }),
+  setInflacion: (porcentaje: number) =>
+    api<FixedCostsOverview>('/api/fixed-costs/inflacion', { method: 'PUT', body: { porcentaje } }),
+  setListo: (month: string, listo: boolean) =>
+    api<FixedCostsOverview>(`/api/fixed-costs/${month}/listo`, { method: 'PUT', body: { listo } }),
 };

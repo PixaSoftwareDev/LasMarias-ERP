@@ -77,8 +77,29 @@ export const productionCostBreakdownSchema = z.object({
   // caso la orden muestra solo el costo real (pedido #12).
   estandar: elaborationCostResultSchema.nullable(),
   variance: elaborationVarianceSchema.nullable(),
+  // Rendimiento esperado (kg/L) cargado al cerrar. Se guarda para poder recalcular la orden
+  // con la receta corregida sin pedirlo de nuevo. Las órdenes viejas no lo tienen.
+  expectedYieldKgPerLiter: z.number().nullable().optional(),
 });
 export type ProductionCostBreakdown = z.infer<typeof productionCostBreakdownSchema>;
+
+// "Recalcular con la receta corregida" (pedido del dueño, 09/11/2026): una orden cerrada se
+// costeó con una receta que tenía un error; la receta ya se corrigió (versión nueva) y se
+// quiere el costo corregido aunque el producto ya se haya vendido. Solo cambia el costo.
+const recalcLineSchema = z.object({ cantidad: z.string(), subtotal: z.string() });
+export const productionRecalcPreviewSchema = z.object({
+  versionActual: z.number().int(),
+  versionNueva: z.number().int(),
+  antes: z.object({ costoNeto: z.string(), costoPorKg: z.string().nullable() }),
+  despues: z.object({ costoNeto: z.string(), costoPorKg: z.string().nullable() }),
+  // Insumos que cambian entre la receta vieja y la corregida (los iguales no se listan).
+  cambios: z.array(
+    z.object({ name: z.string(), antes: recalcLineSchema.nullable(), despues: recalcLineSchema.nullable() }),
+  ),
+  // Motivo por el que NO se puede recalcular (null = se puede).
+  bloqueo: z.string().nullable(),
+});
+export type ProductionRecalcPreview = z.infer<typeof productionRecalcPreviewSchema>;
 
 export const productionOrderSchema = z.object({
   id: uuidSchema,

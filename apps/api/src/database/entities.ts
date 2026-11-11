@@ -26,9 +26,17 @@ import { SupplierEntity } from '../suppliers/supplier.entity';
 import { PayableEntity } from '../suppliers/payable.entity';
 import { SupplierPaymentEntity } from '../suppliers/supplier-payment.entity';
 import { BackupRunEntity } from '../backups/backup-run.entity';
+import { FixedCostMonthEntity } from '../fixed-costs/fixed-cost-month.entity';
+import { FixedCostTypeEntity } from '../fixed-costs/fixed-cost-type.entity';
+import { FixedCostSettingsEntity } from '../fixed-costs/fixed-cost-settings.entity';
+import { ProducerMonthPriceEntity } from '../producers/producer-month-price.entity';
 
 export const entities = [
   BackupRunEntity,
+  FixedCostMonthEntity,
+  FixedCostTypeEntity,
+  FixedCostSettingsEntity,
+  ProducerMonthPriceEntity,
   UserEntity,
   ClientEntity,
   ClientPriceItemEntity,

@@ -1,3 +1,4 @@
+import { milkPricesSinMeses } from './milk-prices.test-helper';
 import { MilkReceptionsService } from './milk-receptions.service';
 
 // Tests del método REMOVE: borrar una recepción deshaciendo su efecto en stock.
@@ -90,6 +91,7 @@ function makeService(fx: Fixture) {
     { getQualityLimits: jest.fn(), getIvaRate: jest.fn() } as any,
     { toArs: jest.fn() } as any,
     dataSource as any,
+    milkPricesSinMeses(),
   );
 
   return { service, removedReceptions, removedMovements, deletedBatchIds };

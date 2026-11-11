@@ -28,9 +28,10 @@ import { PageHeader } from '@/components/page-header';
 import { MonthCalendar } from '@/components/month-calendar';
 import { SetupChecklist } from '@/components/setup-checklist';
 import { useAuth } from '@/hooks/use-auth';
-import { homeApi, inventoryApi, salesApi, financeApi, suppliersApi, backupsApi } from '@/features/api';
+import { homeApi, inventoryApi, salesApi, financeApi, suppliersApi, backupsApi, fixedCostsApi } from '@/features/api';
 import { formatMoney as money } from '@/lib/utils';
-import type { HomeCalendarEvent, StockSummary, AccountBalance, SilosOverview, Cheque, SupplierBalance } from '@lasmarias/shared-schemas';
+import { sumarMeses } from '@lasmarias/shared-schemas';
+import type { HomeCalendarEvent, StockSummary, AccountBalance, SilosOverview, Cheque, SupplierBalance, FixedCostsOverview } from '@lasmarias/shared-schemas';
 
 // Home "Centro de comando" (CLAUDE.md §5.3 / §5.4): panel administrativo denso
 // y ordenado. Izquierda (2/3): saludo + KPIs en chips + "Para resolver" (lo
@@ -129,8 +130,25 @@ function buildPending(
   cheques: Cheque[] | undefined,
   suppliers: SupplierBalance[] | undefined,
   backupWarnings: string[] | undefined,
+  fixedCosts: FixedCostsOverview | undefined,
 ): Pending[] {
   const items: Pending[] = [];
+
+  // Costos fijos: el mes pasado ya terminó pero no se confirmó → las elaboraciones siguen
+  // con el $/litro de un mes más viejo. Solo si ya se usan costos fijos (hay algún mes cargado).
+  if (fixedCosts && fixedCosts.months.length > 0) {
+    const anterior = sumarMeses(fixedCosts.mesActual, -1);
+    if (!fixedCosts.months.find((m) => m.month === anterior)?.listo) {
+      const nombre = new Date(`${anterior}-15T12:00:00`).toLocaleDateString('es-AR', { month: 'long' });
+      items.push({
+        key: 'costos-fijos-sin-terminar',
+        severity: 'warning',
+        icon: Receipt,
+        text: `Costos fijos de ${nombre} sin confirmar`,
+        href: '/costos-fijos',
+      });
+    }
+  }
 
   // Copias de seguridad: si la de ayer no se hizo o la última falló, es lo primero
   // a resolver (sin copia, un problema de datos no tiene vuelta atrás).
@@ -291,6 +309,11 @@ export default function DashboardPage() {
     queryFn: () => backupsApi.overview(),
     enabled: user?.role === 'admin',
   });
+  const fixedCostsQuery = useQuery({
+    queryKey: ['fixed-costs'],
+    queryFn: () => fixedCostsApi.overview(),
+    enabled: user?.role === 'admin' || user?.role === 'gerente',
+  });
 
   const s = summaryQuery.data;
   // Bloque PLATA: todo en $ (finanzas y comercial).
@@ -312,8 +335,17 @@ export default function DashboardPage() {
     : [];
 
   const pending = useMemo(
-    () => buildPending(stockQuery.data, accountsQuery.data, silosQuery.data, chequesQuery.data, suppliersAccQuery.data, backupsQuery.data?.warnings),
-    [stockQuery.data, accountsQuery.data, silosQuery.data, chequesQuery.data, suppliersAccQuery.data, backupsQuery.data],
+    () =>
+      buildPending(
+        stockQuery.data,
+        accountsQuery.data,
+        silosQuery.data,
+        chequesQuery.data,
+        suppliersAccQuery.data,
+        backupsQuery.data?.warnings,
+        fixedCostsQuery.data,
+      ),
+    [stockQuery.data, accountsQuery.data, silosQuery.data, chequesQuery.data, suppliersAccQuery.data, backupsQuery.data, fixedCostsQuery.data],
   );
   const pendingLoading = stockQuery.isLoading || accountsQuery.isLoading;
   const pendingError = stockQuery.isError && accountsQuery.isError;

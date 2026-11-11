@@ -20,6 +20,7 @@ import { ExchangeRatesModule } from './exchange-rates/exchange-rates.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { BackupsModule } from './backups/backups.module';
 import { HealthModule } from './health/health.module';
+import { FixedCostsModule } from './fixed-costs/fixed-costs.module';
 
 // Fase 1 — Recepción de leche, Elaboración (calculadora de costo), Inventario,
 // Despacho y maestros. Lo demás quedó fuera de alcance.
@@ -42,6 +43,7 @@ import { HealthModule } from './health/health.module';
     HomeModule,
     ReportsModule,
     SettingsModule,
+    FixedCostsModule,
     ExchangeRatesModule,
     SuppliersModule,
     HealthModule,
