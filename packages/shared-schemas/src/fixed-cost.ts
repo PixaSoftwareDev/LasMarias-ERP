@@ -118,7 +118,9 @@ export const fixedCostMonthSchema = z.object({
   total: z.string(), // gastos del mes (si se reparten, solo la 1ª cuota) + cuotas de meses anteriores
   litros: z.string(), // litros de leche elaborados en el mes (reales)
   litrosBase: z.string(), // por cuánto se divide: la leche de un mes normal (o la del mes, si todavía no hay historia)
-  costoPorLitro: z.string().nullable(), // total / litrosBase; null = no hay litros para dividir
+  costoSinAjuste: z.string().nullable(), // total / litrosBase, sin inflación
+  inflacion: z.string(), // % de inflación de este mes ('0.00' = sin ajuste)
+  costoPorLitro: z.string().nullable(), // total × (1 + inflación) / litrosBase: el que se suma; null = no hay litros
   cubierto: z.string(), // lo que las elaboraciones del mes cargaron DE VERDAD (suma de sus líneas de costos fijos)
   sinCubrir: z.string(), // total − cubierto: >0 no llegó a ningún queso, <0 se cubrió de más
   ordenesSinCostoFijo: z.number().int(), // elaboraciones del mes con leche cerradas SIN la línea (ej. antes de cargar los costos fijos)
@@ -147,6 +149,7 @@ export const fixedCostsOverviewSchema = z.object({
     mesesPromedio: z.number().int(), // cuántos meses entraron en el promedio
     manual: z.string().nullable(),
   }),
+  inflacion: z.string(), // % por mes que se aplica a los meses nuevos (y al que está en uso)
   mesActual: monthKeySchema,
 });
 export const setFixedCostMonthListoInputSchema = z.object({ listo: z.boolean() });
@@ -156,6 +159,15 @@ export const setLitrosNormalesInputSchema = z.object({
   litros: z.number().positive('Tienen que ser más de 0 litros').max(1e9).nullable(), // null = volver al promedio
 });
 export type SetLitrosNormalesInput = z.infer<typeof setLitrosNormalesInputSchema>;
+
+export const setInflacionInputSchema = z.object({
+  porcentaje: z
+    .number()
+    .min(0, 'No puede ser negativo')
+    .max(30, 'Máximo 30% por mes')
+    .refine((n) => Number(n.toFixed(2)) === n, 'Hasta 2 decimales'),
+});
+export type SetInflacionInput = z.infer<typeof setInflacionInputSchema>;
 
 
 export type FixedCostsOverview = z.infer<typeof fixedCostsOverviewSchema>;

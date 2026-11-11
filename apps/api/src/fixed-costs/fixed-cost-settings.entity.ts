@@ -9,4 +9,8 @@ export class FixedCostSettingsEntity {
 
   @Column({ type: 'numeric', precision: 14, scale: 1, nullable: true, name: 'litros_normales' })
   litrosNormales!: string | null;
+
+  // Ajuste por inflación (% por mes) que se suma al costo por litro. 0 = sin ajuste.
+  @Column({ type: 'numeric', precision: 5, scale: 2, default: 0, name: 'inflacion_mensual' })
+  inflacionMensual!: string;
 }

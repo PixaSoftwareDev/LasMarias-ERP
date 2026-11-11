@@ -16,6 +16,11 @@ export class FixedCostMonthEntity {
   @Column({ type: 'numeric', precision: 14, scale: 1, nullable: true, name: 'litros_base' })
   litrosBase!: string | null;
 
+  // % de inflación con que se usa el $/litro de ESTE mes. Se guarda al cargarlo (como la leche),
+  // así cambiar el ajuste no toca los meses que ya se usaron. null = mes viejo, sin ajuste.
+  @Column({ type: 'numeric', precision: 5, scale: 2, nullable: true })
+  inflacion!: string | null;
+
   // true = el administrativo terminó de cargar el mes (están todas las facturas): recién ahí
   // su $/litro se suma a las elaboraciones. Mientras tanto se sigue usando el último mes listo.
   @Column({ type: 'boolean', default: false })

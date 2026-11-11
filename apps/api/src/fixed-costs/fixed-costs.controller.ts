@@ -7,6 +7,8 @@ import {
   setFixedCostMonthListoInputSchema,
   type SetFixedCostMonthListoInput,
   setLitrosNormalesInputSchema,
+  setInflacionInputSchema,
+  type SetInflacionInput,
   type SetLitrosNormalesInput,
   type SaveFixedCostMonthInput,
 } from '@lasmarias/shared-schemas';
@@ -31,6 +33,11 @@ export class FixedCostsController {
   @Put('litros-normales')
   setLitrosNormales(@Body(new ZodValidationPipe(setLitrosNormalesInputSchema)) body: SetLitrosNormalesInput) {
     return this.fixedCosts.setLitrosNormales(body.litros);
+  }
+
+  @Put('inflacion')
+  setInflacion(@Body(new ZodValidationPipe(setInflacionInputSchema)) body: SetInflacionInput) {
+    return this.fixedCosts.setInflacion(body.porcentaje);
   }
 
   @Put(':month')

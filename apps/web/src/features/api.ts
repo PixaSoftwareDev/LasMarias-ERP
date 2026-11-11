@@ -429,6 +429,8 @@ export const fixedCostsApi = {
   removeType: (id: string) => api<{ deleted: true }>(`/api/fixed-costs/types/${id}`, { method: 'DELETE' }),
   setLitrosNormales: (litros: number | null) =>
     api<FixedCostsOverview>('/api/fixed-costs/litros-normales', { method: 'PUT', body: { litros } }),
+  setInflacion: (porcentaje: number) =>
+    api<FixedCostsOverview>('/api/fixed-costs/inflacion', { method: 'PUT', body: { porcentaje } }),
   setListo: (month: string, listo: boolean) =>
     api<FixedCostsOverview>(`/api/fixed-costs/${month}/listo`, { method: 'PUT', body: { listo } }),
 };

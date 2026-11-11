@@ -83,11 +83,16 @@ export class FixedCostsService {
     return (await m.getRepository(FixedCostSettingsEntity).findOne({ where: { id: 1 } }))?.litrosNormales ?? null;
   }
 
+  private async inflacion(m: EntityManager): Promise<string> {
+    return (await m.getRepository(FixedCostSettingsEntity).findOne({ where: { id: 1 } }))?.inflacionMensual ?? '0.00';
+  }
+
   private async calc(m: EntityManager) {
     const rows = await m.getRepository(FixedCostMonthEntity).find({ order: { month: 'DESC' } });
     const litros = await this.litrosPorMes(m);
     const { cargado, sinFijo } = await this.cargadoPorMes(m);
     const manual = await this.manual(m);
+    const inflacion = await this.inflacion(m);
     const actual = mesActual();
     // Tarjeta de arriba: la leche de un mes normal que se usa para el mes actual.
     const { promedio, meses } = promedioLitros(litros, actual);
@@ -103,12 +108,14 @@ export class FixedCostsService {
       ];
       // Se divide por la leche de un mes normal DE ESE MES; sin historia, por la del propio mes.
       const base = baseDelMes(e.litrosBase, manual, litros, e.month) ?? L;
-      const c = computeFixedCosts(montos, base);
+      const infl = e.inflacion ?? '0.00';
+      const c = computeFixedCosts(montos, base, infl);
       return {
         month: e.month,
         lines: e.lines,
         cuotas,
         ...c,
+        inflacion: infl,
         ...cobertura(c.total, cargado.get(e.month) ?? '0'),
         ordenesSinCostoFijo: sinFijo.get(e.month) ?? 0,
         litros: L,
@@ -130,7 +137,7 @@ export class FixedCostsService {
     for (let mes = desde; mes <= actual; mes = sumarMeses(mes, 1)) {
       basePorMes[mes] = baseDelMes(guardada.get(mes) ?? null, manual, litros, mes);
     }
-    return { months: dtos, litros, normales, basePorMes, cargado, sinFijo };
+    return { months: dtos, litros, normales, basePorMes, cargado, sinFijo, inflacion };
   }
 
   private async months(m: EntityManager): Promise<FixedCostMonth[]> {
@@ -144,7 +151,7 @@ export class FixedCostsService {
   }
 
   async overview(): Promise<FixedCostsOverview> {
-    const { months, litros, normales, basePorMes, cargado, sinFijo } = await this.calc(this.ds.manager);
+    const { months, litros, normales, basePorMes, cargado, sinFijo, inflacion } = await this.calc(this.ds.manager);
     const uso = months.find((d) => d.enUso);
     const tipos = await this.ds.getRepository(FixedCostTypeEntity).find({ order: { nombre: 'ASC' } });
     return {
@@ -157,6 +164,7 @@ export class FixedCostsService {
       sinCostoFijoPorMes: Object.fromEntries(sinFijo),
       mesActual: mesActual(),
       litrosNormales: normales,
+      inflacion,
     };
   }
 
@@ -167,7 +175,8 @@ export class FixedCostsService {
       const repo = m.getRepository(FixedCostMonthEntity);
       const prev = await repo.findOne({ where: { month } });
       const litrosBase = prev?.litrosBase ?? baseDelMes(null, await this.manual(m), await this.litrosPorMes(m), month);
-      await repo.save({ month, lines, litrosBase });
+      const inflacion = prev ? prev.inflacion : await this.inflacion(m);
+      await repo.save({ month, lines, litrosBase, inflacion });
     });
     return this.overview();
   }
@@ -214,6 +223,30 @@ export class FixedCostsService {
         rows[0].litrosBase = baseDelMes(null, nuevo, L, rows[0].month);
         await repo.save(rows[0]);
       }
+    });
+    return this.overview();
+  }
+
+  // Cambia el ajuste por inflación (% por mes). Se aplica al mes en uso y a los más nuevos (los
+  // que todavía no se usaron); los meses que ya se usaron quedan con el % con que se usaron.
+  async setInflacion(porcentaje: number): Promise<FixedCostsOverview> {
+    await this.ds.transaction(async (m) => {
+      const nuevo = porcentaje.toFixed(2);
+      const uso = (await this.calc(m)).months.find((d) => d.enUso);
+      const repo = m.getRepository(FixedCostMonthEntity);
+      for (const r of await repo.find()) {
+        if (!uso || r.month >= uso.month) {
+          r.inflacion = nuevo;
+          await repo.save(r);
+        } else if (r.inflacion == null) {
+          r.inflacion = '0.00';
+          await repo.save(r);
+        }
+      }
+      const settings = m.getRepository(FixedCostSettingsEntity);
+      const s = (await settings.findOne({ where: { id: 1 } })) ?? settings.create({ id: 1, litrosNormales: null });
+      s.inflacionMensual = nuevo;
+      await settings.save(s);
     });
     return this.overview();
   }

@@ -292,3 +292,28 @@ describe('aviso de gasto grande de un solo mes (más del 15% del total)', () => 
     expect(gastosGrandesDeUnMes([g('X', 1_500_001)], 10_000_000, [])).toEqual([0]);
   });
 });
+
+describe('ajuste por inflación (pedido de Pablo 11/11/2026)', () => {
+  it('ejemplo a mano: $12.401.556,83 / 377.011 L = $32,8944; con 2,5% → × 1,025 = $33,7168', () => {
+    const r = computeFixedCosts([{ monto: '12401556.83' }], 377011, '2.5');
+    expect(r.costoSinAjuste).toBe('32.8944');
+    // 12.401.556,83 × 1,025 = 12.711.595,75…; / 377.011 = 33,71678…
+    expect(r.costoPorLitro).toBe('33.7168');
+  });
+
+  it('el total del mes no cambia (la inflación solo sube lo que se suma por litro)', () => {
+    expect(computeFixedCosts([{ monto: 1_000_000 }], 100_000, 3).total).toBe('1000000.00');
+  });
+
+  it('0% = igual que sin ajuste', () => {
+    const r = computeFixedCosts([{ monto: 30_000_000 }], 382404, 0);
+    expect(r.costoPorLitro).toBe('78.4511');
+    expect(r.costoSinAjuste).toBe('78.4511');
+  });
+
+  it('sin litros: no divide por cero aunque haya ajuste', () => {
+    const r = computeFixedCosts([{ monto: 1000 }], 0, 5);
+    expect(r.costoPorLitro).toBeNull();
+    expect(r.costoSinAjuste).toBeNull();
+  });
+});

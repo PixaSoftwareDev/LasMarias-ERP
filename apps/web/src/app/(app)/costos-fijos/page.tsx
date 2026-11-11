@@ -97,6 +97,7 @@ const mesLargo = (m: string) => `${MESES[Number(m.slice(5, 7)) - 1]} ${m.slice(0
 // En títulos va con mayúscula ("Noviembre 2026"); dentro de una frase, en minúscula.
 const Mes = ({ m, titulo }: { m: string; titulo?: boolean }) => <span className={titulo ? 'capitalize' : undefined}>{mesLargo(m)}</span>;
 const litrosFmt = (s: string | number) => Number(s).toLocaleString('es-AR', { maximumFractionDigits: 1 });
+const pctFmt = (n: number) => `${n.toLocaleString('es-AR', { maximumFractionDigits: 2 })}%`;
 const porLitro = (s: string | number) =>
   `$${Number(s).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
 const detalle = (datos: { valor: string }[]) => datos.map((d) => d.valor).filter(Boolean).join(' · ');
@@ -199,7 +200,10 @@ function Resumen({ data, onVerTipos, verTipos }: { data: FixedCostsOverview; onV
             </span>
           </p>
         )}
-        <LitrosNormales data={data} />
+        <div className="flex flex-col gap-1 border-t border-border-subtle pt-3">
+          <LitrosNormales data={data} />
+          <Inflacion data={data} />
+        </div>
       </CardContent>
     </Card>
   );
@@ -226,7 +230,7 @@ function LitrosNormales({ data }: { data: FixedCostsOverview }) {
     set.mutate(v);
   };
   return (
-    <div className="flex flex-col gap-2 border-t border-border-subtle pt-3 text-sm">
+    <div className="flex flex-col gap-2 text-sm">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="text-foreground-muted">
           Leche promedio por mes: <strong className="text-foreground">{n.valor != null ? `${litrosFmt(n.valor)} L` : '—'}</strong>
@@ -256,6 +260,64 @@ function LitrosNormales({ data }: { data: FixedCostsOverview }) {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <Field label="Leche promedio por mes (litros)" htmlFor="cf-litros-normales" className="sm:w-64">
             <Input type="number" inputMode="decimal" min={1} step="1" value={valor} onChange={(e) => setValor(e.target.value)} />
+          </Field>
+          <Button variant="ghost" onClick={() => setEditando(false)} disabled={set.isPending}>
+            Cancelar
+          </Button>
+          <Button onClick={onGuardar} loading={set.isPending} loadingText="Guardando...">
+            Guardar
+          </Button>
+          <p className="text-xs text-foreground-muted sm:pb-3">Cambia el mes en uso y los que vengan; los meses viejos quedan como estaban.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Ajuste por inflación: % por mes que se suma al costo por litro (los gastos de un mes se cargan
+// en las elaboraciones del mes siguiente, cuando todo ya subió).
+function Inflacion({ data }: { data: FixedCostsOverview }) {
+  const queryClient = useQueryClient();
+  const actual = Number(data.inflacion);
+  const [editando, setEditando] = useState(false);
+  const [valor, setValor] = useState('');
+  const set = useMutation({
+    mutationFn: (porcentaje: number) => fixedCostsApi.setInflacion(porcentaje),
+    onSuccess: (o) => {
+      queryClient.setQueryData(['fixed-costs'], o);
+      setEditando(false);
+      toast.success(o.enUso ? `Guardado. Cada elaboración suma ${porLitro(o.enUso.costoPorLitro)} por litro.` : 'Ajuste guardado.');
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar. Probá de nuevo.'),
+  });
+  const onGuardar = () => {
+    const v = Number(valor.replace(',', '.'));
+    if (!(v >= 0 && v <= 30)) return void toast.error('Poné un porcentaje entre 0 y 30.');
+    set.mutate(Math.round(v * 100) / 100);
+  };
+  return (
+    <div className="flex flex-col gap-2 text-sm">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-foreground-muted">
+          Ajuste por inflación: <strong className="text-foreground">{actual > 0 ? `${pctFmt(actual)} por mes` : 'sin ajuste'}</strong>
+        </span>
+        {!editando && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setValor(actual > 0 ? String(actual) : '');
+              setEditando(true);
+            }}
+          >
+            Cambiar
+          </Button>
+        )}
+      </div>
+      {editando && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <Field label="Inflación por mes (%)" htmlFor="cf-inflacion" className="sm:w-48">
+            <Input type="number" inputMode="decimal" min={0} max={30} step="0.1" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0" />
           </Field>
           <Button variant="ghost" onClick={() => setEditando(false)} disabled={set.isPending}>
             Cancelar
@@ -445,14 +507,22 @@ function MesDetalle({ data, month }: { data: FixedCostsOverview; month: string }
   const litros = data.litrosPorMes[month] ?? '0';
   const base = data.basePorMes[month] || litros;
   const cargado = Number(data.cargadoPorMes[month] || 0);
+  // % de inflación del mes: el que quedó guardado con él, o el de hoy si todavía no se guardó.
+  const infl = Number(guardado?.inflacion ?? data.inflacion);
   const prev = useMemo(() => {
     const cents = rows.reduce((a, r) => a + rowCents(r), 0) + cuotas.reduce((a, c) => a + Math.round(Number(c.cuota) * 100), 0);
     const total = cents / 100;
-    return { total, porLitro: Number(base) > 0 ? Number((total / Number(base)).toFixed(4)) : null };
-  }, [rows, cuotas, base]);
+    const B = Number(base);
+    return {
+      total,
+      sinAjuste: B > 0 ? Number((total / B).toFixed(4)) : null,
+      porLitro: B > 0 ? Number(((total * (1 + infl / 100)) / B).toFixed(4)) : null,
+    };
+  }, [rows, cuotas, base, infl]);
   // Leyendo, los números son los del servidor; editando, los de la vista previa.
   const total = editando || !guardado ? prev.total : Number(guardado.total);
   const pl = editando || !guardado ? prev.porLitro : guardado.costoPorLitro != null ? Number(guardado.costoPorLitro) : null;
+  const plSin = editando || !guardado ? prev.sinAjuste : guardado.costoSinAjuste != null ? Number(guardado.costoSinAjuste) : null;
   const est = estadoDe(guardado);
   const mesEnCurso = month >= data.mesActual;
   const pendientes = (editando ? rows : (guardado?.lines ?? [])).filter((r) => r.pendiente);
@@ -476,7 +546,8 @@ function MesDetalle({ data, month }: { data: FixedCostsOverview; month: string }
               <p className="text-sm text-foreground-muted">
                 {pl != null ? (
                   <>
-                    ÷ {litrosFmt(base)} L = <strong className="text-primary-700">{porLitro(pl)} por litro</strong>
+                    ÷ {litrosFmt(base)} L = {infl > 0 && plSin != null ? <>{porLitro(plSin)} + {pctFmt(infl)} = </> : null}
+                    <strong className="text-primary-700">{porLitro(pl)} por litro</strong>
                   </>
                 ) : (
                   'Todavía no hay leche para dividir'

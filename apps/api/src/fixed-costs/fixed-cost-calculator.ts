@@ -4,6 +4,8 @@ import { sumarMeses } from '@lasmarias/shared-schemas';
 // Cuenta de los costos fijos del mes. Pura y verificable a mano:
 //   total          = Σ montos (a centavos). Un gasto repartido en N meses entra con su cuota.
 //   costo por litro = total / litros de leche de un mes normal (4 decimales)
+//   con inflación   = total × (1 + %/100) / litros: los gastos de un mes se cargan en las
+//                     elaboraciones del mes siguiente, cuando ya subieron (pedido de Pablo 11/11)
 //   cubierto        = lo que las elaboraciones del mes cargaron DE VERDAD (suma de sus líneas
 //                     "COSTOS FIJOS DE PLANTA"), no litros × $/litro
 //   sin cubrir      = total − cubierto (>0 no llegó a ningún queso; <0 se cubrió de más)
@@ -13,15 +15,22 @@ const RATE_DP = 4;
 
 export interface FixedCostTotals {
   total: string;
-  costoPorLitro: string | null; // null si no hubo litros (no se divide por cero)
+  costoSinAjuste: string | null; // total / litros, sin inflación
+  costoPorLitro: string | null; // el que se suma: con la inflación. null si no hubo litros
 }
 
-export function computeFixedCosts(lines: { monto: string | number }[], litros: string | number): FixedCostTotals {
+export function computeFixedCosts(
+  lines: { monto: string | number }[],
+  litros: string | number,
+  inflacion: string | number = 0,
+): FixedCostTotals {
   const total = lines.reduce((acc, l) => acc.plus(new Big(String(l.monto)).round(MONEY_DP)), new Big(0));
   const L = new Big(String(litros));
+  const factor = new Big(1).plus(new Big(String(inflacion)).div(100));
   return {
     total: total.toFixed(MONEY_DP),
-    costoPorLitro: L.gt(0) ? total.div(L).toFixed(RATE_DP) : null,
+    costoSinAjuste: L.gt(0) ? total.div(L).toFixed(RATE_DP) : null,
+    costoPorLitro: L.gt(0) ? total.times(factor).div(L).toFixed(RATE_DP) : null,
   };
 }
 
