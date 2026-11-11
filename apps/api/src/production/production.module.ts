@@ -8,6 +8,7 @@ import { BatchesModule } from '../batches/batches.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { UsersModule } from '../users/users.module';
 import { ExchangeRatesModule } from '../exchange-rates/exchange-rates.module';
+import { FixedCostsModule } from '../fixed-costs/fixed-costs.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { ExchangeRatesModule } from '../exchange-rates/exchange-rates.module';
     InventoryModule,
     UsersModule,
     ExchangeRatesModule,
+    FixedCostsModule,
   ],
   providers: [ProductionService],
   controllers: [ProductionController],

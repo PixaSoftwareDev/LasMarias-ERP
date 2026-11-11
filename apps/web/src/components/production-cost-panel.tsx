@@ -1,6 +1,7 @@
 'use client';
 
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react';
+import { COSTO_FIJO_NOMBRE } from '@lasmarias/shared-schemas';
 import type { ProductionCostBreakdown } from '@lasmarias/shared-schemas';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn, formatMoney } from '@/lib/utils';
@@ -25,6 +26,15 @@ function pesos(value: string | null | undefined): string {
   const n = Number(value);
   if (Number.isNaN(n)) return '—';
   return formatMoney(n);
+}
+
+// Precio unitario con hasta 4 decimales: es el que usa la calculadora (ej. $24,8385 por litro).
+// Con 2 decimales la cuenta "cantidad × precio" no da el subtotal a mano.
+function precioUnit(value: string | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '—';
+  const n = Number(value);
+  if (Number.isNaN(n)) return '—';
+  return `$${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
 }
 
 function pct(value: string | null | undefined): string {
@@ -59,6 +69,8 @@ interface Props {
 export function ProductionCostPanel({ breakdown, className }: Props) {
   const { real, estandar, variance } = breakdown;
   const hasWarnings = real.warnings.length > 0;
+  // Línea de costos fijos de planta (si la orden la tiene): se muestra aparte del resto de insumos.
+  const fijo = real.detalleInsumos?.find((l) => l.name === COSTO_FIJO_NOMBRE);
   const costPerKgMissing = real.costoPorKg === null || real.costoPorKg === '';
 
   const netTone = variance ? varianceTone(variance.desvioCostoNeto) : 'neutral';
@@ -110,6 +122,12 @@ export function ProductionCostPanel({ breakdown, className }: Props) {
             <dt className="text-foreground-muted">Costo de insumos</dt>
             <dd className="font-medium">{pesos(real.costoInsumos)}</dd>
           </div>
+          {fijo && (
+            <div className="flex items-center justify-between border-b border-border-subtle py-1.5 pl-4 text-sm">
+              <dt className="text-foreground-muted">incluye costos fijos de planta ({precioUnit(fijo.unitCost)} por litro)</dt>
+              <dd>{pesos(fijo.subtotal)}</dd>
+            </div>
+          )}
           <div className="flex items-center justify-between border-b border-border-subtle py-1.5">
             <dt className="text-foreground-muted">Costo bruto</dt>
             <dd className="font-medium">{pesos(real.costoBruto)}</dd>
@@ -146,7 +164,7 @@ export function ProductionCostPanel({ breakdown, className }: Props) {
                         {l.name} <span className="text-xs text-foreground-muted">(leche / masa)</span>
                       </td>
                       <td className="px-3 py-2 text-right">{kg(l.cantidad)}</td>
-                      <td className="px-3 py-2 text-right">{pesos(l.unitCost)}</td>
+                      <td className="px-3 py-2 text-right">{precioUnit(l.unitCost)}</td>
                       <td className="px-3 py-2 text-right font-medium">{pesos(l.subtotal)}</td>
                     </tr>
                   ))}
@@ -154,7 +172,7 @@ export function ProductionCostPanel({ breakdown, className }: Props) {
                     <tr key={`insumo-${l.name}`} className="border-t border-border-subtle">
                       <td className="px-3 py-2">{l.name}</td>
                       <td className="px-3 py-2 text-right">{kg(l.cantidad)}</td>
-                      <td className="px-3 py-2 text-right">{pesos(l.unitCost)}</td>
+                      <td className="px-3 py-2 text-right">{precioUnit(l.unitCost)}</td>
                       <td className="px-3 py-2 text-right font-medium">{pesos(l.subtotal)}</td>
                     </tr>
                   ))}

@@ -1,5 +1,5 @@
 import type { IngredientCost } from './elaboration-cost';
-import { computeOrderCost, expectedYieldFromBreakdown, primaryInputsFromBreakdown } from './order-cost';
+import { computeOrderCost, expectedYieldFromBreakdown, fixedCostIngredient, primaryInputsFromBreakdown } from './order-cost';
 
 // "Recalcular con la receta corregida" — caso real del dueño (09/11/2026), OP-20261109-0002:
 // CHEDDAR EN SALSA, 54,5 kg de origen (masa 35 + ricota 3,5 + ricota 11 + crema 5) → 65 kg
@@ -84,5 +84,38 @@ describe('expectedYieldFromBreakdown', () => {
 
   it('sin estándar al cerrar → sin estándar al recalcular', () => {
     expect(expectedYieldFromBreakdown({ estandar: null }, 0)).toBeNull();
+  });
+});
+
+describe('costos fijos de planta (se suman solos al cerrar)', () => {
+  it('sin leche cruda o sin $/litro no hay línea', () => {
+    expect(fixedCostIngredient('CF', '0', '27.4840')).toBeNull();
+    expect(fixedCostIngredient('CF', '1000', null)).toBeNull();
+  });
+
+  it('masa de 1.000 L con $27,484/L: suma $27.484,00 y no escala con los kg', () => {
+    const base = {
+      totalLiters: 1000,
+      primaryInputs: [{ name: 'LECHE', quantity: '1000', unitCost: '500' }], // 500.000
+      version,
+      byproductActuals: {},
+      expectedYield: 0.1, // estándar: 100 kg
+    };
+    const fijo = fixedCostIngredient('COSTOS FIJOS DE PLANTA', '1000', '27.4840')!;
+    const sin = computeOrderCost({ ...base, kgProductoTotal: '100', ingredients: [] });
+    const con = computeOrderCost({ ...base, kgProductoTotal: '100', ingredients: [fijo] });
+    const linea = con.real.detalleInsumos.find((l) => l.name === 'COSTOS FIJOS DE PLANTA')!;
+    expect(linea.cantidad).toBe('1000');
+    expect(linea.subtotal).toBe('27484.00');
+    // 500.000 + 27.484 = 527.484 → / 100 kg = 5.274,84
+    expect(sin.real.costoNeto).toBe('500000.00');
+    expect(con.real.costoNeto).toBe('527484.00');
+    expect(con.real.costoPorKg).toBe('5274.8400');
+    // En el estándar es la misma plata (mismos litros): el desvío no cambia por los fijos.
+    expect(con.estandar?.costoNeto).toBe('527484.00');
+    expect(con.variance?.desvioCostoNeto).toBe(sin.variance?.desvioCostoNeto);
+    // Con 90 kg en vez de 100, la línea sigue siendo 27.484 (no escala con kg).
+    const menos = computeOrderCost({ ...base, kgProductoTotal: '90', ingredients: [fijo] });
+    expect(menos.real.detalleInsumos.find((l) => l.name === 'COSTOS FIJOS DE PLANTA')!.subtotal).toBe('27484.00');
   });
 });

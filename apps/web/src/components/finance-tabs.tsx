@@ -13,6 +13,7 @@ const TABS: { href: string; label: string }[] = [
   { href: '/pagos', label: 'Pagos' },
   { href: '/caja', label: 'Caja y bancos' },
   { href: '/cheques', label: 'Cheques' },
+  { href: '/costos-fijos', label: 'Costos fijos' },
 ];
 
 export function FinanceTabs() {

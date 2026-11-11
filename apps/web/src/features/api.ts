@@ -68,9 +68,7 @@ import type {
   CreateChequeInput,
   UpdateChequeStatusInput,
   ProfitabilityRow,
-  MilkMonthPrices,
-  SaveMilkMonthPricesInput,
-  SaveMilkMonthPricesResult,
+  CostPerKgRow,
   HomeSummary,
   HomeCalendar,
   ProducerBalance,
@@ -96,6 +94,13 @@ import type {
   SupplierPayment,
   RegisterSupplierPaymentInput,
   SupplierBalance,
+  FixedCostsOverview,
+  MilkMonthPrices,
+  SaveMilkMonthPricesInput,
+  SaveMilkMonthPricesResult,
+  FixedCostType,
+  FixedCostTypeInput,
+  SaveFixedCostMonthInput,
 } from '@lasmarias/shared-schemas';
 import type { ProducerDto } from './receptions/types';
 import { api, downloadFile } from '@/lib/api-client';
@@ -323,6 +328,8 @@ export const reportsApi = {
   salesByPeriod: (from: string, to: string, granularity: ReportGranularity) =>
     api<SalesByPeriodRow[]>(`/api/reports/sales-by-period?${reportQs({ from, to, granularity })}`),
   yield: (from: string, to: string) => api<YieldReportRow[]>(`/api/reports/yield?${reportQs({ from, to })}`),
+  // Costo por kg de cada producto (promedio de los lotes cerrados del rango).
+  costPerKg: (from: string, to: string) => api<CostPerKgRow[]>(`/api/reports/cost-per-kg?${reportQs({ from, to })}`),
   // Rentabilidad por cliente (ingresos − costo de lo despachado).
   profitability: (from: string, to: string) =>
     api<ProfitabilityRow[]>(`/api/reports/profitability?${reportQs({ from, to })}`),
@@ -409,4 +416,19 @@ export const milkPricesApi = {
   get: (month: string) => api<MilkMonthPrices>(`/api/milk-receptions/prices/${month}`),
   save: (month: string, input: SaveMilkMonthPricesInput) =>
     api<SaveMilkMonthPricesResult>(`/api/milk-receptions/prices/${month}`, { method: 'PUT', body: input }),
+};
+
+export const fixedCostsApi = {
+  overview: () => api<FixedCostsOverview>('/api/fixed-costs'),
+  save: (month: string, input: SaveFixedCostMonthInput) =>
+    api<FixedCostsOverview>(`/api/fixed-costs/${month}`, { method: 'PUT', body: input }),
+  createType: (input: FixedCostTypeInput) =>
+    api<FixedCostType>('/api/fixed-costs/types', { method: 'POST', body: input }),
+  updateType: (id: string, input: FixedCostTypeInput) =>
+    api<FixedCostType>(`/api/fixed-costs/types/${id}`, { method: 'PUT', body: input }),
+  removeType: (id: string) => api<{ deleted: true }>(`/api/fixed-costs/types/${id}`, { method: 'DELETE' }),
+  setLitrosNormales: (litros: number | null) =>
+    api<FixedCostsOverview>('/api/fixed-costs/litros-normales', { method: 'PUT', body: { litros } }),
+  setListo: (month: string, listo: boolean) =>
+    api<FixedCostsOverview>(`/api/fixed-costs/${month}/listo`, { method: 'PUT', body: { listo } }),
 };

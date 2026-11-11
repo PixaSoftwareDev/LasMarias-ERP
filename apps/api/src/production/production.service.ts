@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import Big from 'big.js';
@@ -19,6 +20,7 @@ import type {
   SaveProductionProgressInput,
   UpdateProductionInput,
 } from '@lasmarias/shared-schemas';
+import { COSTO_FIJO_NOMBRE } from '@lasmarias/shared-schemas';
 import { ProductionOrderEntity } from './production-order.entity';
 import { RecipesService } from '../recipes/recipes.service';
 import { BatchEntity } from '../batches/batch.entity';
@@ -27,7 +29,13 @@ import { RecipeEntity, RecipeVersionEntity } from '../recipes/recipe.entity';
 import { InventoryMovementEntity } from '../inventory/inventory-movement.entity';
 import { computeByproducts, computeYield } from '../recipes/yield-calculator';
 import type { CostDetailLine, IngredientCost, PrimaryInput } from './elaboration-cost';
-import { computeOrderCost, expectedYieldFromBreakdown, primaryInputsFromBreakdown } from './order-cost';
+import { FixedCostsService } from '../fixed-costs/fixed-costs.service';
+import {
+  computeOrderCost,
+  expectedYieldFromBreakdown,
+  fixedCostIngredient,
+  primaryInputsFromBreakdown,
+} from './order-cost';
 import { UsersService } from '../users/users.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import { bultosForQuantity } from '../inventory/bultos-allocation';
@@ -54,6 +62,8 @@ export class ProductionService {
     private readonly users: UsersService,
     private readonly dataSource: DataSource,
     private readonly exchangeRates: ExchangeRatesService,
+    // Costos fijos de planta: opcional para que los tests de servicio no lo necesiten.
+    @Optional() private readonly fixedCosts?: FixedCostsService,
   ) {}
 
   async list(): Promise<ProductionOrder[]> {
@@ -683,6 +693,7 @@ export class ProductionService {
       // En leche→masa son litros de leche ($/litro); en masa→mozzarella son kg de masa
       // ($/kg) heredados del cierre de la orden anterior vía batch.unitCost.
       const primaryInputs: PrimaryInput[] = [];
+      let milkLiters = new Big(0); // solo leche cruda (lote sin producto): base de los costos fijos
       // CANDADO sobre los lotes consumidos: el cierre de una orden vieja todavía puede
       // descontar leche (retrocompat), y nadie más puede tocarlos mientras tanto.
       await lockBatches(manager, order.milkInputs.map((m) => m.batchId));
@@ -707,6 +718,7 @@ export class ProductionService {
           quantity: String(mi.liters),
           unitCost,
         });
+        if (!batch.productId) milkLiters = milkLiters.plus(String(mi.liters));
         // Normalmente la leche/masa YA se descontó del silo al ABRIR la orden (la reserva es
         // consumo) y su salida quedó registrada; al cerrar solo liberamos la marca "en proceso".
         // RETROCOMPAT: las órdenes que quedaron ABIERTAS de antes del cambio no tienen ese descuento
@@ -793,6 +805,17 @@ export class ProductionService {
       // para insumos sin precio en la ficha o sin producto asociado. Así el administrativo
       // actualiza un precio en UN solo lugar y las próximas elaboraciones lo toman solas.
       const ingredients = await this.priceIngredients(manager, version, order.startedAt);
+
+      // Costos fijos de planta (luz, gas, sueldos…): se suman solos por litro de leche cruda,
+      // sin estar en la receta. Primera vez que cierra → $/litro del último mes cargado. Si se
+      // está re-cerrando (editar una orden cerrada) se mantiene el $/litro con que cerró, y si
+      // cerró sin costos fijos sigue sin ellos: las órdenes ya cerradas no cambian.
+      const fijoPrevio = order.costBreakdown?.real.detalleInsumos?.find((l) => l.name === COSTO_FIJO_NOMBRE);
+      const costoPorLitroFijo = order.costBreakdown
+        ? (fijoPrevio?.unitCost ?? null)
+        : ((await this.fixedCosts?.vigente(manager))?.costoPorLitro ?? null);
+      const fijo = fixedCostIngredient(COSTO_FIJO_NOMBRE, milkLiters.toString(), costoPorLitroFijo);
+      if (fijo) ingredients.push(fijo);
 
       // Cantidades reales de subproductos (por nombre, desde lo que carga el operario).
       const byproductActuals = this.byproductActuals(order, input.actualOutputs);
@@ -1327,6 +1350,10 @@ export class ProductionService {
     const totalLiters = Number(order.totalMilkLiters);
     const kgProductoTotal = String(order.totalPrincipalKg ?? 0);
     const ingredients = await this.priceIngredients(manager, version, order.startedAt, detalleInsumos);
+    // Los costos fijos no están en la receta: se mantienen tal cual cerró la orden.
+    const fijoPrevio = detalleInsumos.find((l) => l.name === COSTO_FIJO_NOMBRE);
+    if (fijoPrevio)
+      ingredients.push({ name: fijoPrevio.name, quantity: fijoPrevio.cantidad, unitCost: fijoPrevio.unitCost, basis: 'fixed_per_order' });
     const expectedYield = expectedYieldFromBreakdown(old, order.recipeVersion?.standardWastePercent ?? 0);
     const cost = {
       ...computeOrderCost({

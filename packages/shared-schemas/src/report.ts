@@ -55,6 +55,19 @@ export const yieldReportRowSchema = z.object({
 });
 export type YieldReportRow = z.infer<typeof yieldReportRowSchema>;
 
+// --- Costo por kg de cada producto (para fijar precios) ---
+// Promedio PONDERADO de los lotes cerrados en el período: Σ costo neto ÷ Σ kg. Incluye los costos
+// fijos que cargó cada lote (los cerrados antes de cargarlos no los tienen).
+export const costPerKgRowSchema = z.object({
+  productId: z.string(),
+  productName: z.string(),
+  lots: z.number(), // elaboraciones cerradas en el período
+  kg: z.number(),
+  totalCost: z.number(),
+  costPerKg: z.number(),
+});
+export type CostPerKgRow = z.infer<typeof costPerKgRowSchema>;
+
 // --- Rentabilidad por cliente (ingresos − costo de lo despachado) ---
 export const profitabilityRowSchema = z.object({
   clientId: z.string(),

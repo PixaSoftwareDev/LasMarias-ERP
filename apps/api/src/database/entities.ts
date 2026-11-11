@@ -7,7 +7,6 @@ import { ProductEntity } from '../products/product.entity';
 import { BatchEntity } from '../batches/batch.entity';
 import { ProducerEntity } from '../producers/producer.entity';
 import { ProducerPaymentEntity } from '../producers/producer-payment.entity';
-import { ProducerMonthPriceEntity } from '../producers/producer-month-price.entity';
 import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
 import { RecipeEntity, RecipeVersionEntity } from '../recipes/recipe.entity';
 import { ProductionOrderEntity } from '../production/production-order.entity';
@@ -27,9 +26,17 @@ import { SupplierEntity } from '../suppliers/supplier.entity';
 import { PayableEntity } from '../suppliers/payable.entity';
 import { SupplierPaymentEntity } from '../suppliers/supplier-payment.entity';
 import { BackupRunEntity } from '../backups/backup-run.entity';
+import { FixedCostMonthEntity } from '../fixed-costs/fixed-cost-month.entity';
+import { FixedCostTypeEntity } from '../fixed-costs/fixed-cost-type.entity';
+import { FixedCostSettingsEntity } from '../fixed-costs/fixed-cost-settings.entity';
+import { ProducerMonthPriceEntity } from '../producers/producer-month-price.entity';
 
 export const entities = [
   BackupRunEntity,
+  FixedCostMonthEntity,
+  FixedCostTypeEntity,
+  FixedCostSettingsEntity,
+  ProducerMonthPriceEntity,
   UserEntity,
   ClientEntity,
   ClientPriceItemEntity,
@@ -37,7 +44,6 @@ export const entities = [
   BatchEntity,
   ProducerEntity,
   ProducerPaymentEntity,
-  ProducerMonthPriceEntity,
   MilkReceptionEntity,
   RecipeEntity,
   RecipeVersionEntity,

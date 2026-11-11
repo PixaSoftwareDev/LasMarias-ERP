@@ -84,6 +84,17 @@ export function computeOrderCost(input: OrderCostInput): OrderCost {
   return { real, estandar, variance: computeElaborationVariance(estandar, real) };
 }
 
+// --- Costos fijos de planta -------------------------------------------------------------
+
+// Línea de costos fijos que se suma sola al cerrar (sin estar en la receta):
+//   litros de leche cruda de la orden × $/litro del mes activo.
+// Va como "fijo por orden" con cantidad = litros, así la calculadora la suma tal cual en el
+// real y en el estándar (no escala con kg). Sin leche cruda o sin $/litro → no hay línea.
+export function fixedCostIngredient(name: string, milkLiters: string, costoPorLitro: string | null): IngredientCost | null {
+  if (costoPorLitro == null || !(Number(milkLiters) > 0)) return null;
+  return { name, quantity: milkLiters, unitCost: costoPorLitro, basis: 'fixed_per_order' };
+}
+
 // --- Recalcular con la receta corregida -------------------------------------------------
 
 // Los lotes de origen se toman TAL CUAL quedaron al cerrar (cantidad y $/kg): lo único que
