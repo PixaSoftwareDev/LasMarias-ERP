@@ -7,6 +7,7 @@ import { ProductEntity } from '../products/product.entity';
 import { BatchEntity } from '../batches/batch.entity';
 import { ProducerEntity } from '../producers/producer.entity';
 import { ProducerPaymentEntity } from '../producers/producer-payment.entity';
+import { ProducerMonthPriceEntity } from '../producers/producer-month-price.entity';
 import { MilkReceptionEntity } from '../milk-receptions/milk-reception.entity';
 import { RecipeEntity, RecipeVersionEntity } from '../recipes/recipe.entity';
 import { ProductionOrderEntity } from '../production/production-order.entity';
@@ -36,6 +37,7 @@ export const entities = [
   BatchEntity,
   ProducerEntity,
   ProducerPaymentEntity,
+  ProducerMonthPriceEntity,
   MilkReceptionEntity,
   RecipeEntity,
   RecipeVersionEntity,

@@ -17,3 +17,5 @@ export * from './settings';
 export * from './money';
 export * from './supplier';
 export * from './backup';
+export * from './month';
+export * from './milk-price';

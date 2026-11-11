@@ -68,6 +68,9 @@ import type {
   CreateChequeInput,
   UpdateChequeStatusInput,
   ProfitabilityRow,
+  MilkMonthPrices,
+  SaveMilkMonthPricesInput,
+  SaveMilkMonthPricesResult,
   HomeSummary,
   HomeCalendar,
   ProducerBalance,
@@ -400,4 +403,10 @@ export const salesApi = {
     api<CreditNote>(`/api/sales/orders/${orderId}/returns`, { method: 'POST', body: input }),
   exportAccountsXlsx: () => downloadFile('/api/sales/export/accounts.xlsx', 'cuentas-corrientes.xlsx'),
   exportPriceListXlsx: () => downloadFile('/api/sales/export/price-list.xlsx', 'listas-de-precios.xlsx'),
+};
+
+export const milkPricesApi = {
+  get: (month: string) => api<MilkMonthPrices>(`/api/milk-receptions/prices/${month}`),
+  save: (month: string, input: SaveMilkMonthPricesInput) =>
+    api<SaveMilkMonthPricesResult>(`/api/milk-receptions/prices/${month}`, { method: 'PUT', body: input }),
 };

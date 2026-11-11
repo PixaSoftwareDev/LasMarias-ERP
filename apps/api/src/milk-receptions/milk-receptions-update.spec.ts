@@ -1,3 +1,4 @@
+import { milkPricesSinMeses } from './milk-prices.test-helper';
 import { MilkReceptionsService } from './milk-receptions.service';
 
 // Tests del método UPDATE: editar una recepción cargada mal (pedido del dueño, oct 2026).
@@ -32,6 +33,8 @@ function makeService(fx: Fixture) {
 
   const receptionRepo = {
     findOne: jest.fn(({ where: { id } }: any) => Promise.resolve(fx.reception?.id === id ? fx.reception : null)),
+    // Suelta el vínculo con el lote ANTES de borrarlo (FK batch_id).
+    update: jest.fn(() => Promise.resolve({ affected: 1 })),
     save: jest.fn((r: any) => {
       savedReception = { ...r };
       return Promise.resolve(r);
@@ -104,6 +107,7 @@ function makeService(fx: Fixture) {
     { getQualityLimits: jest.fn().mockResolvedValue(undefined), getIvaRate: jest.fn().mockResolvedValue(21) } as any,
     { toArs: jest.fn((amount: number) => Promise.resolve(amount)) } as any,
     dataSource as any,
+    milkPricesSinMeses(),
   );
 
   return { service, savedBatches, deletedBatchIds, getReception: () => savedReception };
