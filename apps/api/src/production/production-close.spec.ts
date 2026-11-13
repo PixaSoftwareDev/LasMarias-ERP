@@ -124,6 +124,8 @@ function makeService(
     }),
     // Lotes de insumo para el descuento FEFO (vacío por defecto → no descuenta).
     find: jest.fn().mockResolvedValue(opts.insumoLots ?? []),
+    // ¿El insumo lleva stock? Sin lotes nunca (mano de obra) → no se avisa faltante.
+    count: jest.fn().mockResolvedValue((opts.insumoLots ?? []).length),
   };
   const movementRepo = {
     // Entradas previas de la orden = lotes creados por "guardar lo de hoy".
@@ -869,5 +871,62 @@ describe('ProductionService.close — reusa el lote creado por "guardar lo de ho
       } as any),
     ).rejects.toThrow(/Cargaste 0/);
   });
-});
 
+  describe('envases enteros (pedido 12/11/2026)', () => {
+    const baldes = { productName: 'BALDES', productId: 'ins-balde', quantity: 0.1, unit: 'unidad', unitCost: 1000, basis: 'per_kg_product' };
+    const loteBaldes = () => ({ id: 'balde-1', productId: 'ins-balde', remainingQuantity: '140', status: 'activo', unit: 'unidad' });
+
+    it('168 kg × 0,1 → descuenta 17 baldes del stock, lo mismo que se costea', async () => {
+      const lote = loteBaldes();
+      const { service, getOrder } = makeService({ ingredients: [baldes], insumoLots: [lote] });
+      await service.close('order-1', {
+        actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 168, isPrincipal: true }],
+      } as any);
+      expect(lote.remainingQuantity).toBe('123');
+      expect(getOrder().costBreakdown.real.detalleInsumos[0]).toMatchObject({ cantidad: '17', subtotal: '17000.00' });
+      expect(getOrder().costBreakdown.insumosFaltantes).toBeUndefined();
+    });
+
+    it('envases corregidos al cerrar: 16 baldes (uno se reusó) → stock y costo con 16, y se guardan', async () => {
+      const lote = loteBaldes();
+      const { service, getOrder } = makeService({ ingredients: [baldes], insumoLots: [lote] });
+      await service.close('order-1', {
+        actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 168, isPrincipal: true }],
+        envases: [{ productId: 'ins-balde', quantity: 16 }],
+      } as any);
+      expect(lote.remainingQuantity).toBe('124');
+      expect(getOrder().costBreakdown.real.detalleInsumos[0].cantidad).toBe('16');
+      expect(getOrder().costBreakdown.envases).toEqual({ 'ins-balde': 16 });
+    });
+
+    it('si no alcanza el stock descuenta lo que hay y avisa cuánto faltó', async () => {
+      const lote = { ...loteBaldes(), remainingQuantity: '10' };
+      const { service, getOrder } = makeService({ ingredients: [baldes], insumoLots: [lote] });
+      await service.close('order-1', {
+        actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 168, isPrincipal: true }],
+      } as any);
+      expect(lote.remainingQuantity).toBe('0');
+      expect(lote.status).toBe('agotado');
+      expect(getOrder().costBreakdown.insumosFaltantes).toEqual([{ name: 'BALDES', faltan: '7' }]);
+    });
+
+    it('"por bulto": usa los bultos del principal + formatos', async () => {
+      const bolsa = { ...baldes, productName: 'BOLSA', quantity: 1, basis: 'per_bulto' };
+      const lote = loteBaldes();
+      const { service, getOrder } = makeService({ ingredients: [bolsa], insumoLots: [lote] });
+      await service.close('order-1', {
+        actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 701, bultos: 44, isPrincipal: true }],
+      } as any);
+      expect(getOrder().costBreakdown.real.detalleInsumos[0].cantidad).toBe('44');
+      expect(lote.remainingQuantity).toBe('96');
+    });
+
+    it('"por bulto" sin bultos cargados: no deja cerrar (no se sabe cuántos envases se usaron)', async () => {
+      const bolsa = { ...baldes, productName: 'BOLSA', quantity: 1, basis: 'per_bulto' };
+      const { service } = makeService({ ingredients: [bolsa], insumoLots: [loteBaldes()] });
+      await expect(
+        service.close('order-1', { actualOutputs: [{ productId: PRINCIPAL_PRODUCT_ID, quantity: 701, isPrincipal: true }] } as any),
+      ).rejects.toThrow(/Cargá los bultos: la receta usa BOLSA por bulto/);
+    });
+  });
+});

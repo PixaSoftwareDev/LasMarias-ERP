@@ -36,6 +36,7 @@ const insumos = (sh500: string): IngredientCost[] => [
 const base = {
   totalLiters: 54.5,
   kgProductoTotal: '65',
+  bultos: 0,
   primaryInputs: primaryInputsFromBreakdown(detalleInputs),
   version,
   byproductActuals: {},
@@ -96,6 +97,7 @@ describe('costos fijos de planta (se suman solos al cerrar)', () => {
   it('masa de 1.000 L con $27,484/L: suma $27.484,00 y no escala con los kg', () => {
     const base = {
       totalLiters: 1000,
+      bultos: 0,
       primaryInputs: [{ name: 'LECHE', quantity: '1000', unitCost: '500' }], // 500.000
       version,
       byproductActuals: {},

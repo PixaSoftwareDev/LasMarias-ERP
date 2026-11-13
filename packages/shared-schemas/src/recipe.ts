@@ -11,6 +11,9 @@ export const ingredientBasisSchema = z.enum([
   'per_1000_liters_milk', // por cada 1.000 litros de leche (ej: 250 g de calcio /1000 L)
   'per_kg_product',
   'fixed_per_order',
+  // Uno (o N) por bulto producido: el envase de cada bolsa/balde/caja (pedido del dueño
+  // 12/11/2026). Cuenta los bultos reales del cierre, no los kg.
+  'per_bulto',
 ]);
 export type IngredientBasis = z.infer<typeof ingredientBasisSchema>;
 
