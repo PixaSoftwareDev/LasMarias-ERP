@@ -27,10 +27,11 @@ function aInputDate(d: Date) {
 // nota de crédito). El usuario elige cuánto devolver de cada producto (hasta lo
 // despachado). El backend repone stock y acredita en cuenta corriente.
 export function ReturnDialog({ order, onClose, onDone }: Props) {
-  // qty a devolver por productId (string para input controlado).
-  const [qty, setQty] = useState<Record<string, string>>({});
-  // Bultos a devolver por productId. Solo se pide en las líneas que salieron con bultos.
-  const [bultos, setBultos] = useState<Record<string, string>>({});
+  // Cantidad y bultos a devolver POR RENGLÓN (índice), no por producto: una venta puede tener
+  // el mismo producto en dos renglones (ej. masa de dos lotes). Strings para input controlado.
+  const [qty, setQty] = useState<Record<number, string>>({});
+  // Bultos solo se piden en los renglones que salieron con bultos.
+  const [bultos, setBultos] = useState<Record<number, string>>({});
   const [notes, setNotes] = useState('');
   // Fecha real de la devolución: hoy por defecto, editable (se cargan atrasadas). No puede
   // ser futura ni anterior a la venta.
@@ -50,12 +51,10 @@ export function ReturnDialog({ order, onClose, onDone }: Props) {
 
   const lines = useMemo(
     () =>
-      order.lines
-        .map((l) => {
-          const raw = qty[l.productId] ?? '';
-          const quantity = Number(raw);
-          return { line: l, raw, quantity };
-        }),
+      order.lines.map((l, index) => {
+        const raw = qty[index] ?? '';
+        return { line: l, index, raw, quantity: Number(raw) };
+      }),
     [order.lines, qty],
   );
 
@@ -63,7 +62,7 @@ export function ReturnDialog({ order, onClose, onDone }: Props) {
   const overMax = lines.some((l) => l.quantity > l.line.quantity);
   // Si la línea se cobró por bulto, se acredita por bulto devuelto; si no, por kg.
   const refundTotal = selected.reduce((acc, l) => {
-    const b = Number(bultos[l.line.productId] ?? '');
+    const b = Number(bultos[l.index] ?? '');
     const cantidad = l.line.priceBasis === 'bulto' ? (Number.isFinite(b) ? b : 0) : l.quantity;
     return acc + cantidad * l.line.unitPrice;
   }, 0);
@@ -72,9 +71,10 @@ export function ReturnDialog({ order, onClose, onDone }: Props) {
     mutationFn: () =>
       salesApi.createReturn(order.id, {
         lines: selected.map((l) => {
-          const b = bultos[l.line.productId];
+          const b = bultos[l.index];
           return {
             productId: l.line.productId,
+            lineIndex: l.index,
             quantity: l.quantity,
             bultos: b != null && b !== '' ? Math.round(Number(b)) : undefined,
           };
@@ -128,15 +128,24 @@ export function ReturnDialog({ order, onClose, onDone }: Props) {
 
         <div className="flex-1 space-y-3 overflow-y-auto p-4 sm:p-6">
           <p className="text-sm text-foreground-muted">Indicá cuánto se devuelve de cada producto.</p>
-          {lines.map(({ line, raw, quantity }) => {
+          {lines.map(({ line, index, raw, quantity }) => {
             const over = quantity > line.quantity;
             return (
-              <div key={line.productId} className="rounded-lg border border-border-subtle p-3">
+              <div key={index} className="rounded-lg border border-border-subtle p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate font-medium text-foreground">{line.productName}</p>
                     <p className="text-xs text-foreground-muted">
                       Despachado: {line.quantity.toLocaleString('es-AR')} {line.unit} · {money(line.unitPrice)} c/u
+                      {(line.lotes?.length || line.batchCode) && (
+                        <>
+                          {' · '}
+                          {line.lotes && line.lotes.length > 1 ? 'lotes' : 'lote'}{' '}
+                          <span className="font-mono">
+                            {line.lotes?.map((x) => x.batchCode).join(', ') || line.batchCode}
+                          </span>
+                        </>
+                      )}
                     </p>
                   </div>
                   <div className="w-28 flex-shrink-0">
@@ -150,7 +159,7 @@ export function ReturnDialog({ order, onClose, onDone }: Props) {
                       placeholder="0"
                       value={raw}
                       invalid={over}
-                      onChange={(e) => setQty((cur) => ({ ...cur, [line.productId]: e.target.value }))}
+                      onChange={(e) => setQty((cur) => ({ ...cur, [index]: e.target.value }))}
                     />
                   </div>
                 </div>
@@ -170,8 +179,8 @@ export function ReturnDialog({ order, onClose, onDone }: Props) {
                         aria-label={`Bultos a devolver de ${line.productName}`}
                         suffix="bultos"
                         placeholder="0"
-                        value={bultos[line.productId] ?? ''}
-                        onChange={(e) => setBultos((cur) => ({ ...cur, [line.productId]: e.target.value }))}
+                        value={bultos[index] ?? ''}
+                        onChange={(e) => setBultos((cur) => ({ ...cur, [index]: e.target.value }))}
                       />
                     </div>
                   </div>

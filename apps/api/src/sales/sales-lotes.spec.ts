@@ -164,13 +164,18 @@ function makeService(opts: { order?: any; accountMovements?: any[]; creditNotes?
 describe('despacho: de qué lote sale', () => {
   it('por defecto sale del más viejo aunque la base los devuelva desordenados', async () => {
     const { service, savedMovements } = makeService();
-    await service.createOrder(
+    const venta = await service.createOrder(
       { clientId: 'cli-1', lines: [{ productId: 'masa', quantity: 150, unitPrice: 10 }] } as any,
       'user-1',
     );
     expect(savedMovements.map((m) => [m.batchId, m.quantity])).toEqual([
       ['viejo', '100'],
       ['nuevo', '50'],
+    ]);
+    // El renglón anota de qué lotes salió de verdad (para el remito y la devolución).
+    expect(venta.lines[0]!.lotes!.map((x) => [x.batchCode, x.quantity])).toEqual([
+      ['LM-PP-20260810-0001', 100],
+      ['LM-PP-20261020-0001', 50],
     ]);
   });
 
@@ -214,6 +219,61 @@ describe('despacho: de qué lote sale', () => {
       ['nuevo', '100'],
       ['viejo', '100'],
     ]);
+  });
+
+  it('un renglón repartido entre lotes: cada lote baja sus kg y sus bultos, sin prorratear', async () => {
+    // Pedido 12/11/2026: 150 kg en UN renglón, 40 kg / 2 b del viejo y 110 kg / 9 b del nuevo.
+    // A prorrata habrían salido otros bultos (40/150 × 11 = 2,9 → 3 del viejo).
+    const { service, savedMovements, batchRepo } = makeService({
+      batches: [
+        { id: 'viejo', code: 'LM-PP-20260810-0001', productionDate: new Date('2026-08-10'), status: 'activo', remainingQuantity: '100', remainingBultos: 6, unit: 'kg' },
+        { id: 'nuevo', code: 'LM-PP-20261020-0001', productionDate: new Date('2026-10-20'), status: 'activo', remainingQuantity: '300', remainingBultos: 20, unit: 'kg' },
+      ],
+    });
+    const venta = await service.createOrder(
+      {
+        clientId: 'cli-1',
+        lines: [
+          {
+            productId: 'masa',
+            quantity: 150,
+            unitPrice: 10,
+            lotes: [
+              { batchId: 'viejo', quantity: 40, bultos: 2 },
+              { batchId: 'nuevo', quantity: 110, bultos: 9 },
+            ],
+          },
+        ],
+      } as any,
+      'user-1',
+    );
+    expect(savedMovements.map((m) => [m.batchId, m.quantity, m.bultos])).toEqual([
+      ['viejo', '40', 2],
+      ['nuevo', '110', 9],
+    ]);
+    const saldos = batchRepo.save.mock.calls.map(([b]: any) => [b.id, b.remainingQuantity, b.remainingBultos]);
+    expect(saldos).toEqual([
+      ['viejo', '60', 4],
+      ['nuevo', '190', 11],
+    ]);
+    // Un solo renglón: 150 kg, 11 bultos, $1.500, con los dos lotes anotados.
+    expect(venta.lines).toHaveLength(1);
+    expect(venta.lines[0]).toMatchObject({ quantity: 150, bultos: 11, subtotal: 1500 });
+    expect(venta.lines[0]!.lotes!.map((x) => x.batchCode)).toEqual(['LM-PP-20260810-0001', 'LM-PP-20261020-0001']);
+  });
+
+  it('si el reparto no suma el total del renglón, no descuenta nada', async () => {
+    const { service, savedMovements } = makeService();
+    await expect(
+      service.createOrder(
+        {
+          clientId: 'cli-1',
+          lines: [{ productId: 'masa', quantity: 150, unitPrice: 10, lotes: [{ batchId: 'viejo', quantity: 40 }] }],
+        } as any,
+        'user-1',
+      ),
+    ).rejects.toThrow(/Repartiste 40 kg de Masa entre los lotes, pero el renglón es de 150/);
+    expect(savedMovements).toHaveLength(0);
   });
 
   it('si el lote elegido ya no está disponible, lo dice', async () => {

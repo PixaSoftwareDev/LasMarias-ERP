@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ShoppingCart, Plus, Trash2, Truck, FileText, Undo2, TriangleAlert, PackageCheck, CalendarDays, BadgeDollarSign } from 'lucide-react';
+import { ShoppingCart, Plus, Trash2, Truck, FileText, Undo2, TriangleAlert, CalendarDays, BadgeDollarSign } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -24,7 +24,8 @@ import { formatMoney as money, formatDate } from '@/lib/utils';
 import { rateForCurrency } from '@/features/currency';
 import { DateRangeFilter } from '@/components/ui/date-range';
 import { TableSkeleton } from '@/components/ui/skeleton';
-import { ivaFactor, usaBultos, type SalesOrder, type Currency, type PriceBasis } from '@lasmarias/shared-schemas';
+import { DeQueLoteSale } from '@/components/sales/de-que-lote-sale';
+import { ivaFactor, resumenReparto, usaBultos, type FilaReparto, type SalesOrder, type Currency, type PriceBasis } from '@lasmarias/shared-schemas';
 
 // Condición de pago del despacho. El tipo vive en el schema como enum inline de
 // createSalesOrderInput; lo reflejamos acá para el selector.
@@ -40,6 +41,8 @@ interface Line {
   priceBasis: PriceBasis;
   // Lote elegido a mano. Sin elegir = sale del más viejo (automático).
   batchId?: string;
+  // O repartida entre varios lotes elegidos (lote + kg + bultos de cada uno).
+  lotes?: FilaReparto[];
   // Crema por % de grasa: % del análisis y precio de lista por kg de materia grasa.
   // El precio por kg sale solo: fatBasePrice × fatPct ÷ 100.
   fatPct?: number;
@@ -53,120 +56,10 @@ const EMPTY_LINE: Line = { productId: '', quantity: 1, unitPrice: 0, priceBasis:
 // Lo que se cobra en una línea: por bulto se multiplica por bultos, si no por kg.
 const lineQty = (l: Line) => (l.priceBasis === 'bulto' ? (l.bultos ?? 0) : l.quantity);
 
-const fefoDate = (iso?: string) => (iso ? formatDate(iso) : null);
-
 // Fecha de hoy en formato YYYY-MM-DD según el reloj local (no UTC, que corre un día en Argentina).
 function todayLocal(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-// De qué lote sale cada línea. Por defecto el más viejo (y sigue con el siguiente si no
-// alcanza); el dueño pidió poder elegir otro, porque a veces guardan el viejo para madurarlo.
-// El descuento real lo hace el backend al despachar. Debounce sobre producto+cantidad.
-function FefoPreview({
-  productId,
-  quantity,
-  batchId,
-  unit,
-  onChooseBatch,
-}: {
-  productId: string;
-  quantity: number;
-  unit: string;
-  batchId?: string;
-  onChooseBatch: (batchId: string | undefined) => void;
-}) {
-  const [debounced, setDebounced] = useState<{ productId: string; quantity: number } | null>(null);
-
-  useEffect(() => {
-    if (!productId || !(quantity > 0)) {
-      setDebounced(null);
-      return;
-    }
-    const t = setTimeout(() => setDebounced({ productId, quantity }), 350);
-    return () => clearTimeout(t);
-  }, [productId, quantity]);
-
-  const query = useQuery({
-    queryKey: ['fefo', debounced?.productId, debounced?.quantity],
-    queryFn: () => inventoryApi.fefoSuggestion(debounced!.productId, debounced!.quantity),
-    enabled: !!debounced,
-  });
-
-  if (!debounced) return null;
-  if (query.isLoading) {
-    return <p className="mt-2 text-xs text-foreground-subtle">Calculando de qué lote sale…</p>;
-  }
-  if (query.isError || !query.data) return null;
-
-  const { allocations, shortage } = query.data;
-  const lotes = query.data.batches ?? [];
-  const elegido = batchId ? lotes.find((b) => b.batchId === batchId) : undefined;
-  const fechaLote = (b: (typeof lotes)[number]) =>
-    b.expirationDate ? `vence ${formatDate(b.expirationDate)}` : b.productionDate ? `elaborado ${formatDate(b.productionDate)}` : '';
-
-  return (
-    <div className="mt-2 space-y-1.5 rounded-lg border border-border-subtle bg-surface-subtle/60 px-3 py-2.5 text-xs">
-      <label className="flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-foreground-muted">
-        <span className="flex items-center gap-1.5">
-          <PackageCheck className="h-3.5 w-3.5" aria-hidden="true" /> De qué lote sale
-        </span>
-        {lotes.length > 1 && (
-          <select
-            aria-label="Elegir de qué lote sale"
-            className="min-h-touch rounded-md border border-border bg-surface-elevated px-2 text-sm font-normal normal-case tracking-normal text-foreground"
-            value={batchId ?? ''}
-            onChange={(e) => onChooseBatch(e.target.value || undefined)}
-          >
-            <option value="">El más viejo primero</option>
-            {lotes.map((b) => (
-              <option key={b.batchId} value={b.batchId}>
-                {b.batchCode} · {fechaLote(b)} · {b.remaining.toLocaleString('es-AR')} {unit} disponibles
-              </option>
-            ))}
-          </select>
-        )}
-      </label>
-      {batchId ? (
-        !elegido ? (
-          <p className="flex items-center gap-1.5 text-amber-700">
-            <TriangleAlert className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-            El lote elegido ya no tiene stock. Elegí otro.
-          </p>
-        ) : elegido.remaining < quantity ? (
-          <p className="flex items-center gap-1.5 font-medium text-amber-700">
-            <TriangleAlert className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-            Ese lote tiene {elegido.remaining.toLocaleString('es-AR')} {unit}. Bajá la cantidad o agregá otra línea con otro lote.
-          </p>
-        ) : (
-          <p className="text-foreground-muted">
-            Sale todo del lote <span className="font-mono text-foreground">{elegido.batchCode}</span> ({fechaLote(elegido)}).
-          </p>
-        )
-      ) : allocations.length === 0 ? (
-        <p className="flex items-center gap-1.5 text-amber-700">
-          <TriangleAlert className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-          No hay lotes disponibles para este producto.
-        </p>
-      ) : (
-        allocations.map((a) => (
-          <p key={a.batchId} className="text-foreground-muted">
-            Se tomará <span className="font-medium text-foreground">{a.take.toLocaleString('es-AR', { maximumFractionDigits: 2 })}</span>
-            {' del lote '}
-            <span className="font-mono text-foreground">{a.batchCode}</span>
-            {fefoDate(a.expirationDate) ? <span> (vence {fefoDate(a.expirationDate)})</span> : null}
-          </p>
-        ))
-      )}
-      {!batchId && shortage > 0 && (
-        <p className="flex items-center gap-1.5 font-medium text-amber-700">
-          <TriangleAlert className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-          Faltan {shortage.toLocaleString('es-AR', { maximumFractionDigits: 2 })} sin stock disponible.
-        </p>
-      )}
-    </div>
-  );
 }
 
 export default function SalesPage() {
@@ -317,6 +210,7 @@ export default function SalesPage() {
           unitPrice: l.unitPrice,
           priceBasis: l.priceBasis,
           batchId: l.batchId,
+          lotes: l.lotes?.map(({ batchId, quantity, bultos }) => ({ batchId, quantity, bultos })),
           ...(l.fatPct && l.fatBasePrice != null && { fat: { pct: l.fatPct, basePrice: l.fatBasePrice } }),
         })),
         notes: notes || undefined,
@@ -383,7 +277,10 @@ export default function SalesPage() {
         if (i !== idx) return l;
         const next = { ...l, ...patch };
         // El lote elegido es de UN producto: si cambian el producto, vuelve al automático.
-        if (patch.productId !== undefined && patch.productId !== l.productId) next.batchId = undefined;
+        if (patch.productId !== undefined && patch.productId !== l.productId) {
+          next.batchId = undefined;
+          next.lotes = undefined;
+        }
         if (patch.productId && priceByProduct.has(patch.productId)) {
           next.unitPrice = priceByProduct.get(patch.productId)!;
         }
@@ -417,10 +314,15 @@ export default function SalesPage() {
 
   // Cobrar por bulto exige saber cuántos bultos salen (si no, el importe sería 0).
   const bultosFaltantes = validLines.some((l) => l.priceBasis === 'bulto' && !(l.bultos && l.bultos > 0));
+  // Un renglón repartido entre lotes tiene que cerrar: cada fila con lote y kg, y la suma = total.
+  // (Lo que tiene cada lote lo controla la pantalla del reparto y, al final, el backend.)
+  const repartoIncompleto = validLines.some(
+    (l) => l.lotes && resumenReparto(l.quantity, l.bultos, l.lotes, [], '').errores.length > 0,
+  );
   const grasaInvalida = (l: Line) => l.fatPct != null && !(l.fatPct > 0 && l.fatPct <= 100);
   const hayGrasaInvalida = validLines.some(grasaInvalida);
   const canSave =
-    !!clientId && validLines.length > 0 && !create.isPending && !needsRate && !bultosFaltantes && !hayGrasaInvalida && !!dispatchDate && dispatchDate <= todayLocal();
+    !!clientId && validLines.length > 0 && !create.isPending && !needsRate && !bultosFaltantes && !repartoIncompleto && !hayGrasaInvalida && !!dispatchDate && dispatchDate <= todayLocal();
 
   // ¿Alguna línea pide más de lo que hay en stock? (venta quedaría con stock negativo)
   const hasOverStock = useMemo(
@@ -730,13 +632,23 @@ export default function SalesPage() {
                         Precio $0. Si es masa usada para hacer mozzarella, cargala en Producción; si es merma, usá &quot;Dar de baja&quot; en Stock.
                       </p>
                     )}
+                    {row.productId && lines.findIndex((o) => o.productId === row.productId) < idx && (
+                      <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-amber-700">
+                        <TriangleAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                        Este producto ya está en otro renglón. Si va al mismo precio, sumalo ahí y elegí
+                        &quot;Repartir entre varios lotes&quot;: así el remito sale en un solo renglón.
+                      </p>
+                    )}
                     {row.productId && row.quantity > 0 && (
-                      <FefoPreview
+                      <DeQueLoteSale
                         productId={row.productId}
                         quantity={row.quantity}
-                        batchId={row.batchId}
+                        bultos={row.bultos}
                         unit={lineUnit}
-                        onChooseBatch={(batchId) => updateLine(idx, { batchId })}
+                        conBultos={conBultos}
+                        batchId={row.batchId}
+                        lotes={row.lotes}
+                        onChange={(cambio) => updateLine(idx, cambio)}
                       />
                     )}
                   </div>

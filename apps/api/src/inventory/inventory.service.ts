@@ -1074,6 +1074,7 @@ export class InventoryService {
           batchId: b.id,
           batchCode: b.code,
           remaining: Number(b.remainingQuantity),
+          bultos: b.remainingBultos,
           productionDate: b.productionDate?.toISOString(),
           expirationDate: b.expirationDate?.toISOString(),
         })),
