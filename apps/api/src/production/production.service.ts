@@ -1413,6 +1413,13 @@ export class ProductionService {
     const kgProductoTotal = String(order.totalPrincipalKg ?? 0);
     const envases = old.envases ?? {};
     const ingredients = await this.priceIngredients(manager, version, order.startedAt, detalleInsumos, envases);
+    const bultos = order.actualOutputs
+      .filter((o) => o.isPrincipal || o.isFormat)
+      .reduce((acc, o) => acc + (o.bultos ?? 0), 0);
+    // Igual que al cerrar: un envase "por bulto" sin bultos cargados daría 0 envases sin avisar.
+    const envasePorBulto = version.ingredients.find((i) => i.basis === 'per_bulto' && envases[i.productId] == null);
+    if (!bloqueo && envasePorBulto && bultos === 0)
+      bloqueo = `No se puede recalcular: la receta usa ${envasePorBulto.productName} por bulto y esta orden no tiene los bultos cargados. Editá la orden y cargalos.`;
     // Los costos fijos no están en la receta: se mantienen tal cual cerró la orden.
     const fijoPrevio = detalleInsumos.find((l) => l.name === COSTO_FIJO_NOMBRE);
     if (fijoPrevio)
@@ -1422,9 +1429,7 @@ export class ProductionService {
       ...computeOrderCost({
         totalLiters,
         kgProductoTotal,
-        bultos: order.actualOutputs
-          .filter((o) => o.isPrincipal || o.isFormat)
-          .reduce((acc, o) => acc + (o.bultos ?? 0), 0),
+        bultos,
         primaryInputs: primaryInputsFromBreakdown(detalleInputs),
         ingredients,
         version,
