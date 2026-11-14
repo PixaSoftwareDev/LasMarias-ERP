@@ -14,7 +14,7 @@ import { RecipeEntity, RecipeVersionEntity } from './recipe.entity';
 import { ProductionOrderEntity } from '../production/production-order.entity';
 import { ProductsService } from '../products/products.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
-import type { Currency } from '@lasmarias/shared-schemas';
+import type { Currency, IngredientBasis } from '@lasmarias/shared-schemas';
 import {
   computeByproducts,
   computeIngredients,
@@ -173,7 +173,9 @@ export class RecipesService {
       proteinPercent: input.proteinPercent,
     });
 
-    const ingredients = computeIngredients(input.liters, yieldResult.expectedYieldKg, version.ingredients);
+    const kgPorBulto = (await this.products.get(recipe.productId)).kgPorBulto;
+    const bultos = kgPorBulto ? Math.ceil(yieldResult.expectedYieldKg / kgPorBulto) : 0;
+    const ingredients = computeIngredients(input.liters, yieldResult.expectedYieldKg, version.ingredients, bultos);
     const byproducts = computeByproducts(input.liters, yieldResult.expectedYieldKg, version.byproducts);
 
     return {
@@ -204,7 +206,7 @@ export class RecipesService {
           productName: p.name,
           quantity: i.quantity,
           unit: i.unit as 'kg' | 'litro' | 'unidad' | 'gramo',
-          basis: i.basis as 'per_liter_milk' | 'per_kg_product' | 'fixed_per_order',
+          basis: i.basis as IngredientBasis,
           // Costo unitario congelado en la versión, EN PESOS ($/unidad del insumo). Default 0
           // para tolerar recetas sin costo cargado (CLAUDE.md §4.2).
           unitCost: unitCostArs,

@@ -19,6 +19,7 @@ import { MetaLitrosField, MetaLitrosResumen, litrosSugeridos } from '@/component
 import { DobleCostoAviso, ReprocesoRows, SinCostoAviso, useStockSources, type InputRow } from '@/components/production/stock-inputs';
 import { OutputFields } from '@/components/production/output-fields';
 import { FormatOutputs, type FormatRow } from '@/components/production/format-outputs';
+import { EnvasesUsados, envasesCorregidos } from '@/components/production/envases-usados';
 
 interface MilkBatch {
   id: string;
@@ -172,6 +173,8 @@ export default function EditProductionPage() {
   const [formatos, setFormatos] = useState<FormatRow[]>([]);
   const [warehouseId, setWarehouseId] = useState('');
   const [expectedYield, setExpectedYield] = useState('');
+  // Envases corregidos a mano al cerrar (precargados de la orden: si no, al guardar se perdían).
+  const [envases, setEnvases] = useState<Record<string, string>>({});
 
   // Ficha de cada producto: define si se cuenta por bultos y cuántos kg trae uno.
   const productsQuery = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
@@ -217,6 +220,9 @@ export default function EditProductionPage() {
       setWarehouseId(order.warehouseId ?? '');
       const std = order.costBreakdown?.estandar?.rendimiento;
       if (std) setExpectedYield(std);
+      setEnvases(
+        Object.fromEntries(Object.entries(order.costBreakdown?.envases ?? {}).map(([k, v]) => [k, String(v)])),
+      );
     }
     setSeeded(true);
   }, [orderQuery.data, seeded]);
@@ -263,6 +269,7 @@ export default function EditProductionPage() {
               warehouseId: warehouseId || undefined,
               expectedYieldKgPerLiter:
                 expectedYield !== '' && Number(expectedYield) > 0 ? Number(expectedYield) : undefined,
+              envases: envasesCorregidos(envases),
             }
           : {}),
       }),
@@ -582,6 +589,23 @@ export default function EditProductionPage() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {wasClosed && (
+        <EnvasesUsados
+          recipeId={order.recipeId}
+          recipeVersionId={order.recipeVersionId}
+          kg={
+            principalOutputs.reduce((a, o) => a + Number(quantities[o.productId] ?? 0), 0) +
+            formatosValidos.reduce((a, f) => a + Number(f.kg), 0)
+          }
+          bultos={
+            principalOutputs.reduce((a, o) => a + Number(bultos[o.productId] ?? 0), 0) +
+            formatosValidos.reduce((a, f) => a + Number(f.bultos ?? 0), 0)
+          }
+          value={envases}
+          onChange={setEnvases}
+        />
       )}
 
       <div className="flex justify-end gap-2">

@@ -449,6 +449,7 @@ export class ProductionService {
             actualOutputs: input.actualOutputs,
             warehouseId: input.warehouseId,
             expectedYieldKgPerLiter: input.expectedYieldKgPerLiter,
+            envases: input.envases,
             notes: input.notes,
           },
           recipeEntity,
@@ -804,7 +805,19 @@ export class ProductionService {
       // si está en USD/EUR). El congelado en la versión de receta queda solo de respaldo,
       // para insumos sin precio en la ficha o sin producto asociado. Así el administrativo
       // actualiza un precio en UN solo lugar y las próximas elaboraciones lo toman solas.
-      const ingredients = await this.priceIngredients(manager, version, order.startedAt);
+      // Envases corregidos a mano (los manda la pantalla). Si no vienen (re-cierre desde un
+      // cliente viejo), se mantienen los del cierre anterior.
+      const envases = input.envases
+        ? Object.fromEntries(input.envases.map((e) => [e.productId, e.quantity]))
+        : (order.costBreakdown?.envases ?? {});
+      const ingredients = await this.priceIngredients(manager, version, order.startedAt, [], envases);
+      // Bultos de la tachada (principal + formatos): cuántos envases "por bulto" se usan.
+      const bultosTachada = formatos.reduce((acc, f) => acc + (f.bultos ?? 0), principalOutput.bultos ?? 0);
+      const envasePorBulto = version.ingredients.find((i) => i.basis === 'per_bulto');
+      if (envasePorBulto && bultosTachada === 0 && envases[envasePorBulto.productId] == null)
+        throw new BadRequestException(
+          `Cargá los bultos: la receta usa ${envasePorBulto.productName} por bulto y sin bultos no se sabe cuántos se usaron.`,
+        );
 
       // Costos fijos de planta (luz, gas, sueldos…): se suman solos por litro de leche cruda,
       // sin estar en la receta. Primera vez que cierra → $/litro del último mes cargado. Si se
@@ -832,6 +845,7 @@ export class ProductionService {
       } = computeOrderCost({
         totalLiters,
         kgProductoTotal,
+        bultos: bultosTachada,
         primaryInputs,
         ingredients,
         version,
@@ -1027,54 +1041,8 @@ export class ProductionService {
         await batchRepo.remove(batch);
       }
 
-      // --- 4c. Descontar insumos del stock por FEFO. No bloquea si falta (solo descuenta lo
-      // disponible); los insumos sin stock trackeado (ej. mano de obra, energía) se ignoran. ---
-      // Los insumos se bloquean TODOS JUNTOS y siempre en el mismo orden (por id). Si cada
-      // cierre los tomara en el orden de su receta, dos cierres con los mismos insumos en
-      // distinto orden se trabarían mutuamente (deadlock) y Postgres abortaría uno.
-      const idsInsumos = [...new Set(version.ingredients.map((i) => i.productId).filter(Boolean))].sort();
-      for (const productId of idsInsumos) await lockBatchesOfProduct(manager, productId as string);
-
-      for (const ing of version.ingredients) {
-        const consumed =
-          ing.basis === 'per_liter_milk'
-            ? Number(ing.quantity) * totalLiters
-            : ing.basis === 'per_1000_liters_milk'
-              ? (Number(ing.quantity) * totalLiters) / 1000
-              : ing.basis === 'per_kg_product'
-                ? Number(ing.quantity) * Number(kgProductoTotal)
-                : Number(ing.quantity);
-        if (!(consumed > 0)) continue;
-        const lots = await manager.getRepository(BatchEntity).find({
-          where: { productId: ing.productId, status: 'activo' },
-          order: { expirationDate: 'ASC' },
-        });
-        if (lots.length === 0) continue;
-        let toConsume = consumed;
-        for (const lot of lots) {
-          if (toConsume <= 0) break;
-          const avail = Number(lot.remainingQuantity);
-          const take = Math.min(avail, toConsume);
-          if (take <= 0) continue;
-          lot.remainingQuantity = String(avail - take);
-          if (Number(lot.remainingQuantity) <= 0) lot.status = 'agotado';
-          await manager.getRepository(BatchEntity).save(lot);
-          await manager.getRepository(InventoryMovementEntity).save(
-            manager.getRepository(InventoryMovementEntity).create({
-              batchId: lot.id,
-              productId: ing.productId,
-              type: 'out',
-              reason: 'consumption',
-              quantity: String(take),
-              unit: lot.unit,
-              referenceType: 'production_order',
-              referenceId: order.id,
-              createdById: order.operatorId,
-            }),
-          );
-          toConsume -= take;
-        }
-      }
+      // --- 4c. Descontar insumos del stock: lo MISMO que se costeó (detalle real). ---
+      const insumosFaltantes = await this.consumirInsumos(manager, order, version, realCost.detalleInsumos);
 
       const actualOutputs: ProductionOutput[] = input.actualOutputs
         // Un formato en 0 kg no produjo nada: no se guarda.
@@ -1108,7 +1076,14 @@ export class ProductionService {
       order.totalCost = realCost.costoNeto;
       order.unitCost = realCost.costoPorKg;
       // El rendimiento esperado se guarda para poder recalcular más adelante con la receta corregida.
-      order.costBreakdown = { real: realCost, estandar: estandarCost, variance, expectedYieldKgPerLiter: expectedYield };
+      order.costBreakdown = {
+        real: realCost,
+        estandar: estandarCost,
+        variance,
+        expectedYieldKgPerLiter: expectedYield,
+        ...(Object.keys(envases).length > 0 && { envases }),
+        ...(insumosFaltantes.length > 0 && { insumosFaltantes }),
+      };
       if (input.notes) order.notes = input.notes;
       await manager.getRepository(ProductionOrderEntity).save(order);
   }
@@ -1213,6 +1188,7 @@ export class ProductionService {
     version: RecipeVersionEntity,
     startedAt: Date,
     previos: CostDetailLine[] = [],
+    envases: Record<string, number> = {},
   ): Promise<IngredientCost[]> {
     const ingredients: IngredientCost[] = [];
     for (const ing of version.ingredients) {
@@ -1230,9 +1206,92 @@ export class ProductionService {
               : String(await this.exchangeRates.toArs(ingProduct.defaultCost, currency, startedAt));
         }
       }
-      ingredients.push({ name: ing.productName, quantity: String(ing.quantity), unitCost, basis: ing.basis });
+      const corregido = envases[ing.productId];
+      ingredients.push({
+        name: ing.productName,
+        quantity: String(ing.quantity),
+        unitCost,
+        basis: ing.basis,
+        unit: ing.unit,
+        ...(corregido != null && { cantidadReal: String(corregido) }),
+      });
     }
     return ingredients;
+  }
+
+  // Descuenta del stock los insumos de la receta, por FEFO, en la cantidad que se COSTEÓ
+  // (`detalle` = detalle real de la calculadora, en el mismo orden que la receta): así el stock
+  // y el costo nunca difieren (16,8 baldes en uno y 17 en el otro). Si no alcanza, descuenta lo
+  // que hay y devuelve lo que faltó para avisar. Insumos sin lotes (mano de obra, energía) se saltean.
+  private async consumirInsumos(
+    manager: import('typeorm').EntityManager,
+    order: ProductionOrderEntity,
+    version: RecipeVersionEntity,
+    detalle: CostDetailLine[],
+  ): Promise<{ name: string; faltan: string }[]> {
+    // Los insumos se bloquean TODOS JUNTOS y siempre en el mismo orden (por id). Si cada
+    // cierre los tomara en el orden de su receta, dos cierres con los mismos insumos en
+    // distinto orden se trabarían mutuamente (deadlock) y Postgres abortaría uno.
+    const ids = [...new Set(version.ingredients.map((i) => i.productId).filter(Boolean))].sort();
+    for (const productId of ids) await lockBatchesOfProduct(manager, productId);
+
+    const batchRepo = manager.getRepository(BatchEntity);
+    const movementRepo = manager.getRepository(InventoryMovementEntity);
+    const faltantes: { name: string; faltan: string }[] = [];
+    for (const [i, ing] of version.ingredients.entries()) {
+      let falta = new Big(detalle[i]?.cantidad ?? 0);
+      if (!ing.productId || falta.lte(0)) continue;
+      const lots = await batchRepo.find({
+        where: { productId: ing.productId, status: 'activo' },
+        order: { expirationDate: 'ASC' },
+      });
+      // Sin lotes nunca (mano de obra, energía): no se lleva stock, no hay nada que avisar.
+      if (lots.length === 0 && (await batchRepo.count({ where: { productId: ing.productId } })) === 0) continue;
+      for (const lot of lots) {
+        if (falta.lte(0)) break;
+        const take = falta.lt(lot.remainingQuantity) ? falta : new Big(lot.remainingQuantity);
+        if (take.lte(0)) continue;
+        const queda = new Big(lot.remainingQuantity).minus(take);
+        lot.remainingQuantity = queda.toString();
+        if (queda.lte(0)) lot.status = 'agotado';
+        await batchRepo.save(lot);
+        await movementRepo.save(
+          movementRepo.create({
+            batchId: lot.id,
+            productId: ing.productId,
+            type: 'out',
+            reason: 'consumption',
+            quantity: take.toString(),
+            unit: lot.unit,
+            referenceType: 'production_order',
+            referenceId: order.id,
+            createdById: order.operatorId,
+          }),
+        );
+        falta = falta.minus(take);
+      }
+      if (falta.gt(0)) faltantes.push({ name: ing.productName, faltan: falta.toString() });
+    }
+    return faltantes;
+  }
+
+  // Devuelve al stock los insumos que la orden consumió (para volver a descontarlos con la
+  // cuenta nueva al recalcular). Solo los movimientos de insumos ('consumption'), no la leche/masa.
+  private async devolverInsumos(manager: import('typeorm').EntityManager, order: ProductionOrderEntity) {
+    const batchRepo = manager.getRepository(BatchEntity);
+    const movementRepo = manager.getRepository(InventoryMovementEntity);
+    const movs = await movementRepo.find({
+      where: { referenceType: 'production_order', referenceId: order.id, type: 'out', reason: 'consumption' },
+    });
+    await lockBatches(manager, movs.map((m) => m.batchId));
+    for (const m of movs) {
+      const batch = await batchRepo.findOne({ where: { id: m.batchId } });
+      if (!batch) continue;
+      batch.remainingQuantity = new Big(batch.remainingQuantity).plus(m.quantity).toString();
+      if (batch.status === 'agotado') batch.status = 'activo';
+      await batchRepo.save(batch);
+    }
+    if (movs.length > 0) await movementRepo.remove(movs);
   }
 
   // Kg reales de cada subproducto, por nombre (lo que carga el operario al cerrar).
@@ -1282,6 +1341,11 @@ export class ProductionService {
           await batchRepo.update({ id: o.batchId }, { unitCost: String(bp.referenceValuePerUnit) });
       }
 
+      // El stock de insumos se ajusta a la cuenta nueva: se devuelve lo que se descontó al
+      // cerrar y se descuenta lo recalculado (ej. receta con 0,259 → 0,0269 devuelve la diferencia).
+      await this.devolverInsumos(manager, order);
+      const insumosFaltantes = await this.consumirInsumos(manager, order, version, cost.real.detalleInsumos);
+
       await manager.getRepository(ProductionOrderEntity).update(
         { id },
         {
@@ -1293,6 +1357,8 @@ export class ProductionService {
             estandar: cost.estandar,
             variance: cost.variance,
             expectedYieldKgPerLiter: cost.expectedYield,
+            ...(order.costBreakdown?.envases && { envases: order.costBreakdown.envases }),
+            ...(insumosFaltantes.length > 0 && { insumosFaltantes }),
           },
         },
       );
@@ -1317,10 +1383,6 @@ export class ProductionService {
       .getRepository(RecipeVersionEntity)
       .findOne({ where: { recipeId: order.recipeId, isActive: true } });
     if (!version) throw new BadRequestException(`La receta ${order.recipe?.name ?? ''} no tiene una versión activa.`);
-    if (version.id === order.recipeVersionId)
-      throw new BadRequestException(
-        `La orden ${order.code} ya usa la receta vigente. Si la receta tiene un error, corregila primero (Recetas → Nueva versión).`,
-      );
 
     // Guardia: lo producido no tiene que haber entrado a otra elaboración.
     let bloqueo: string | null = null;
@@ -1349,7 +1411,15 @@ export class ProductionService {
       );
     const totalLiters = Number(order.totalMilkLiters);
     const kgProductoTotal = String(order.totalPrincipalKg ?? 0);
-    const ingredients = await this.priceIngredients(manager, version, order.startedAt, detalleInsumos);
+    const envases = old.envases ?? {};
+    const ingredients = await this.priceIngredients(manager, version, order.startedAt, detalleInsumos, envases);
+    const bultos = order.actualOutputs
+      .filter((o) => o.isPrincipal || o.isFormat)
+      .reduce((acc, o) => acc + (o.bultos ?? 0), 0);
+    // Igual que al cerrar: un envase "por bulto" sin bultos cargados daría 0 envases sin avisar.
+    const envasePorBulto = version.ingredients.find((i) => i.basis === 'per_bulto' && envases[i.productId] == null);
+    if (!bloqueo && envasePorBulto && bultos === 0)
+      bloqueo = `No se puede recalcular: la receta usa ${envasePorBulto.productName} por bulto y esta orden no tiene los bultos cargados. Editá la orden y cargalos.`;
     // Los costos fijos no están en la receta: se mantienen tal cual cerró la orden.
     const fijoPrevio = detalleInsumos.find((l) => l.name === COSTO_FIJO_NOMBRE);
     if (fijoPrevio)
@@ -1359,6 +1429,7 @@ export class ProductionService {
       ...computeOrderCost({
         totalLiters,
         kgProductoTotal,
+        bultos,
         primaryInputs: primaryInputsFromBreakdown(detalleInputs),
         ingredients,
         version,
@@ -1380,6 +1451,12 @@ export class ProductionService {
         despues: linea(cost.real.detalleInsumos.find((l) => l.name === name)),
       }))
       .filter((c) => c.antes?.cantidad !== c.despues?.cantidad || c.antes?.subtotal !== c.despues?.subtotal);
+    // Misma receta y nada cambia: no hay qué recalcular. (Con la MISMA receta sí puede cambiar
+    // algo: las órdenes viejas costearon 16,8 baldes y hoy los envases se cuentan enteros.)
+    if (version.id === order.recipeVersionId && cambios.length === 0)
+      throw new BadRequestException(
+        `La orden ${order.code} ya usa la receta vigente. Si la receta tiene un error, corregila primero (Recetas → Nueva versión).`,
+      );
 
     const preview: ProductionRecalcPreview = {
       versionActual: order.recipeVersion?.versionNumber ?? 0,

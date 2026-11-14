@@ -292,7 +292,7 @@ describe('SalesService.createReturn — fecha real de la devolución', () => {
       save: jest.fn((b: any) => Promise.resolve(b)),
     };
     const movementRepo = {
-      find: jest.fn().mockResolvedValue([{ batchId: 'pp-1', quantity: '10', bultos: null }]),
+      find: jest.fn().mockResolvedValue([{ batchId: 'pp-1', quantity: '10', bultos: null, type: 'out', reason: 'sale' }]),
       create: jest.fn((x: any) => x),
       save: jest.fn((x: any) => Promise.resolve(x)),
     };

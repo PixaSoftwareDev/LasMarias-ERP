@@ -24,6 +24,10 @@ import { ProductsService } from '../products/products.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import { allocateBultos, bultosForQuantity } from '../inventory/bultos-allocation';
 import { sortOldestFirst } from '../inventory/oldest-first';
+import { planFefoAllocation } from './fefo-plan';
+import { devolviblePorLote, lotesDelRenglon, pendientePorRenglon, planReposicion, type MovimientoDeLote } from './returns';
+import { bultosDelReparto, planDelReparto, validarRepartoKg } from './reparto-lotes';
+export { planFefoAllocation, type FefoAllocation, type FefoBatchInput, type FefoPlan } from './fefo-plan';
 import { lockBatches, lockBatchesOfProduct, lockDuplicateSignature, lockRow } from '../common/locks';
 import type { Currency } from '@lasmarias/shared-schemas';
 
@@ -35,23 +39,6 @@ function assertNotFuture(fecha: Date, de = 'del despacho'): void {
     throw new BadRequestException(`La fecha ${de} no puede ser futura. Revisá el día, el mes y el año.`);
 }
 
-// Asignación FEFO pura: dada la cantidad pedida y los lotes (ya ordenados por
-// vencimiento más próximo primero), devuelve cuánto tomar de cada lote y el faltante.
-// Sin efectos: se testea sin tocar la base (CLAUDE.md §8 — lógica de dominio testeable).
-export interface FefoBatchInput {
-  id: string;
-  remaining: number;
-}
-export interface FefoAllocation {
-  batchId: string;
-  take: number;
-  remainingAfter: number;
-}
-export interface FefoPlan {
-  allocations: FefoAllocation[];
-  shortage: number; // cantidad que no se pudo cubrir (0 si alcanzó)
-}
-
 // Crema a granel cobrada por % de grasa (pedido del dueño, audio 26/10/2026): el precio de
 // lista es por kg de MATERIA GRASA y el comprador paga según el % que da su análisis.
 //   precio por kg = precio por kg de grasa × % ÷ 100
@@ -59,26 +46,6 @@ export interface FefoPlan {
 // Decimal exacto, 4 decimales (en float 7199.5 × 0.59 da 4247.70499…).
 export function precioPorGrasa(fat: FatPricing): number {
   return new Big(fat.basePrice).times(fat.pct).div(100).round(4).toNumber();
-}
-
-// Las cuentas van en DECIMAL EXACTO (big.js): en float, 869,2 − 709,9 − 159,3 daba
-// 0,0000000000000568 y el despacho se frenaba con "faltan 0" (crema, oct 2026).
-export function planFefoAllocation(quantity: number, batches: FefoBatchInput[]): FefoPlan {
-  let pending = new Big(quantity);
-  const allocations: FefoAllocation[] = [];
-  for (const batch of batches) {
-    if (pending.lte(0)) break;
-    const available = new Big(batch.remaining);
-    if (available.lte(0)) continue;
-    const take = available.lt(pending) ? available : pending;
-    allocations.push({
-      batchId: batch.id,
-      take: take.toNumber(),
-      remainingAfter: available.minus(take).toNumber(),
-    });
-    pending = pending.minus(take);
-  }
-  return { allocations, shortage: pending.gt(0) ? pending.toNumber() : 0 };
 }
 
 @Injectable()
@@ -141,12 +108,14 @@ export class SalesService {
         // pesos; el basis queda congelado en la línea para que el remito y la nota de
         // crédito muestren exactamente cómo se cobró (mismo criterio que la cotización).
         const priceBasis = l.priceBasis ?? 'unidad';
-        if (priceBasis === 'bulto' && !(l.bultos && l.bultos > 0)) {
+        const bultos = l.lotes ? bultosDelReparto(l, product.name) : l.bultos;
+        if (l.lotes) validarRepartoKg(l, product.name, product.unit);
+        if (priceBasis === 'bulto' && !(bultos && bultos > 0)) {
           throw new BadRequestException(
             `Cargaste el precio por bulto de ${product.name}, pero no pusiste cuántos bultos salen.`,
           );
         }
-        const cantidadCobrada = priceBasis === 'bulto' ? (l.bultos as number) : l.quantity;
+        const cantidadCobrada = priceBasis === 'bulto' ? (bultos as number) : l.quantity;
         // Por % de grasa: la cuenta la hace el backend y pisa el precio que mandó el front.
         // Se cobra por kg (el % es sobre el kg de crema): por bulto no tiene sentido.
         if (l.fat && priceBasis === 'bulto') {
@@ -160,12 +129,13 @@ export class SalesService {
           productName: product.name,
           sku: product.sku,
           quantity: l.quantity,
-          bultos: l.bultos,
+          bultos,
           unitPrice,
           priceBasis,
           unit: product.unit,
           subtotal,
           ...(l.batchId && { batchId: l.batchId }),
+          ...(l.lotes && { lotes: l.lotes }),
           ...(l.fat && { fatPct: l.fat.pct, fatBasePrice: l.fat.basePrice }),
         });
       }
@@ -215,7 +185,7 @@ export class SalesService {
 
       // Principio no negociable #4: el stock baja con el despacho, nunca a mano.
       await this.dischargeStock(manager, saved);
-      if (saved.lines.some((l) => l.batchId)) await manager.getRepository(SalesOrderEntity).save(saved);
+      await manager.getRepository(SalesOrderEntity).save(saved);
 
       // Cuenta corriente: cargo por el total del despacho.
       const dueDate =
@@ -280,47 +250,32 @@ export class SalesService {
       );
 
     return this.dataSource.transaction(async (manager) => {
-      // Lo ya devuelto previamente por este despacho (para no exceder).
-      const priorNotes = await manager
-        .getRepository(CreditNoteEntity)
-        .find({ where: { salesOrderId: orderId } });
-      const returnedByProduct = new Map<string, number>();
-      for (const cn of priorNotes) {
-        for (const l of cn.lines) {
-          returnedByProduct.set(
-            l.productId,
-            (returnedByProduct.get(l.productId) ?? 0) + l.quantity,
-          );
-        }
-      }
+      // CANDADO sobre la venta: dos devoluciones a la vez verían el mismo "pendiente" y
+      // podrían devolver dos veces lo mismo.
+      await lockRow(manager, 'sales_orders', orderId);
+      const priorNotes = await manager.getRepository(CreditNoteEntity).find({ where: { salesOrderId: orderId } });
+      // Se controla por RENGLÓN: la venta puede tener el mismo producto en dos renglones.
+      const pendiente = pendientePorRenglon(order.lines, priorNotes.flatMap((cn) => cn.lines));
 
-      const ncLines: SalesOrderLine[] = [];
-      let total = 0;
+      const ncLines: CreditNote['lines'] = [];
+      let total = new Big(0);
       for (const reqLine of input.lines) {
-        const orderLine = order.lines.find((l) => l.productId === reqLine.productId);
-        if (!orderLine) {
-          throw new BadRequestException(
-            `El producto no figura en el despacho ${order.code}`,
-          );
+        const lineIndex = reqLine.lineIndex ?? order.lines.findIndex((l) => l.productId === reqLine.productId);
+        const orderLine = order.lines[lineIndex];
+        if (!orderLine || orderLine.productId !== reqLine.productId) {
+          throw new BadRequestException(`El producto no figura en el despacho ${order.code}`);
         }
-        const alreadyReturned = returnedByProduct.get(reqLine.productId) ?? 0;
-        const remaining = orderLine.quantity - alreadyReturned;
-        if (reqLine.quantity > remaining + 1e-9) {
+        const queda = pendiente[lineIndex]!;
+        if (queda.lt(reqLine.quantity)) {
           throw new BadRequestException(
             `No se puede devolver ${reqLine.quantity} ${orderLine.unit} de ${orderLine.productName}: ` +
-              `el despacho ${order.code} tiene ${remaining} ${orderLine.unit} pendientes de devolver`,
+              `del despacho ${order.code} quedan ${queda.toNumber()} ${orderLine.unit} por devolver.`,
           );
         }
-        // Reponer al mismo lote del que salió (movimientos sale de este despacho).
-        await this.restockToOriginBatches(
-          manager,
-          orderId,
-          reqLine.productId,
-          reqLine.quantity,
-          userId,
-          order.code,
-          reqLine.bultos ?? null,
-        );
+        pendiente[lineIndex] = queda.minus(reqLine.quantity);
+
+        // Vuelve a los lotes de los que salió (primero los elegidos para ese renglón).
+        await this.restockToOriginBatches(manager, order, orderLine, reqLine.quantity, reqLine.bultos ?? null, userId);
 
         // La NC respeta cómo se cobró el despacho original: si fue por bulto, se acredita
         // por bulto. Si el basis era 'bulto' y no dicen cuántos vuelven, se prorratea.
@@ -331,8 +286,8 @@ export class SalesService {
             ? Math.round((reqLine.quantity / orderLine.quantity) * orderLine.bultos)
             : undefined);
         const cantidadAcreditada = basis === 'bulto' ? (bultosDevueltos ?? 0) : reqLine.quantity;
-        const subtotal = Math.round(orderLine.unitPrice * cantidadAcreditada * 100) / 100;
-        total += subtotal;
+        const subtotal = new Big(orderLine.unitPrice).times(cantidadAcreditada).round(2);
+        total = total.plus(subtotal);
         ncLines.push({
           productId: orderLine.productId,
           productName: orderLine.productName,
@@ -343,10 +298,10 @@ export class SalesService {
           priceBasis: basis,
           unit: orderLine.unit,
           ...(orderLine.fatPct != null && { fatPct: orderLine.fatPct, fatBasePrice: orderLine.fatBasePrice }),
-          subtotal,
+          subtotal: subtotal.toNumber(),
+          lineIndex,
         });
       }
-      total = Math.round(total * 100) / 100;
 
       const code = await this.nextCreditNoteCode(manager);
       const note = await manager.getRepository(CreditNoteEntity).save(
@@ -355,7 +310,7 @@ export class SalesService {
           salesOrderId: order.id,
           clientId: order.clientId,
           lines: ncLines,
-          total: String(total),
+          total: total.toString(),
           createdById: userId,
         }),
       );
@@ -365,7 +320,7 @@ export class SalesService {
         manager.getRepository(AccountMovementEntity).create({
           clientId: order.clientId,
           kind: 'credit_note',
-          amount: String(total),
+          amount: total.toString(),
           referenceType: 'credit_note',
           referenceId: note.id,
           occurredAt,
@@ -379,49 +334,49 @@ export class SalesService {
     });
   }
 
-  // Repone una cantidad devuelta a los lotes desde los que se despachó (movimientos
-  // sale de este despacho para este producto), en orden de salida, con movimiento 'in'
-  // reason='return'. Si el lote estaba agotado vuelve a 'activo'.
+  // Repone una cantidad devuelta a los lotes de los que salió por esta venta, con movimiento
+  // 'in' reason='return'. Ningún lote recibe más de lo que entregó (descontando devoluciones
+  // anteriores). Si el lote estaba agotado vuelve a 'activo'.
   private async restockToOriginBatches(
     manager: EntityManager,
-    orderId: string,
-    productId: string,
+    order: SalesOrderEntity,
+    line: SalesOrderLine,
     quantity: number,
-    userId: string,
-    orderCode: string,
     // Bultos que vuelven. Si no se dicen, se reponen a prorrata de los kg devueltos.
-    bultos: number | null = null,
+    bultos: number | null,
+    userId: string,
   ): Promise<void> {
-    const saleMovements = await manager.getRepository(InventoryMovementEntity).find({
-      where: { referenceType: 'sales_order', referenceId: orderId, productId, reason: 'sale' },
+    const movimientos = await manager.getRepository(InventoryMovementEntity).find({
+      where: { referenceType: 'sales_order', referenceId: order.id, productId: line.productId },
       order: { createdAt: 'ASC' },
     });
-    if (saleMovements.length === 0) {
-      throw new BadRequestException(`No se encontró el movimiento de salida para el despacho ${orderCode}`);
-    }
     // CANDADO sobre los lotes a los que se les va a devolver mercadería.
-    await lockBatches(manager, saleMovements.map((m) => m.batchId));
-    // Reparto de los bultos devueltos sobre los mismos lotes de los que salieron, sin
-    // devolver a un lote más bultos de los que ese lote entregó.
+    await lockBatches(manager, movimientos.map((m) => m.batchId));
+    const devolvibles = devolviblePorLote(
+      movimientos.filter((m) => m.reason === 'sale' || m.reason === 'return') as MovimientoDeLote[],
+    );
+    const plan = planReposicion(quantity, devolvibles, lotesDelRenglon(line));
+    if (plan.shortage > 0) {
+      // No debería pasar: lo pendiente del renglón ya se validó contra lo vendido.
+      throw new BadRequestException(
+        `No se encontró de qué lote salieron ${plan.shortage} ${line.unit} de ${line.productName} en ${order.code}.`,
+      );
+    }
+    const cupo = new Map(devolvibles.map((d) => [d.batchId, d]));
+    // Bultos cargados: se reparten sobre esos lotes sin pasar los que entregó cada uno.
     const reparto =
       bultos != null
         ? allocateBultos(
             bultos,
-            // Tope por lote: no se devuelve a un lote más bultos de los que ese lote entregó.
-            saleMovements.map((mv) => ({ quantity: Number(mv.quantity), available: mv.bultos ?? 0 })),
+            plan.allocations.map((a) => ({ quantity: a.take, available: cupo.get(a.batchId)!.bultos ?? 0 })),
           ).bultos
         : null;
-    let pending = quantity;
-    for (const [idx, mv] of saleMovements.entries()) {
-      if (pending <= 1e-9) break;
-      const restore = Math.min(Number(mv.quantity), pending);
-      pending -= restore;
-      const batch = await manager.getRepository(BatchEntity).findOne({ where: { id: mv.batchId } });
+    for (const [idx, a] of plan.allocations.entries()) {
+      const batch = await manager.getRepository(BatchEntity).findOne({ where: { id: a.batchId } });
       if (!batch) continue;
-      const bultosVuelven = reparto
-        ? (reparto[idx] ?? 0)
-        : bultosForQuantity(restore, Number(mv.quantity), mv.bultos);
-      batch.remainingQuantity = String(Number(batch.remainingQuantity) + restore);
+      const lote = cupo.get(a.batchId)!;
+      const bultosVuelven = reparto ? (reparto[idx] ?? 0) : bultosForQuantity(a.take, lote.quantity, lote.bultos);
+      batch.remainingQuantity = new Big(batch.remainingQuantity).plus(a.take).toString();
       if (bultosVuelven != null && bultosVuelven > 0)
         batch.remainingBultos = (batch.remainingBultos ?? 0) + bultosVuelven;
       if (batch.status === 'agotado') batch.status = 'activo';
@@ -429,31 +384,29 @@ export class SalesService {
       await manager.getRepository(InventoryMovementEntity).save(
         manager.getRepository(InventoryMovementEntity).create({
           batchId: batch.id,
-          productId,
+          productId: line.productId,
           type: 'in',
           reason: 'return',
-          quantity: String(restore),
+          quantity: String(a.take),
           unit: batch.unit,
           bultos: bultosVuelven,
           referenceType: 'sales_order',
-          referenceId: orderId,
-          notes: `Devolución ${orderCode}`,
+          referenceId: order.id,
+          notes: `Devolución ${order.code}`,
           createdById: userId,
         }),
       );
     }
-    if (pending > 1e-9) {
-      // No debería ocurrir si la validación contra lo despachado es correcta.
-      throw new BadRequestException('La cantidad a devolver excede lo despachado');
-    }
   }
 
-  // Descuenta del stock las cantidades del despacho, el lote más viejo primero (o del lote
-  // que eligieron para la línea), y registra un movimiento de salida por cada lote afectado.
+  // Descuenta del stock las cantidades del despacho: el lote más viejo primero, o el lote que
+  // eligieron para la línea, o el reparto entre lotes que cargaron. Registra un movimiento de
+  // salida por cada lote afectado.
   private async dischargeStock(manager: EntityManager, order: SalesOrderEntity): Promise<void> {
-    // Primero las líneas con lote elegido: si una línea automática del mismo producto fuera
+    // Primero las líneas con lotes elegidos: si una línea automática del mismo producto fuera
     // antes, podría llevarse justo ese lote (el más viejo) y la elegida fallaría sin motivo.
-    const elegidasPrimero = [...order.lines].sort((a, b) => Number(!!b.batchId) - Number(!!a.batchId));
+    const eligeLote = (l: SalesOrderLine) => Number(!!(l.batchId || l.lotes));
+    const elegidasPrimero = [...order.lines].sort((a, b) => eligeLote(b) - eligeLote(a));
     for (const line of elegidasPrimero) {
       // CANDADO sobre los lotes candidatos antes de mirar saldos: dos despachos del mismo
       // producto a la vez no pueden llevarse el mismo lote (sobreventa / stock negativo).
@@ -463,26 +416,26 @@ export class SalesService {
           where: { productId: line.productId, status: 'activo' },
         }),
       );
-      // Lote elegido a mano: la línea sale entera de ese lote. Si no alcanza, se avisa cuánto
-      // tiene (para repartir entre dos lotes elegidos se cargan dos líneas).
       const batches = line.batchId ? activos.filter((b) => b.id === line.batchId) : activos;
       if (line.batchId && batches.length === 0)
         throw new BadRequestException(
           `El lote elegido ya no tiene stock de ${line.productName}. Elegí otro o dejá "el más viejo".`,
         );
-      const plan = planFefoAllocation(
-        line.quantity,
-        batches.map((b) => ({ id: b.id, remaining: Number(b.remainingQuantity) })),
-      );
+      const plan = line.lotes
+        ? planDelReparto(line, activos)
+        : planFefoAllocation(
+            line.quantity,
+            batches.map((b) => ({ id: b.id, remaining: Number(b.remainingQuantity) })),
+          );
       if (plan.shortage > 0) {
         const elegido = line.batchId ? batches[0] : null;
         throw new BadRequestException(
           elegido
-            ? `El lote ${elegido.code} tiene ${Number(elegido.remainingQuantity)} ${line.unit} de ${line.productName} y pediste ${line.quantity}. Bajá la cantidad o agregá otra línea con otro lote.`
+            ? `El lote ${elegido.code} tiene ${Number(elegido.remainingQuantity)} ${line.unit} de ${line.productName} y pediste ${line.quantity}. Bajá la cantidad o repartila entre lotes.`
             : `No hay stock suficiente de ${line.productName} para despachar: faltan ${plan.shortage} ${line.unit}`,
         );
       }
-      // La línea guarda el código del lote elegido para mostrarlo en la venta.
+      // La línea guarda el código de los lotes elegidos para mostrarlos en la venta.
       if (line.batchId) line.batchCode = batches[0]!.code;
       const byId = new Map(batches.map((b) => [b.id, b]));
 
@@ -495,8 +448,14 @@ export class SalesService {
         quantity: a.take,
         available: byId.get(a.batchId)?.remainingBultos ?? 0,
       }));
-      const reparto = line.bultos != null ? allocateBultos(line.bultos, shares).bultos : null;
+      // Reparto entre lotes con bultos cargados: cada lote baja exactamente los suyos.
+      const reparto = line.lotes?.some((x) => x.bultos != null)
+        ? line.lotes.map((x) => x.bultos ?? 0)
+        : line.bultos != null
+          ? allocateBultos(line.bultos, shares).bultos
+          : null;
 
+      const salieron: NonNullable<SalesOrderLine['lotes']> = [];
       for (const [idx, alloc] of plan.allocations.entries()) {
         const batch = byId.get(alloc.batchId)!;
         // Un lote sin bultos contados sigue sin ellos: no se le anota ni se le descuenta nada.
@@ -526,7 +485,11 @@ export class SalesService {
             createdById: order.createdById,
           }),
         );
+        salieron.push({ batchId: batch.id, batchCode: batch.code, quantity: alloc.take, bultos: bultosSalen ?? undefined });
       }
+      // El renglón queda con los lotes de los que salió DE VERDAD (en los tres modos): lo usan
+      // el remito ("mostrar lotes") y la devolución (vuelve a esos lotes).
+      line.lotes = salieron;
     }
   }
 

@@ -1,6 +1,7 @@
 // API client centralizado por dominio. Las pantallas importan desde acá.
 
 import type {
+  CloseProductionInput,
   Client,
   ClientPriceItem,
   CreateClientInput,
@@ -233,7 +234,7 @@ export const productionApi = {
   recalcApply: (id: string) => api<ProductionOrder>(`/api/production-orders/${id}/recalculate`, { method: 'POST' }),
   saveProgress: (id: string, input: { outputs: { productId: string; quantity: number; bultos?: number }[]; notes?: string }) =>
     api<ProductionOrder>(`/api/production-orders/${id}/progress`, { method: 'POST', body: input }),
-  close: (id: string, input: { actualOutputs: { productId: string; quantity: number; bultos?: number; isPrincipal: boolean; isFormat?: boolean }[]; warehouseId?: string; expectedYieldKgPerLiter?: number; notes?: string }) =>
+  close: (id: string, input: CloseProductionInput) =>
     api<ProductionOrder>(`/api/production-orders/${id}/close`, { method: 'POST', body: input }),
   remove: (id: string) =>
     api<{ deleted: true; code: string }>(`/api/production-orders/${id}`, { method: 'DELETE' }),

@@ -306,6 +306,8 @@ export const fefoSuggestionSchema = z.object({
         batchId: uuidSchema,
         batchCode: z.string(),
         remaining: z.number(),
+        // Bultos que le quedan al lote (null/ausente = no se cuenta por bultos).
+        bultos: z.number().nullable().optional(),
         productionDate: z.string().optional(),
         expirationDate: z.string().optional(),
       }),

@@ -80,6 +80,11 @@ export const productionCostBreakdownSchema = z.object({
   // Rendimiento esperado (kg/L) cargado al cerrar. Se guarda para poder recalcular la orden
   // con la receta corregida sin pedirlo de nuevo. Las órdenes viejas no lo tienen.
   expectedYieldKgPerLiter: z.number().nullable().optional(),
+  // Envases que el operario corrigió a mano al cerrar (productId → unidades). Se guardan
+  // para que editar o recalcular la orden no los pierda.
+  envases: z.record(z.string(), z.number()).optional(),
+  // Insumos que no alcanzaron en el stock al cerrar (se descontó lo que había).
+  insumosFaltantes: z.array(z.object({ name: z.string(), faltan: z.string() })).optional(),
 });
 export type ProductionCostBreakdown = z.infer<typeof productionCostBreakdownSchema>;
 
@@ -169,6 +174,7 @@ export const updateProductionInputSchema = openProductionInputSchema.extend({
     .optional(),
   warehouseId: uuidSchema.optional(),
   expectedYieldKgPerLiter: z.number().positive().optional(),
+  envases: z.array(z.object({ productId: uuidSchema, quantity: z.number().int().nonnegative() })).optional(),
 });
 export type UpdateProductionInput = z.infer<typeof updateProductionInputSchema>;
 
@@ -190,6 +196,9 @@ export const closeProductionInputSchema = z.object({
   // se conoce al producir, no en la receta). Si se carga, habilita la comparación real vs
   // estándar de esta orden; si se omite, se muestra solo el costo real.
   expectedYieldKgPerLiter: z.number().positive().optional(),
+  // Envases realmente usados, si no coinciden con la cuenta de la receta (se rompió un
+  // balde, un formato va en otro envase…). Solo los que se corrigen.
+  envases: z.array(z.object({ productId: uuidSchema, quantity: z.number().int().nonnegative() })).optional(),
   notes: z.string().max(2000).optional(),
 });
 export type CloseProductionInput = z.infer<typeof closeProductionInputSchema>;

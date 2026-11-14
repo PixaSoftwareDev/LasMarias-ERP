@@ -18,6 +18,8 @@ import { type ProductionOrder } from '@lasmarias/shared-schemas';
 import { OutputFields } from '@/components/production/output-fields';
 import { FormatOutputs, type FormatRow } from '@/components/production/format-outputs';
 import { RecalcularReceta } from '@/components/production/recalcular-receta';
+import { EnvasesUsados, envasesCorregidos } from '@/components/production/envases-usados';
+import { InsumosFaltantes } from '@/components/production/insumos-faltantes';
 
 // Pantalla de cierre de orden (CLAUDE.md §4.3): se cargan las salidas reales por producto
 // y al cerrar se muestra el panel de costo. El cierre es definitivo.
@@ -56,6 +58,8 @@ export default function CloseProductionPage({ params }: { params: { id: string }
   // Rendimiento ESPERADO (kg/litro) cargado a mano al cerrar (opcional). Si se carga,
   // habilita la comparación real vs estándar (pedido #12).
   const [expectedYield, setExpectedYield] = useState<string>('');
+  // Envases corregidos a mano (productId → unidades; vacío = lo que dice la receta).
+  const [envases, setEnvases] = useState<Record<string, string>>({});
   // La orden cerrada (con costBreakdown) tras un cierre exitoso.
   const [closedOrder, setClosedOrder] = useState<ProductionOrder | null>(null);
 
@@ -107,6 +111,7 @@ export default function CloseProductionPage({ params }: { params: { id: string }
         warehouseId: warehouseId || undefined,
         expectedYieldKgPerLiter:
           expectedYield !== '' && Number(expectedYield) > 0 ? Number(expectedYield) : undefined,
+        envases: envasesCorregidos(envases),
       }),
     onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ['production-orders'] });
@@ -164,6 +169,10 @@ export default function CloseProductionPage({ params }: { params: { id: string }
   const principalKg =
     principal.reduce((a, o) => a + Number(quantities[o.productId] ?? 0), 0) +
     formatosValidos.reduce((a, f) => a + Number(f.kg), 0);
+  // Bultos de la tachada (principal + formatos): cuántos envases "por bulto" se usan.
+  const bultosTachada =
+    principal.reduce((a, o) => a + Number(bultos[o.productId] ?? 0), 0) +
+    formatosValidos.reduce((a, f) => a + Number(f.bultos ?? 0), 0);
   const realYield = order && order.totalMilkLiters > 0 && principalKg > 0 ? principalKg / order.totalMilkLiters : null;
 
   if (orderQuery.isLoading) {
@@ -195,6 +204,8 @@ export default function CloseProductionPage({ params }: { params: { id: string }
             <span>Producción cargada y orden cerrada. Se generaron los lotes de cada producto.</span>
           </div>
         )}
+
+        <InsumosFaltantes faltantes={closedOrder.costBreakdown?.insumosFaltantes} />
 
         {closedOrder.costBreakdown ? (
           <ProductionCostPanel breakdown={closedOrder.costBreakdown} />
@@ -352,6 +363,15 @@ export default function CloseProductionPage({ params }: { params: { id: string }
           </CardContent>
         </Card>
       )}
+
+      <EnvasesUsados
+        recipeId={order.recipeId}
+        recipeVersionId={order.recipeVersionId}
+        kg={principalKg}
+        bultos={bultosTachada}
+        value={envases}
+        onChange={setEnvases}
+      />
 
       <Card>
         <CardHeader>

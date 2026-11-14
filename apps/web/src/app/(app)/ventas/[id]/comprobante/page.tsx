@@ -11,7 +11,7 @@ import { Card } from '@/components/ui/card';
 import { ApiError } from '@/lib/api-client';
 import { clientsApi, salesApi, settingsApi } from '@/features/api';
 import { formatMoney as money, formatQuantity as qty, formatDate } from '@/lib/utils';
-import type { SalesOrder } from '@lasmarias/shared-schemas';
+import { agruparRenglones, type SalesOrder } from '@lasmarias/shared-schemas';
 
 // Qué se muestra en el remito antes de imprimirlo. Son preferencias de impresión:
 // no cambian la venta, solo el papel. Se recuerdan en el navegador para no
@@ -19,6 +19,7 @@ import type { SalesOrder } from '@lasmarias/shared-schemas';
 type OpcionesRemito = {
   precios: boolean;
   bultos: boolean;
+  lotes: boolean;
   datosCliente: boolean;
   condicionPago: boolean;
   observaciones: boolean;
@@ -28,6 +29,8 @@ type OpcionesRemito = {
 const OPCIONES_POR_DEFECTO: OpcionesRemito = {
   precios: true,
   bultos: true,
+  // Apagado: el cliente ve un renglón por producto. Prendido, abajo de cada uno sus lotes.
+  lotes: false,
   datosCliente: true,
   condicionPago: true,
   observaciones: true,
@@ -39,6 +42,7 @@ const STORAGE_KEY = 'remito-opciones';
 const ETIQUETAS: { key: keyof OpcionesRemito; label: string }[] = [
   { key: 'precios', label: 'Precios e importes' },
   { key: 'bultos', label: 'Bultos' },
+  { key: 'lotes', label: 'Lotes de cada producto' },
   { key: 'datosCliente', label: 'CUIT y domicilio del cliente' },
   { key: 'condicionPago', label: 'Condición de pago y vencimiento' },
   { key: 'observaciones', label: 'Observaciones' },
@@ -161,6 +165,8 @@ export default function ComprobantePage() {
   // y si el usuario no la ocultó.
   const hayBultos = opciones.bultos && order.lines.some((l) => l.bultos != null);
   const verPrecios = opciones.precios;
+  // Un renglón por producto y precio, aunque haya salido de varios lotes (pedido 12/11/2026).
+  const renglones = agruparRenglones(order.lines);
   const columnasAntesDelTotal = 1 + (hayBultos ? 1 : 0) + 1; // producto + bultos? + cantidad
 
   return (
@@ -306,11 +312,18 @@ export default function ComprobantePage() {
             </tr>
           </thead>
           <tbody>
-            {order.lines.map((l) => (
-              <tr key={l.productId} className="border-b border-border-subtle">
+            {renglones.map((l, i) => (
+              <tr key={i} className="border-b border-border-subtle">
                 <td className="py-2.5">
                   <span className="font-medium">{l.productName}</span>
                   <span className="ml-2 font-mono text-xs text-foreground-muted">{l.sku}</span>
+                  {opciones.lotes &&
+                    l.lotes.map((x) => (
+                      <span key={x.batchCode} className="block text-xs text-foreground-muted">
+                        Lote <span className="whitespace-nowrap font-mono">{x.batchCode}</span>: {qty(x.quantity)} {l.unit}
+                        {x.bultos != null ? ` · ${x.bultos} b` : ''}
+                      </span>
+                    ))}
                 </td>
                 <td className="py-2.5 text-right">{qty(l.quantity)} {l.unit}</td>
                 {hayBultos && <td className="py-2.5 text-right">{l.bultos != null ? l.bultos : '—'}</td>}

@@ -26,6 +26,7 @@ export interface OrderCostVersion {
 export interface OrderCostInput {
   totalLiters: number;
   kgProductoTotal: string; // principal + otros formatos
+  bultos: number; // bultos de la tachada (principal + formatos): driver de los envases "por bulto"
   primaryInputs: PrimaryInput[];
   ingredients: IngredientCost[]; // ya con su precio resuelto
   version: OrderCostVersion;
@@ -48,6 +49,7 @@ export function computeOrderCost(input: OrderCostInput): OrderCost {
     mode: 'real',
     litros: String(totalLiters),
     productKg: input.kgProductoTotal,
+    bultos: String(input.bultos),
     primaryInputs: input.primaryInputs,
     ingredients: input.ingredients,
     byproducts: version.byproducts.map((bp) => ({
@@ -73,6 +75,8 @@ export function computeOrderCost(input: OrderCostInput): OrderCost {
     mode: 'estandar',
     litros: String(totalLiters),
     productKg: String(expectedYieldKg),
+    // Los envases del estándar son los mismos bultos reales: no hay un "bultos esperados".
+    bultos: String(input.bultos),
     primaryInputs: input.primaryInputs,
     ingredients: input.ingredients,
     byproducts: version.byproducts.map((bp) => ({

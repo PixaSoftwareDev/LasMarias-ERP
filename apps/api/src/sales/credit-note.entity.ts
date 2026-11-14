@@ -1,5 +1,5 @@
 import { Column, Entity, Index, PrimaryGeneratedColumn, CreateDateColumn } from 'typeorm';
-import type { SalesOrderLine } from '@lasmarias/shared-schemas';
+import type { CreditNote } from '@lasmarias/shared-schemas';
 
 // Nota de crédito por devolución de un despacho. Repone stock al mismo lote del que
 // salió y baja el saldo de cuenta corriente. Precio histórico del despacho.
@@ -19,7 +19,7 @@ export class CreditNoteEntity {
   clientId!: string;
 
   @Column({ type: 'jsonb', default: [] })
-  lines!: SalesOrderLine[];
+  lines!: CreditNote['lines'];
 
   @Column({ type: 'numeric', precision: 14, scale: 2, default: '0' })
   total!: string;

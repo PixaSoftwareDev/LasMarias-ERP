@@ -15,8 +15,7 @@
 //   - El costo neto PUEDE ser negativo (subproducto que vale más que los insumos).
 //     No se clampea a 0.
 //
-// ⚠️ STUB: hoy solo existe el CONTRATO. La lógica se implementa en el paso 3.
-// La batería de tests de QA (elaboration-cost.spec.ts) corre en ROJO hasta entonces.
+//   - Envases (insumo en "unidad" por kg o por bulto) se consumen ENTEROS: redondeo hacia arriba.
 
 import Big from 'big.js';
 import type { IngredientBasis } from '@lasmarias/shared-schemas';
@@ -42,7 +41,9 @@ export interface IngredientCost {
   name: string;
   quantity: Decimal; // cantidad de receta por unidad de la base
   unitCost: Decimal; // $/unidad del insumo
-  basis: IngredientBasis; // per_liter_milk | per_kg_product | fixed_per_order
+  basis: IngredientBasis; // per_liter_milk | per_1000_liters_milk | per_kg_product | fixed_per_order | per_bulto
+  unit?: string; // 'unidad' + base por kg/bulto = envase: se consume entero (redondeo hacia arriba)
+  cantidadReal?: Decimal; // envases corregidos a mano al cerrar: pisa la cuenta SOLO en el modo real
 }
 
 export interface ByproductCost {
@@ -55,6 +56,7 @@ export interface ElaborationCostInput {
   mode: ElaborationMode;
   litros: Decimal; // litros elaborados (driver de la base "por litro" y del rendimiento)
   productKg: Decimal; // kg de producto principal (real o esperado según mode)
+  bultos?: Decimal; // bultos producidos (driver de la base "por bulto"); ausente = 0
   primaryInputs: PrimaryInput[];
   ingredients: IngredientCost[];
   byproducts: ByproductCost[];
@@ -95,7 +97,8 @@ const MONEY_DP = 2; // montos en $
 const RATE_DP = 4; // $/kg, rendimiento (kg/litro) y porcentajes
 
 /** Cantidad consumida de un insumo según su base de consumo. */
-function consumedQuantity(ing: IngredientCost, litros: Big, productKg: Big): Big {
+function consumedQuantity(ing: IngredientCost, mode: ElaborationMode, litros: Big, productKg: Big, bultos: Big): Big {
+  if (mode === 'real' && ing.cantidadReal != null) return new Big(ing.cantidadReal);
   const qty = new Big(ing.quantity);
   switch (ing.basis) {
     case 'per_liter_milk':
@@ -103,15 +106,24 @@ function consumedQuantity(ing: IngredientCost, litros: Big, productKg: Big): Big
     case 'per_1000_liters_milk':
       return qty.times(litros).div(1000);
     case 'per_kg_product':
-      return qty.times(productKg);
+      return enteroSiEsEnvase(ing, qty.times(productKg));
+    case 'per_bulto':
+      return enteroSiEsEnvase(ing, qty.times(bultos));
     case 'fixed_per_order':
       return qty;
   }
 }
 
+// Un envase (insumo por unidad que escala con lo producido) se usa entero: 16,8 baldes son 17.
+function enteroSiEsEnvase(ing: IngredientCost, cantidad: Big): Big {
+  return ing.unit === 'unidad' ? cantidad.round(0, Big.roundUp) : cantidad;
+}
+
 export function computeElaborationCost(input: ElaborationCostInput): ElaborationCostResult {
   const litros = new Big(input.litros);
   const productKg = new Big(input.productKg);
+  const bultos = new Big(input.bultos ?? 0);
+  const consumo = (ing: IngredientCost) => consumedQuantity(ing, input.mode, litros, productKg, bultos);
   const warnings: ElaborationWarning[] = [];
 
   // Costo de la materia prima principal (leche o masa): Σ cantidad × costo unitario del lote.
@@ -129,7 +141,7 @@ export function computeElaborationCost(input: ElaborationCostInput): Elaboration
 
   // Costo de insumos de receta: cada uno según su base.
   const detalleInsumos: CostDetailLine[] = input.ingredients.map((ing) => {
-    const cantidad = consumedQuantity(ing, litros, productKg);
+    const cantidad = consumo(ing);
     return {
       name: ing.name,
       cantidad: cantidad.toString(),
@@ -138,7 +150,7 @@ export function computeElaborationCost(input: ElaborationCostInput): Elaboration
     };
   });
   const costoInsumos = input.ingredients.reduce(
-    (acc, ing) => acc.plus(consumedQuantity(ing, litros, productKg).times(new Big(ing.unitCost))),
+    (acc, ing) => acc.plus(consumo(ing).times(new Big(ing.unitCost))),
     new Big(0),
   );
 

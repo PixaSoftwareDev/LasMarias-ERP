@@ -13,6 +13,14 @@ export type PriceBasis = z.infer<typeof priceBasisSchema>;
 // Fase comercial — Despacho de mercadería: cliente + líneas con precio (lista por
 // tipo de cliente, editable a mano) → baja de stock + cargo en cuenta corriente.
 
+// Un lote dentro de un renglón repartido: cuánto (y cuántos bultos) sale de ese lote.
+export const saleLotSchema = z.object({
+  batchId: uuidSchema,
+  quantity: z.number().positive('Cargá cuánto sale de ese lote'),
+  bultos: bultosSchema,
+});
+export type SaleLot = z.infer<typeof saleLotSchema>;
+
 export const salesOrderLineSchema = z.object({
   productId: uuidSchema,
   productName: z.string(),
@@ -29,6 +37,9 @@ export const salesOrderLineSchema = z.object({
   // que te dé la opción de elegir"). Ausente = automático, el más viejo primero.
   batchId: uuidSchema.optional(),
   batchCode: z.string().optional(),
+  // Renglón repartido entre varios lotes elegidos a mano (pedido del dueño, 12/11/2026: 701 kg
+  // de masa en un renglón, 328 de un lote y 373 de otro). Excluye a batchId.
+  lotes: z.array(saleLotSchema.extend({ batchCode: z.string().optional() })).optional(),
   // Crema a granel cobrada por % de grasa: queda congelado el % del análisis y el precio por
   // kg de materia grasa con el que se calculó (unitPrice = fatBasePrice × fatPct ÷ 100), así
   // el remito y una corrección posterior muestran de dónde salió el precio.
@@ -85,12 +96,20 @@ export const createSalesOrderInputSchema = z.object({
         // Por bulto: el importe es bultos × precio (exige bultos > 0). Por defecto 'unidad'.
         priceBasis: priceBasisSchema.optional(),
         // Lote del que sale TODA la línea. Si se omite, sale del más viejo (y sigue con el
-        // siguiente si no alcanza). Para repartir entre dos lotes elegidos: dos líneas.
+        // siguiente si no alcanza).
         batchId: uuidSchema.optional(),
+        // O repartida entre varios lotes elegidos: la suma tiene que dar `quantity` (y los
+        // bultos, `bultos`). Lo controla el backend en decimal exacto.
+        lotes: z.array(saleLotSchema).min(1).optional(),
         // Crema por % de grasa: si viene, el backend calcula unitPrice = basePrice × pct ÷ 100
         // y pisa el unitPrice enviado (la cuenta vive en un solo lugar).
         fat: fatPricingSchema.optional(),
-      }),
+      })
+        .refine((l) => !(l.batchId && l.lotes), 'Elegí un lote o repartí entre lotes, no las dos cosas.')
+        .refine(
+          (l) => !l.lotes || new Set(l.lotes.map((x) => x.batchId)).size === l.lotes.length,
+          'Elegiste el mismo lote dos veces en el reparto.',
+        ),
     )
     .min(1, 'Cargá al menos un ítem'),
   notes: z.string().max(1000).optional(),
@@ -234,7 +253,9 @@ export const creditNoteSchema = z.object({
   code: z.string(),
   salesOrderId: uuidSchema,
   clientId: uuidSchema,
-  lines: z.array(salesOrderLineSchema),
+  // lineIndex: renglón de la venta del que se devolvió (una venta puede repetir producto).
+  // Las notas viejas no lo tienen.
+  lines: z.array(salesOrderLineSchema.extend({ lineIndex: z.number().int().optional() })),
   total: z.number().nonnegative(),
   createdById: uuidSchema,
   createdAt: isoDateTimeSchema,
@@ -246,6 +267,9 @@ export const createReturnInputSchema = z.object({
     .array(
       z.object({
         productId: uuidSchema,
+        // Renglón de la venta (posición en `lines`). Hace falta porque una venta puede tener el
+        // mismo producto en dos renglones. Si se omite, el primer renglón de ese producto.
+        lineIndex: z.number().int().nonnegative().optional(),
         quantity: z.number().positive('La cantidad tiene que ser mayor a 0'),
         // Bultos que vuelven. Opcional; si se omite se reponen solo los kg.
         bultos: bultosSchema,

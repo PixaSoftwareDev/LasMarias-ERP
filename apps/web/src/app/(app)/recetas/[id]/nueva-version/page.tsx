@@ -42,6 +42,7 @@ const BASIS_OPTIONS: { value: IngredientBasis; label: string }[] = [
   { value: 'per_liter_milk', label: 'por litro (o kg) de lo que entra: leche, masa o crema' },
   { value: 'per_1000_liters_milk', label: 'por cada 1.000 litros' },
   { value: 'per_kg_product', label: 'por kg de producto' },
+  { value: 'per_bulto', label: 'por bulto (envase: uno por bolsa, balde o caja)' },
   { value: 'fixed_per_order', label: 'fijo por orden' },
 ];
 

@@ -1,4 +1,4 @@
-import type { RecipeByproduct, RecipeIngredient } from '@lasmarias/shared-schemas';
+import { envaseSugerido, esEnvase, type RecipeByproduct, type RecipeIngredient } from '@lasmarias/shared-schemas';
 
 // Cálculo de rendimiento ajustado por calidad de la leche (CLAUDE.md §4.2).
 // Modelo lineal simple: yield = base + sensFat * (fatReal - baselineFat) + sensProtein * (proteinReal - baselineProtein)
@@ -44,14 +44,18 @@ export interface IngredientPlan {
   unit: string;
 }
 
+// `bultos`: bultos estimados (kg esperados ÷ kg por bulto de la ficha), para los envases
+// "por bulto". Los envases se cuentan enteros, igual que al cerrar (envaseSugerido).
 export function computeIngredients(
   liters: number,
   expectedYieldKg: number,
   ingredients: RecipeIngredient[],
+  bultos = 0,
 ): IngredientPlan[] {
   return ingredients.map((ing) => {
     let qty = 0;
-    switch (ing.basis) {
+    if (esEnvase(ing)) qty = envaseSugerido(ing, expectedYieldKg, bultos);
+    else switch (ing.basis) {
       case 'per_liter_milk':
         qty = ing.quantity * liters;
         break;
@@ -60,6 +64,9 @@ export function computeIngredients(
         break;
       case 'per_kg_product':
         qty = ing.quantity * expectedYieldKg;
+        break;
+      case 'per_bulto':
+        qty = ing.quantity * bultos;
         break;
       case 'fixed_per_order':
         qty = ing.quantity;

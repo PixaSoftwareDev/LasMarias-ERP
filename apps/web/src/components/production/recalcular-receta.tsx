@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { RefreshCw, TriangleAlert } from 'lucide-react';
-import type { ProductionOrder, ProductionRecalcPreview } from '@lasmarias/shared-schemas';
+import { esEnvase, type ProductionOrder, type ProductionRecalcPreview } from '@lasmarias/shared-schemas';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { productionApi, recipesApi } from '@/features/api';
@@ -14,8 +14,9 @@ import { formatMoney } from '@/lib/utils';
 
 // "Recalcular con la receta corregida" (pedido del dueño, 09/11/2026). Una orden cerrada queda
 // con la receta con que se hizo. Si esa receta tenía un error y ya se corrigió (versión nueva),
-// acá se vuelve a calcular el costo con la receta corregida. Solo cambia el costo: el stock,
-// las ventas y los kg quedan igual. Aparece solo si la receta tiene una versión más nueva.
+// acá se vuelve a calcular el costo con la receta corregida. Cambia el costo y los insumos
+// descontados; los kg, los lotes producidos y las ventas quedan igual. Aparece si la receta tiene
+// una versión más nueva, o si la orden contó envases partidos (16,8 baldes: antes del 13/11/2026).
 
 const money = (s: string | null) => (s == null ? '—' : formatMoney(Number(s)));
 const qty = (s: string) => Number(s).toLocaleString('es-AR', { maximumFractionDigits: 4 });
@@ -50,22 +51,31 @@ export function RecalcularReceta({ order, onDone }: { order: ProductionOrder; on
   });
 
   const activa = recipe.data?.activeVersion;
-  if (!puede || !activa || activa.id === order.recipeVersionId) return null;
+  const recetaNueva = !!activa && activa.id !== order.recipeVersionId;
+  const usada = recipe.data?.versions?.find((v) => v.id === order.recipeVersionId);
+  const envasesPartidos = (usada?.ingredients ?? []).some(
+    (ing) =>
+      esEnvase(ing) &&
+      !Number.isInteger(Number(order.costBreakdown?.real.detalleInsumos?.find((l) => l.name === ing.productName)?.cantidad ?? 0)),
+  );
+  if (!puede || !activa || (!recetaNueva && !envasesPartidos)) return null;
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>La receta cambió después de esta elaboración</CardTitle>
+        <CardTitle>{recetaNueva ? 'La receta cambió después de esta elaboración' : 'Envases contados partidos'}</CardTitle>
         <p className="text-sm text-foreground-muted">
-          Esta orden se calculó con una receta anterior. Si esa receta tenía un error, podés recalcular el costo con la
-          receta corregida. Cambia solo el costo: el stock, las ventas y los kg quedan igual.
+          {recetaNueva
+            ? 'Esta orden se calculó con una receta anterior. Si esa receta tenía un error, podés recalcular el costo con la receta corregida.'
+            : 'Esta orden descontó envases con decimales. Recalculala para contarlos enteros.'}{' '}
+          Cambian el costo y los insumos descontados; los kg y las ventas quedan igual.
         </p>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {!preview ? (
           <Button variant="secondary" className="self-start" onClick={() => ver.mutate()} disabled={ver.isPending}>
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
-            {ver.isPending ? 'Calculando…' : 'Ver cómo queda con la receta corregida'}
+            {ver.isPending ? 'Calculando…' : recetaNueva ? 'Ver cómo queda con la receta corregida' : 'Ver cómo queda'}
           </Button>
         ) : (
           <>
@@ -76,7 +86,7 @@ export function RecalcularReceta({ order, onDone }: { order: ProductionOrder; on
                 <p className="text-sm text-foreground-muted">Total {money(preview.antes.costoNeto)}</p>
               </div>
               <div className="rounded-lg border border-primary-200 bg-primary-50/40 p-3">
-                <p className="text-sm text-foreground-muted">Con la receta corregida (v{preview.versionNueva})</p>
+                <p className="text-sm text-foreground-muted">Recalculada (receta v{preview.versionNueva})</p>
                 <p className="text-xl font-bold text-primary-700">{money(preview.despues.costoPorKg)} / kg</p>
                 <p className="text-sm text-foreground-muted">Total {money(preview.despues.costoNeto)}</p>
               </div>

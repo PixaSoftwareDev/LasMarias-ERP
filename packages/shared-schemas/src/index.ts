@@ -20,3 +20,6 @@ export * from './backup';
 export * from './month';
 export * from './fixed-cost';
 export * from './milk-price';
+export * from './sales-reparto';
+export * from './remito';
+export * from './envases';
