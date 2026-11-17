@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, CheckCircle2, GitBranch, Lock, Package, Save, ShoppingCart } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, GitBranch, Lock, Package, Save, ShoppingCart, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ui/field';
@@ -18,7 +18,7 @@ import { type ProductionOrder } from '@lasmarias/shared-schemas';
 import { OutputFields } from '@/components/production/output-fields';
 import { FormatOutputs, type FormatRow } from '@/components/production/format-outputs';
 import { RecalcularReceta } from '@/components/production/recalcular-receta';
-import { EnvasesUsados, envasesCorregidos } from '@/components/production/envases-usados';
+import { EnvasesUsados, envaseSinBultos, envasesCorregidos, useEnvasesReceta } from '@/components/production/envases-usados';
 import { InsumosFaltantes } from '@/components/production/insumos-faltantes';
 
 // Pantalla de cierre de orden (CLAUDE.md §4.3): se cargan las salidas reales por producto
@@ -162,6 +162,7 @@ export default function CloseProductionPage({ params }: { params: { id: string }
   const formatosValidos = formatos.filter((f) => f.productId && f.kg != null && f.kg > 0);
   const formatoIncompleto = formatos.some((f) => f.productId && !(f.kg != null && f.kg > 0));
   const canClose = principal.some((o) => Number(quantities[o.productId] ?? 0) > 0) && !formatoIncompleto;
+  const envasesReceta = useEnvasesReceta(order?.recipeId, order?.recipeVersionId);
   // Para guardar sin cerrar alcanza con que haya un subproducto cargado.
   const hayAlgoQueGuardar = byproducts.some((o) => Number(quantities[o.productId] ?? 0) > 0);
 
@@ -173,6 +174,8 @@ export default function CloseProductionPage({ params }: { params: { id: string }
   const bultosTachada =
     principal.reduce((a, o) => a + Number(bultos[o.productId] ?? 0), 0) +
     formatosValidos.reduce((a, f) => a + Number(f.bultos ?? 0), 0);
+  // La bolsa/caja va una por bulto: sin bultos no se puede cerrar (se avisa antes).
+  const sinBultos = envaseSinBultos(envasesReceta, bultosTachada, envases);
   const realYield = order && order.totalMilkLiters > 0 && principalKg > 0 ? principalKg / order.totalMilkLiters : null;
 
   if (orderQuery.isLoading) {
@@ -429,10 +432,17 @@ export default function CloseProductionPage({ params }: { params: { id: string }
       </Card>
 
       <div className="flex items-center justify-between gap-3">
-        <p className="hidden text-sm text-foreground-muted sm:flex sm:items-center sm:gap-1.5">
-          <Lock className="h-4 w-4" aria-hidden="true" />
-          Cerrar la orden es definitivo.
-        </p>
+        {sinBultos ? (
+          <p className="flex items-center gap-1.5 text-sm font-medium text-danger" role="alert">
+            <TriangleAlert className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+            Cargá los bultos: {sinBultos} va uno por bulto.
+          </p>
+        ) : (
+          <p className="hidden text-sm text-foreground-muted sm:flex sm:items-center sm:gap-1.5">
+            <Lock className="h-4 w-4" aria-hidden="true" />
+            Cerrar la orden es definitivo.
+          </p>
+        )}
         <div className="flex w-full gap-2 sm:w-auto">
           <Button variant="ghost" onClick={() => router.push('/produccion')}>
             Cancelar
@@ -441,7 +451,7 @@ export default function CloseProductionPage({ params }: { params: { id: string }
             onClick={() => close.mutate()}
             loading={close.isPending}
             loadingText="Cerrando..."
-            disabled={!canClose}
+            disabled={!canClose || !!sinBultos}
           >
             Cerrar orden
           </Button>

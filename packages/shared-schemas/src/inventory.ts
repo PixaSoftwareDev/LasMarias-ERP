@@ -169,6 +169,29 @@ export const silosOverviewSchema = z.object({
 });
 export type SilosOverview = z.infer<typeof silosOverviewSchema>;
 
+// Pasar leche de un silo a otro (pedido del dueño, 16/11/2026): ej. lo que sobró en el
+// tanque 4 después del fin de semana se pasa al tanque 2.
+export const siloTransferInputSchema = z
+  .object({
+    fromWarehouseId: uuidSchema,
+    toWarehouseId: uuidSchema,
+    liters: z.number().positive('Cargá los litros que pasás').max(1_000_000),
+    notes: z.string().max(500).optional(),
+  })
+  .refine((v) => v.fromWarehouseId !== v.toWarehouseId, {
+    message: 'Elegí dos silos distintos',
+    path: ['toWarehouseId'],
+  });
+export type SiloTransferInput = z.infer<typeof siloTransferInputSchema>;
+
+export const siloTransferResultSchema = z.object({
+  liters: z.number(),
+  fromName: z.string(),
+  toName: z.string(),
+  lotes: z.array(z.object({ code: z.string(), liters: z.number() })), // lotes que quedaron en el destino
+});
+export type SiloTransferResult = z.infer<typeof siloTransferResultSchema>;
+
 // Lote de leche cruda disponible (para el selector de origen en elaboración), con su silo.
 export const milkBatchSchema = z.object({
   id: uuidSchema,

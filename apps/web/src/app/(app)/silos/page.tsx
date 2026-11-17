@@ -1,13 +1,15 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Droplets, TriangleAlert } from 'lucide-react';
+import { ArrowLeftRight, Droplets, TriangleAlert } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { inventoryApi } from '@/features/api';
+import { PasarLeche } from '@/components/silos/pasar-leche';
 import type { SiloLevel } from '@lasmarias/shared-schemas';
 
 // Vista visual de silos de leche (CLAUDE.md §9). Todo sale del stock real; no se carga
@@ -142,13 +144,24 @@ function Gauge({ percent, label }: { percent: number; label: string }) {
 
 export default function SilosPage() {
   const { data, isLoading, isError } = useQuery({ queryKey: ['silos'], queryFn: () => inventoryApi.silos() });
+  const [pasando, setPasando] = useState(false);
+  const puedePasar = !!data && data.silos.length > 1 && data.silos.some((s) => s.currentLiters > 0);
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Silos de leche"
-        description="Nivel de cada silo y de toda la planta. Sube con la recepción y baja con la elaboración — siempre automático."
+        description="Nivel de cada silo y de toda la planta. Sube con la recepción y baja con la elaboración."
+        action={
+          puedePasar && !pasando ? (
+            <Button onClick={() => setPasando(true)}>
+              <ArrowLeftRight className="h-4 w-4" aria-hidden="true" /> Pasar leche
+            </Button>
+          ) : undefined
+        }
       />
+
+      {pasando && data && <PasarLeche silos={data.silos} onClose={() => setPasando(false)} />}
 
       {isLoading ? (
         <div className="h-64 animate-pulse rounded-lg bg-surface-subtle" />

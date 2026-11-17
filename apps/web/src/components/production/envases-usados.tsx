@@ -26,9 +26,7 @@ export function EnvasesUsados({
   value: Record<string, string>;
   onChange: (v: Record<string, string>) => void;
 }) {
-  const recipe = useQuery({ queryKey: ['recipe', recipeId], queryFn: () => recipesApi.get(recipeId) });
-  const version = recipe.data?.versions?.find((v) => v.id === recipeVersionId);
-  const envases = (version?.ingredients ?? []).filter(esEnvase);
+  const envases = useEnvasesReceta(recipeId, recipeVersionId);
   if (envases.length === 0) return null;
 
   return (
@@ -71,4 +69,26 @@ export function envasesCorregidos(value: Record<string, string>) {
   return Object.entries(value)
     .filter(([, v]) => v !== '' && Number.isInteger(Number(v)) && Number(v) >= 0)
     .map(([productId, v]) => ({ productId, quantity: Number(v) }));
+}
+
+// Envases (bolsas, baldes, cajas) de la versión de receta de la orden.
+export function useEnvasesReceta(recipeId: string | undefined, recipeVersionId: string | undefined) {
+  const recipe = useQuery({
+    queryKey: ['recipe', recipeId],
+    queryFn: () => recipesApi.get(recipeId!),
+    enabled: !!recipeId,
+  });
+  const version = recipe.data?.versions?.find((v) => v.id === recipeVersionId);
+  return (version?.ingredients ?? []).filter(esEnvase);
+}
+
+// Envase "uno por bulto" sin bultos cargados ni cantidad a mano: no se sabe cuántos se usaron
+// (la API frena el cierre). Devuelve el nombre del envase para avisar antes de apretar Cerrar.
+export function envaseSinBultos(
+  envases: ReturnType<typeof useEnvasesReceta>,
+  bultos: number,
+  value: Record<string, string>,
+): string | null {
+  if (bultos > 0) return null;
+  return envases.find((e) => e.basis === 'per_bulto' && (value[e.productId] ?? '') === '')?.productName ?? null;
 }
