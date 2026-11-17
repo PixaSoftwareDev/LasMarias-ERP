@@ -7,6 +7,8 @@ import {
   discardStockInputSchema,
   countAdjustInputSchema,
   updateBatchInputSchema,
+  siloTransferInputSchema,
+  type SiloTransferInput,
   type CreateWarehouseInput,
   type UpdateWarehouseInput,
   type StockCountInput,
@@ -65,6 +67,16 @@ export class InventoryController {
   @Roles('admin', 'gerente', 'operario', 'vendedor')
   silos() {
     return this.inventory.silos();
+  }
+
+  // Pasar leche de un silo a otro (ej. lo que sobró en el tanque 4 al tanque 2).
+  @Post('silos/transfer')
+  @Roles('admin', 'gerente', 'operario')
+  transferSilo(
+    @Body(new ZodValidationPipe(siloTransferInputSchema)) body: SiloTransferInput,
+    @CurrentUser() user: JwtUserPayload,
+  ) {
+    return this.inventory.transferSilo(body, user.sub);
   }
 
   // Lotes de leche cruda disponibles, opcionalmente filtrados por silo (origen de elaboración).

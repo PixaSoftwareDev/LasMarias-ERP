@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,7 +19,7 @@ import { MetaLitrosField, MetaLitrosResumen, litrosSugeridos } from '@/component
 import { DobleCostoAviso, ReprocesoRows, SinCostoAviso, useStockSources, type InputRow } from '@/components/production/stock-inputs';
 import { OutputFields } from '@/components/production/output-fields';
 import { FormatOutputs, type FormatRow } from '@/components/production/format-outputs';
-import { EnvasesUsados, envasesCorregidos } from '@/components/production/envases-usados';
+import { EnvasesUsados, envaseSinBultos, envasesCorregidos, useEnvasesReceta } from '@/components/production/envases-usados';
 
 interface MilkBatch {
   id: string;
@@ -184,6 +184,7 @@ export default function EditProductionPage() {
   );
 
   const wasClosed = orderQuery.data?.status === 'closed';
+  const envasesReceta = useEnvasesReceta(orderQuery.data?.recipeId, orderQuery.data?.recipeVersionId);
 
   // Precargar el formulario con los datos de la orden una sola vez, cuando llega del servidor.
   useEffect(() => {
@@ -334,8 +335,14 @@ export default function EditProductionPage() {
   const formatosValidos = formatos.filter((f) => f.productId && f.kg != null && f.kg > 0);
   const formatoIncompleto = formatos.some((f) => f.productId && !(f.kg != null && f.kg > 0));
   // Para una orden cerrada necesitamos al menos un kg de producto principal para poder recalcular.
+  const bultosTachada =
+    principalOutputs.reduce((a, o) => a + Number(bultos[o.productId] ?? 0), 0) +
+    formatosValidos.reduce((a, f) => a + Number(f.bultos ?? 0), 0);
+  // La bolsa/caja va una por bulto: sin bultos no se puede recalcular el cierre (se avisa antes).
+  const sinBultos = wasClosed ? envaseSinBultos(envasesReceta, bultosTachada, envases) : null;
   const closedReady =
-    !wasClosed || (principalOutputs.some((o) => Number(quantities[o.productId] ?? 0) > 0) && !formatoIncompleto);
+    !wasClosed ||
+    (principalOutputs.some((o) => Number(quantities[o.productId] ?? 0) > 0) && !formatoIncompleto && !sinBultos);
 
   return (
     <div className="flex flex-col gap-6">
@@ -599,16 +606,19 @@ export default function EditProductionPage() {
             principalOutputs.reduce((a, o) => a + Number(quantities[o.productId] ?? 0), 0) +
             formatosValidos.reduce((a, f) => a + Number(f.kg), 0)
           }
-          bultos={
-            principalOutputs.reduce((a, o) => a + Number(bultos[o.productId] ?? 0), 0) +
-            formatosValidos.reduce((a, f) => a + Number(f.bultos ?? 0), 0)
-          }
+          bultos={bultosTachada}
           value={envases}
           onChange={setEnvases}
         />
       )}
 
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {sinBultos && (
+          <p className="mr-auto flex items-center gap-1.5 text-sm font-medium text-danger" role="alert">
+            <TriangleAlert className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+            Cargá los bultos: {sinBultos} va uno por bulto.
+          </p>
+        )}
         <Button variant="ghost" onClick={() => router.push('/produccion')}>Cancelar</Button>
         <Button
           onClick={() => save.mutate()}

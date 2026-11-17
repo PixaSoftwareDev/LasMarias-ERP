@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import Big from 'big.js';
-import { Between, DataSource, EntityManager, Repository } from 'typeorm';
+import { Between, DataSource, EntityManager, In, Repository } from 'typeorm';
 import type {
   CreateWarehouseInput,
   UpdateWarehouseInput,
@@ -22,6 +22,8 @@ import type {
   TraceProducer,
   Warehouse,
   SilosOverview,
+  SiloTransferInput,
+  SiloTransferResult,
   MilkBatchDto,
 } from '@lasmarias/shared-schemas';
 import { WarehouseEntity } from './warehouse.entity';
@@ -35,8 +37,9 @@ import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import type { Currency } from '@lasmarias/shared-schemas';
 import { resolveAlertLevel } from './stock-alert';
 import { allocateBultos, bultosForQuantity } from './bultos-allocation';
-import { lockBatches, lockBatchesOfProduct, lockDuplicateSignature } from '../common/locks';
-import { siloFillPercent } from './silo.helpers';
+import { lockBatches, lockBatchesOfProduct, lockDuplicateSignature, lockRow } from '../common/locks';
+import { siloFillPercent, siloHasRoomFor } from './silo.helpers';
+import { codigoLoteTraspaso, planSiloTransfer } from './silo-transfer';
 import { sortOldestFirst } from './oldest-first';
 import { resolveInputCost, type InputCostSource } from '../production/input-cost';
 import {
@@ -872,6 +875,149 @@ export class InventoryService {
     };
   }
 
+  // Pasar leche de un silo a otro (pedido del dueño, 16/11/2026). Ver silo-transfer.ts.
+  // Toma primero la leche más vieja del silo de origen; un lote entero y sin usar cambia de
+  // silo, el resto se parte (nace un lote nuevo en el destino, de la misma recepción y al
+  // mismo costo). Queda un movimiento 'transfer' en cada lote para la trazabilidad.
+  async transferSilo(input: SiloTransferInput, userId: string): Promise<SiloTransferResult> {
+    return this.dataSource.transaction(async (manager) => {
+      const whRepo = manager.getRepository(WarehouseEntity);
+      const batchRepo = manager.getRepository(BatchEntity);
+      const movRepo = manager.getRepository(InventoryMovementEntity);
+      const recRepo = manager.getRepository(MilkReceptionEntity);
+
+      const [from, to] = await Promise.all([
+        whRepo.findOne({ where: { id: input.fromWarehouseId } }),
+        whRepo.findOne({ where: { id: input.toWarehouseId } }),
+      ]);
+      if (!from || from.kind !== 'silo') throw new BadRequestException('Elegí de qué silo sale la leche.');
+      if (!to || to.kind !== 'silo' || !to.isActive) throw new BadRequestException('Elegí a qué silo va la leche.');
+      if (from.id === to.id) throw new BadRequestException('Elegí dos silos distintos.');
+
+      // Mismo orden de candados que editar una recepción (recepción → lotes → silo), para
+      // no trabarse con ella: primero se ubican los lotes del silo sin bloquear, después se
+      // bloquean sus recepciones, los lotes y los dos silos, y recién ahí se lee el saldo real.
+      const milkOfSilo = () =>
+        batchRepo
+          .createQueryBuilder('b')
+          .where('b.warehouse_id = :wid', { wid: from.id })
+          .andWhere('b.product_id IS NULL')
+          .andWhere("b.status IN ('activo', 'en_proceso')")
+          .andWhere('b.remaining_quantity > 0')
+          .orderBy('b.expiration_date', 'ASC', 'NULLS LAST')
+          .addOrderBy('b.production_date', 'ASC')
+          .addOrderBy('b.code', 'ASC')
+          .getMany();
+      const candidatos = await milkOfSilo();
+      const ids = candidatos.map((b) => b.id);
+      const recepciones = ids.length
+        ? await recRepo
+            .createQueryBuilder('r')
+            .where('r.batch_id IN (:...ids)', { ids })
+            .orWhere('r.batch_ids ?| array[:...ids]', { ids })
+            .getMany()
+        : [];
+      for (const r of [...recepciones].sort((a, b) => a.id.localeCompare(b.id))) await lockRow(manager, 'milk_receptions', r.id);
+      await lockBatches(manager, ids);
+      for (const wid of [from.id, to.id].sort()) await lockRow(manager, 'warehouses', wid);
+
+      const lotes = await milkOfSilo();
+      const plan = planSiloTransfer(lotes, input.liters);
+      const litros = (n: Big | string | number) => new Big(n).toNumber().toLocaleString('es-AR');
+      if (!plan.ok)
+        throw new BadRequestException(`En el ${from.name} hay ${litros(plan.disponibles)} L: no se pueden pasar ${litros(input.liters)} L.`);
+
+      // Capacidad del destino (misma regla que una descarga).
+      const capacity = to.capacityLiters != null ? Number(to.capacityLiters) : 0;
+      if (capacity > 0) {
+        const raw = await batchRepo
+          .createQueryBuilder('b')
+          .select('COALESCE(SUM(b.remaining_quantity), 0)', 'current')
+          .where('b.warehouse_id = :wid', { wid: to.id })
+          .andWhere('b.product_id IS NULL')
+          .andWhere("b.status IN ('activo','en_proceso')")
+          .getRawOne<{ current: string }>();
+        const current = Number(raw?.current ?? 0);
+        if (!siloHasRoomFor(capacity, current, input.liters))
+          throw new BadRequestException(
+            `En el ${to.name} entran ${litros(Math.max(0, capacity - current))} L: no se pueden pasar ${litros(input.liters)} L.`,
+          );
+      }
+
+      const recepcionDe = (batchId: string) =>
+        recepciones.find((r) => (r.batchIds?.length ? r.batchIds.includes(batchId) : r.batchId === batchId)) ?? null;
+      const movimiento = (batchId: string, cantidad: string, warehouseId: string, referenceId: string, sentido: 'sale' | 'entra') =>
+        movRepo.create({
+          batchId,
+          productId: null,
+          type: 'transfer',
+          reason: 'transfer',
+          quantity: cantidad,
+          unit: 'litro',
+          warehouseId,
+          referenceType: 'silo_transfer',
+          referenceId,
+          notes: `${sentido === 'sale' ? `Pasada al ${to.name}` : `Viene del ${from.name}`}${input.notes ? ` — ${input.notes}` : ''}`,
+          createdById: userId,
+        });
+      // El movimiento es siempre 'transfer'. referenceId = lote que quedó en el destino: si es
+      // distinto del lote del movimiento, ese lote se partió hacia él (lo usa la trazabilidad).
+
+      const resultado: SiloTransferResult['lotes'] = [];
+      for (const paso of plan.pasos) {
+        const lote = lotes.find((l) => l.id === paso.batchId)!;
+        if (paso.modo === 'mover') {
+          lote.warehouseId = to.id;
+          await batchRepo.save(lote);
+          await movRepo.save(movimiento(lote.id, paso.litros, to.id, lote.id, 'entra'));
+          resultado.push({ code: lote.code, liters: Number(paso.litros) });
+          continue;
+        }
+        // Partir: el origen se achica (inicial y saldo juntos) y nace el lote nuevo.
+        const recepcion = recepcionDe(lote.id);
+        const lotCodes = recepcion
+          ? (await batchRepo.find({ where: { id: In(recepcion.batchIds?.length ? recepcion.batchIds : [lote.id]) } })).map((b) => b.code)
+          : [];
+        const usados = new Set(
+          (await batchRepo.createQueryBuilder('b').select('b.code', 'code').where('b.code LIKE :p', { p: `${recepcion?.code ?? lote.code}-%` }).getRawMany<{ code: string }>()).map((r) => r.code),
+        );
+        const code = codigoLoteTraspaso(lote.code, recepcion ? { code: recepcion.code, lotCodes } : null, (c) => usados.has(c));
+
+        const saldo = new Big(lote.remainingQuantity).minus(paso.litros);
+        lote.remainingQuantity = saldo.toString();
+        lote.initialQuantity = new Big(lote.initialQuantity).minus(paso.litros).toString();
+        if (saldo.lte(0) && lote.status === 'activo') lote.status = 'agotado';
+        await batchRepo.save(lote);
+
+        const nuevo = await batchRepo.save(
+          batchRepo.create({
+            code,
+            productId: null,
+            productionDate: lote.productionDate,
+            expirationDate: lote.expirationDate,
+            initialQuantity: paso.litros,
+            remainingQuantity: paso.litros,
+            unit: lote.unit,
+            status: 'activo' as const,
+            parentBatchId: lote.id,
+            warehouseId: to.id,
+            unitCost: lote.unitCost,
+            notes: lote.notes,
+          }),
+        );
+        if (recepcion) {
+          const actuales = recepcion.batchIds?.length ? recepcion.batchIds : recepcion.batchId ? [recepcion.batchId] : [];
+          recepcion.batchIds = [...actuales, nuevo.id];
+          await recRepo.update({ id: recepcion.id }, { batchIds: recepcion.batchIds });
+        }
+        await movRepo.save(movimiento(lote.id, paso.litros, from.id, nuevo.id, 'sale'));
+        await movRepo.save(movimiento(nuevo.id, paso.litros, to.id, nuevo.id, 'entra'));
+        resultado.push({ code, liters: Number(paso.litros) });
+      }
+      return { liters: Number(input.liters), fromName: from.name, toName: to.name, lotes: resultado };
+    });
+  }
+
   // Lotes activos del producto, el más viejo primero (vencimiento y, si no hay, elaboración).
   async fefoBatchesForProduct(productId: string): Promise<BatchEntity[]> {
     return sortOldestFirst(await this.batches.find({ where: { productId, status: 'activo' } }));
@@ -971,7 +1117,16 @@ export class InventoryService {
     const orderOutputs = new Map<string, Set<string>>(); // orderId → batchIds (in/production_order)
     const producingOrderByBatch = new Map<string, string>(); // batchId → orderId que lo produjo
 
+    // Leche pasada de un silo a otro: el lote de origen → lote nuevo (cuando se partió).
+    const transferChildren = new Map<string, string[]>(); // origen → lotes nuevos
+    const transferParent = new Map<string, string>(); // lote nuevo → origen
+
     for (const m of movements) {
+      if (m.referenceType === 'silo_transfer' && m.referenceId && m.referenceId !== m.batchId) {
+        transferChildren.set(m.batchId, [...(transferChildren.get(m.batchId) ?? []), m.referenceId]);
+        transferParent.set(m.referenceId, m.batchId);
+        continue;
+      }
       if (m.referenceType === 'production_order' && m.referenceId) {
         if (m.type === 'out') {
           if (!consumedInOrders.has(m.batchId)) consumedInOrders.set(m.batchId, new Set());
@@ -1014,10 +1169,21 @@ export class InventoryService {
         const b = batchById.get(batchId);
         return b ? toTraceBatch(b) : null;
       },
-      getOutEdges: (batchId): BatchOutEdges => ({
-        consumedInOrderIds: Array.from(consumedInOrders.get(batchId) ?? []),
-        dispatches: dispatchesByBatch.get(batchId) ?? [],
-      }),
+      // Lo que se hizo con la leche que se pasó a otro silo cuenta como hecho con este lote.
+      getOutEdges: (batchId): BatchOutEdges => {
+        const ids: string[] = [];
+        const pendientes = [batchId];
+        while (pendientes.length > 0) {
+          const id = pendientes.pop()!;
+          if (ids.includes(id)) continue;
+          ids.push(id);
+          pendientes.push(...(transferChildren.get(id) ?? []));
+        }
+        return {
+          consumedInOrderIds: [...new Set(ids.flatMap((id) => Array.from(consumedInOrders.get(id) ?? [])))],
+          dispatches: ids.flatMap((id) => dispatchesByBatch.get(id) ?? []),
+        };
+      },
       getOrderOutputBatchIds: (orderId) => Array.from(orderOutputs.get(orderId) ?? []),
       getProducingOrder: (batchId) => {
         const orderId = producingOrderByBatch.get(batchId);
@@ -1028,7 +1194,15 @@ export class InventoryService {
         const order = orderById.get(orderId);
         return (order?.milkInputs ?? []).map((mi) => mi.batchId);
       },
-      getProducer: (batchId) => producerByBatchId.get(batchId) ?? null,
+      getProducer: (batchId) => {
+        let id: string | undefined = batchId;
+        for (let i = 0; id && i < 20; i++) {
+          const p = producerByBatchId.get(id);
+          if (p) return p;
+          id = transferParent.get(id);
+        }
+        return null;
+      },
       getOrderCode: (orderId) => orderById.get(orderId)?.code ?? '',
     };
   }

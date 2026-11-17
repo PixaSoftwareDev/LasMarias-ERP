@@ -205,6 +205,13 @@ export function DeQueLoteSale({
       {!batchId && !filas && shortage > 0 && (
         <Aviso>Faltan {kg(shortage)} sin stock disponible.</Aviso>
       )}
+      {/* Con un solo lote no hay nada que elegir ni repartir (audio del dueño, 16/11/2026: la
+          elaboración del día todavía no estaba cargada y no le aparecía "Repartir"). */}
+      {lotes.length === 1 && (
+        <p className="text-foreground-muted">
+          Es el único lote cargado. Si falta la elaboración de hoy, cargala antes en Producción.
+        </p>
+      )}
     </div>
   );
 }

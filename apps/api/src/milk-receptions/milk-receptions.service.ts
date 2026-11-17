@@ -302,7 +302,7 @@ export class MilkReceptionsService {
     const movs = await movementRepo
       .createQueryBuilder('m')
       .where('m.batch_id IN (:...ids)', { ids: batches.map((b) => b.id) })
-      .andWhere("m.reference_type IS DISTINCT FROM 'stock_adjustment'")
+      .andWhere("COALESCE(m.reference_type, '') NOT IN ('stock_adjustment', 'silo_transfer')")
       .getCount();
     return movs > 0;
   }
@@ -520,7 +520,7 @@ export class MilkReceptionsService {
         const usedInProduction = await movementRepo
           .createQueryBuilder('m')
           .where('m.batch_id = :batchId', { batchId })
-          .andWhere("m.reference_type IS DISTINCT FROM 'stock_adjustment'")
+          .andWhere("COALESCE(m.reference_type, '') NOT IN ('stock_adjustment', 'silo_transfer')")
           .getCount();
         if (usedInProduction > 0) {
           throw new BadRequestException(
