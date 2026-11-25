@@ -211,7 +211,12 @@ export const recipesApi = {
 export const productionApi = {
   list: () => api<ProductionOrder[]>('/api/production-orders'),
   get: (id: string) => api<ProductionOrder>(`/api/production-orders/${id}`),
-  open: (input: { recipeId: string; operatorId: string; startedAt: string; milkInputs: { batchId: string; liters: number }[]; notes?: string; confirmDuplicate?: boolean }) =>
+  // Masas del día indicado (YYYY-MM-DD) y del anterior: de cuál suero salió la ricota.
+  wheySources: (fecha: string) =>
+    api<{ id: string; code: string; recipeName: string; startedAt: string; status: string }[]>(
+      `/api/production-orders/whey-sources?fecha=${encodeURIComponent(fecha)}`,
+    ),
+  open: (input: { recipeId: string; operatorId: string; startedAt: string; milkInputs: { batchId: string; liters: number }[]; wheyFromOrderId?: string | null; notes?: string; confirmDuplicate?: boolean }) =>
     api<ProductionOrder>('/api/production-orders/open', { method: 'POST', body: input }),
   // Editar. Para una orden ABIERTA alcanza con los campos de apertura. Para una CERRADA hay que
   // mandar además la producción real (actualOutputs/warehouseId/expectedYieldKgPerLiter): el
@@ -223,6 +228,7 @@ export const productionApi = {
       operatorId: string;
       startedAt: string;
       milkInputs: { batchId: string; liters: number }[];
+      wheyFromOrderId?: string | null;
       notes?: string;
       actualOutputs?: { productId: string; quantity: number; bultos?: number; isPrincipal: boolean; isFormat?: boolean }[];
       warehouseId?: string;

@@ -36,6 +36,8 @@ interface FormValues {
 
 // Categorías de productos que pueden usarse como insumo de una receta.
 const BYPRODUCT_CATEGORIES = ['subproducto', 'intermedio', 'queso'];
+// Destinos de subproducto que piden elegir un producto.
+const conProducto = (d: ByproductDestination) => d === 'product' || d === 'elaboracion';
 const INGREDIENT_CATEGORIES = ['materia_prima', 'insumo', 'envase', 'intermedio'];
 
 const BASIS_OPTIONS: { value: IngredientBasis; label: string }[] = [
@@ -55,6 +57,9 @@ const DESTINATION_OPTIONS: { value: ByproductDestination; label: string }[] = [
   { value: 'product', label: 'Otro producto' },
   { value: 'sale', label: 'Venta (ej. chanchería)' },
   { value: 'discard', label: 'Descarte' },
+  // La ricota que se hace con el suero de la masa: no entra al stock desde esta orden; sus
+  // kg los pone la orden de ricota y su valor se le descuenta a esta.
+  { value: 'elaboracion', label: 'Se elabora en otra orden (ej: ricota del suero)' },
 ];
 
 interface IngredientRow {
@@ -204,7 +209,7 @@ export default function NewRecipeVersionPage() {
           unit: r.unit,
           basis: r.basis,
           destination: r.destination,
-          destinationProductId: r.destination === 'product' && r.destinationProductId ? r.destinationProductId : undefined,
+          destinationProductId: conProducto(r.destination) && r.destinationProductId ? r.destinationProductId : undefined,
           referenceValuePerUnit: r.referenceValuePerUnit === '' ? undefined : Number(r.referenceValuePerUnit),
         })),
       });
@@ -227,7 +232,7 @@ export default function NewRecipeVersionPage() {
     }
     for (const [idx, r] of byproducts.entries()) {
       if (!r.name.trim()) { toast.error(`Subproducto ${idx + 1}: ingresá el nombre`); return; }
-      if (r.destination === 'product' && !r.destinationProductId) { toast.error(`Subproducto ${idx + 1}: elegí a qué producto va`); return; }
+      if (conProducto(r.destination) && !r.destinationProductId) { toast.error(`Subproducto ${idx + 1}: elegí a qué producto va`); return; }
       if (!(Number(r.expectedYield) > 0)) { toast.error(`Subproducto ${idx + 1}: el rendimiento tiene que ser mayor a 0`); return; }
       if (r.referenceValuePerUnit !== '' && !(Number(r.referenceValuePerUnit) >= 0)) {
         toast.error(`Subproducto ${idx + 1}: el valor de recupero no es válido`);
@@ -534,18 +539,22 @@ export default function NewRecipeVersionPage() {
                       value={row.destination}
                       onChange={(e) => {
                         const destination = e.target.value as ByproductDestination;
-                        updateByproduct(idx, { destination, ...(destination !== 'product' ? { destinationProductId: '' } : {}) });
+                        updateByproduct(idx, { destination, ...(!conProducto(destination) ? { destinationProductId: '' } : {}) });
                       }}
                     >
                       {DESTINATION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </Field>
-                  {row.destination === 'product' && (
+                  {conProducto(row.destination) && (
                     <Field
-                      label="¿A qué producto va?"
+                      label={row.destination === 'elaboracion' ? '¿Qué producto se elabora?' : '¿A qué producto va?'}
                       htmlFor={`bp-product-${idx}`}
                       required
-                      hint="Al cerrar la orden, lo que cargues de este subproducto entra al stock de ese producto, con su propio lote."
+                      hint={
+                        row.destination === 'elaboracion'
+                          ? 'Los kg los pone la orden de ese producto. Su valor se le descuenta a esta.'
+                          : 'Al cerrar la orden, lo que cargues de este subproducto entra al stock de ese producto, con su propio lote.'
+                      }
                     >
                       <select
                         id={`bp-product-${idx}`}

@@ -71,6 +71,15 @@ export class ProductionOrderEntity extends BaseEntity {
   @Column({ type: 'jsonb', name: 'cost_breakdown', nullable: true })
   costBreakdown!: ProductionCostBreakdown | null;
 
+  // Ricota hecha con el suero de esta orden de masa (opción "Suero de la masa"). Sin FK a
+  // propósito: el borrado de la masa se frena en el servicio con un mensaje claro.
+  @Column({ type: 'uuid', name: 'whey_from_order_id', nullable: true })
+  wheyFromOrderId!: string | null;
+
+  @ManyToOne(() => ProductionOrderEntity, { createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'whey_from_order_id' })
+  wheyFromOrder?: ProductionOrderEntity | null;
+
   @Column({ type: 'text', nullable: true })
   notes!: string | null;
 }

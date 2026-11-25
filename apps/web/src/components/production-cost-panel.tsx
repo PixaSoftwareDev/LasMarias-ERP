@@ -13,7 +13,7 @@ import { cn, formatMoney } from '@/lib/utils';
 // Mapa amigable de códigos de warning del backend a texto del negocio (cero jerga técnica).
 const WARNING_LABELS: Record<string, string> = {
   KG_PRODUCTO_CERO: 'Todavía no se cargó producción, no se puede calcular el costo por kg.',
-  LITROS_CERO: 'Esta orden no consumió leche ni masa (por ejemplo, ricota del suero): el costo es solo el de los insumos y no hay rendimiento por litro.',
+  LITROS_CERO: 'Esta orden no consumió leche ni masa (por ejemplo, ricota del suero): no hay rendimiento por litro.',
   SIN_RECETA: 'La orden no tiene una receta asociada.',
 };
 
@@ -161,7 +161,10 @@ export function ProductionCostPanel({ breakdown, className }: Props) {
                   {(real.detalleInputs ?? []).map((l) => (
                     <tr key={`input-${l.name}`} className="border-t border-border-subtle">
                       <td className="px-3 py-2">
-                        {l.name} <span className="text-xs text-foreground-muted">(leche / masa)</span>
+                        {l.name}{' '}
+                        <span className="text-xs text-foreground-muted">
+                          {l.name.startsWith('Suero de ') ? '(valor de la ricota)' : '(leche / masa)'}
+                        </span>
                       </td>
                       <td className="px-3 py-2 text-right">{kg(l.cantidad)}</td>
                       <td className="px-3 py-2 text-right">{precioUnit(l.unitCost)}</td>

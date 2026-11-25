@@ -30,7 +30,7 @@ export interface OrderCostInput {
   primaryInputs: PrimaryInput[];
   ingredients: IngredientCost[]; // ya con su precio resuelto
   version: OrderCostVersion;
-  byproductActuals: Record<string, number>; // kg reales por nombre de subproducto
+  byproductActuals: Record<string, number | string>; // kg reales por nombre de subproducto (decimal)
   expectedYield: number | null; // kg/L esperado; null = sin estándar
 }
 

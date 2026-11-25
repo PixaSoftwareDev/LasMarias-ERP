@@ -33,7 +33,10 @@ export const recipeIngredientSchema = z.object({
 });
 export type RecipeIngredient = z.infer<typeof recipeIngredientSchema>;
 
-export const byproductDestinationSchema = z.enum(['product', 'sale', 'discard']);
+// 'elaboracion' = se elabora en otra orden (ej: la ricota que sale del suero de la masa).
+// No genera lote ni stock: los kg los pone la orden de ricota vinculada a esta orden, y su
+// valor de recupero se le descuenta a esta orden y entra como costo de la ricota.
+export const byproductDestinationSchema = z.enum(['product', 'sale', 'discard', 'elaboracion']);
 export type ByproductDestination = z.infer<typeof byproductDestinationSchema>;
 
 export const recipeByproductSchema = z.object({
@@ -49,6 +52,10 @@ export const recipeByproductSchema = z.object({
   // cerrar la orden no generaría lote y su valor de recupero no descontaría nada.
   .refine((b) => b.destination !== 'product' || !!b.destinationProductId, {
     message: 'Elegí a qué producto va el subproducto',
+    path: ['destinationProductId'],
+  })
+  .refine((b) => b.destination !== 'elaboracion' || !!b.destinationProductId, {
+    message: 'Elegí qué producto se elabora con este subproducto',
     path: ['destinationProductId'],
   });
 export type RecipeByproduct = z.infer<typeof recipeByproductSchema>;
