@@ -20,6 +20,13 @@ import { FormatOutputs, type FormatRow } from '@/components/production/format-ou
 import { RecalcularReceta } from '@/components/production/recalcular-receta';
 import { EnvasesUsados, envaseSinBultos, envasesCorregidos, useEnvasesReceta } from '@/components/production/envases-usados';
 import { InsumosFaltantes } from '@/components/production/insumos-faltantes';
+import {
+  RicotaDelSueroFila,
+  SueroDescuentoPrevio,
+  SueroResultado,
+  mostrarAvisos,
+  useRicotaDelSuero,
+} from '@/components/production/suero-masa';
 
 // Pantalla de cierre de orden (CLAUDE.md §4.3): se cargan las salidas reales por producto
 // y al cerrar se muestra el panel de costo. El cierre es definitivo.
@@ -94,7 +101,7 @@ export default function CloseProductionPage({ params }: { params: { id: string }
     mutationFn: () =>
       productionApi.close(id, {
         actualOutputs: [
-          ...(order?.expectedOutputs ?? []).map((o) => ({
+          ...(order?.expectedOutputs ?? []).filter((o) => !esRicotaDelSuero(o.productId)).map((o) => ({
             productId: o.productId,
             quantity: Number(quantities[o.productId] ?? 0),
             bultos: bultos[o.productId] != null ? Number(bultos[o.productId]) : undefined,
@@ -118,6 +125,7 @@ export default function CloseProductionPage({ params }: { params: { id: string }
       queryClient.invalidateQueries({ queryKey: ['production-order', id] });
       setClosedOrder(r);
       toast.success(`Orden ${r.code} cerrada`);
+      mostrarAvisos(r);
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo cerrar la orden'),
   });
@@ -129,7 +137,7 @@ export default function CloseProductionPage({ params }: { params: { id: string }
   const guardarAvance = useMutation({
     mutationFn: () =>
       productionApi.saveProgress(id, {
-        outputs: byproducts.map((o) => ({
+        outputs: byproducts.filter((o) => !esRicotaDelSuero(o.productId)).map((o) => ({
           productId: o.productId,
           quantity: Number(quantities[o.productId] ?? 0),
           bultos: bultos[o.productId] != null ? Number(bultos[o.productId]) : undefined,
@@ -157,6 +165,10 @@ export default function CloseProductionPage({ params }: { params: { id: string }
     () => (order?.expectedOutputs ?? []).filter((o) => !o.isPrincipal),
     [order],
   );
+  // Masa: la ricota del suero no se carga acá, la suma la orden de ricota al cerrar.
+  const ricotaDelSuero = useRicotaDelSuero(order?.recipeId, order?.recipeVersionId);
+  const esRicotaDelSuero = (productId: string) => ricotaDelSuero.some((b) => b.destinationProductId === productId);
+  const hayCargables = byproducts.some((o) => !esRicotaDelSuero(o.productId));
 
   // Formatos con producto y kg cargados (los vacíos se ignoran).
   const formatosValidos = formatos.filter((f) => f.productId && f.kg != null && f.kg > 0);
@@ -164,7 +176,9 @@ export default function CloseProductionPage({ params }: { params: { id: string }
   const canClose = principal.some((o) => Number(quantities[o.productId] ?? 0) > 0) && !formatoIncompleto;
   const envasesReceta = useEnvasesReceta(order?.recipeId, order?.recipeVersionId);
   // Para guardar sin cerrar alcanza con que haya un subproducto cargado.
-  const hayAlgoQueGuardar = byproducts.some((o) => Number(quantities[o.productId] ?? 0) > 0);
+  const hayAlgoQueGuardar = byproducts.some(
+    (o) => !esRicotaDelSuero(o.productId) && Number(quantities[o.productId] ?? 0) > 0,
+  );
 
   // Rendimiento real EN VIVO = kg de producto (principal + otros formatos) ÷ litros de la orden.
   const principalKg =
@@ -209,6 +223,7 @@ export default function CloseProductionPage({ params }: { params: { id: string }
         )}
 
         <InsumosFaltantes faltantes={closedOrder.costBreakdown?.insumosFaltantes} />
+        <SueroResultado order={closedOrder} />
 
         {closedOrder.costBreakdown ? (
           <ProductionCostPanel breakdown={closedOrder.costBreakdown} />
@@ -299,6 +314,7 @@ export default function CloseProductionPage({ params }: { params: { id: string }
               onBultos={(v) => setBultos((b) => ({ ...b, [o.productId]: v }))}
             />
           ))}
+          {order.wheyFromOrderId && <SueroDescuentoPrevio order={order} kg={principalKg} />}
         </CardContent>
       </Card>
 
@@ -333,21 +349,26 @@ export default function CloseProductionPage({ params }: { params: { id: string }
             </p>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            {byproducts.map((o) => (
-              <OutputFields
-                key={o.productId}
-                output={o}
-                product={productById.get(o.productId)}
-                kg={quantities[o.productId]}
-                bultos={bultos[o.productId]}
-                placeholder="Ej: 15"
-                onKg={(v) => setQuantities((q) => ({ ...q, [o.productId]: v }))}
-                onBultos={(v) => setBultos((b) => ({ ...b, [o.productId]: v }))}
-              />
-            ))}
+            {byproducts.map((o) => {
+              const ricota = ricotaDelSuero.find((b) => b.destinationProductId === o.productId);
+              if (ricota) return <RicotaDelSueroFila key={o.productId} order={order} name={ricota.name} />;
+              return (
+                <OutputFields
+                  key={o.productId}
+                  output={o}
+                  product={productById.get(o.productId)}
+                  kg={quantities[o.productId]}
+                  bultos={bultos[o.productId]}
+                  placeholder="Ej: 15"
+                  onKg={(v) => setQuantities((q) => ({ ...q, [o.productId]: v }))}
+                  onBultos={(v) => setBultos((b) => ({ ...b, [o.productId]: v }))}
+                />
+              );
+            })}
 
             {/* ¿La crema sale hoy y el producto se pesa mañana? Se guarda lo de hoy, entra al
                 stock en el acto (se puede pasteurizar ya) y la orden queda en curso. */}
+            {hayCargables && (
             <div className="flex flex-col gap-3 rounded-lg border border-border-subtle bg-surface-subtle p-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-foreground-muted">
                 ¿Hoy sacaste la crema y el producto lo pesás mañana? Guardá lo que salió hoy sin cerrar la orden: <span className="font-medium text-foreground">entra al stock ya</span> (la podés usar en otra elaboración) y mañana cargás solo los kg.
@@ -363,6 +384,7 @@ export default function CloseProductionPage({ params }: { params: { id: string }
                 <Save className="h-4 w-4" /> Guardar lo de hoy
               </Button>
             </div>
+            )}
           </CardContent>
         </Card>
       )}

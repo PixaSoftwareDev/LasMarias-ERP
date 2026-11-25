@@ -44,6 +44,18 @@ export const costDetailLineSchema = z.object({
 });
 export type CostDetailLine = z.infer<typeof costDetailLineSchema>;
 
+// Ricota hecha con el suero de una masa (ver cost_breakdown.suero). Decimales como string.
+export const wheyLinkSchema = z.object({
+  orderId: uuidSchema,
+  orderCode: z.string(),
+  kg: z.string(),
+  valor: z.string(),
+  unitValue: z.string(),
+  aplicado: z.boolean(),
+  motivo: z.string().optional(),
+});
+export type WheyLink = z.infer<typeof wheyLinkSchema>;
+
 // Desglose de costo de una elaboración (calculadora — CLAUDE.md §5). Valores DECIMAL como string.
 export const elaborationCostResultSchema = z.object({
   costoInputs: z.string(), // leche o masa
@@ -85,6 +97,10 @@ export const productionCostBreakdownSchema = z.object({
   envases: z.record(z.string(), z.number()).optional(),
   // Insumos que no alcanzaron en el stock al cerrar (se descontó lo que había).
   insumosFaltantes: z.array(z.object({ name: z.string(), faltan: z.string() })).optional(),
+  // Solo en la ricota hecha con el suero de una masa: lo que se le descontó a esa masa y entró
+  // como costo de la ricota (kg ricota × recupero de la receta de la masa). aplicado=false →
+  // no se descontó (la masa ya pasó a mozzarella, o su receta no tiene recupero): motivo.
+  suero: wheyLinkSchema.optional(),
 });
 export type ProductionCostBreakdown = z.infer<typeof productionCostBreakdownSchema>;
 
@@ -134,6 +150,24 @@ export const productionOrderSchema = z.object({
   totalCost: z.number().optional(),
   unitCost: z.number().optional(),
   costBreakdown: productionCostBreakdownSchema.optional(),
+  // Orden de masa de cuyo suero se hizo esta ricota (null = "suero sin masa": no descuenta).
+  wheyFromOrderId: uuidSchema.optional(),
+  wheyFromOrderCode: z.string().optional(),
+  // Solo en el detalle de una MASA: las ricotas hechas con su suero (kg = lo que se le
+  // descuenta; null mientras la ricota no esté cerrada).
+  wheyRicotas: z
+    .array(
+      z.object({
+        id: uuidSchema,
+        code: z.string(),
+        status: productionStatusSchema,
+        kg: z.string().nullable(),
+        aplicado: z.boolean(),
+      }),
+    )
+    .optional(),
+  // Avisos de la última operación (abrir/editar/cerrar/borrar). Solo en la respuesta.
+  avisos: z.array(z.string()).optional(),
   notes: z.string().max(2000).optional(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
@@ -149,6 +183,10 @@ export const openProductionInputSchema = z.object({
   // suero no se lleva como stock, así que la orden arranca con 0 litros y el costo del lote
   // es solo el de los insumos de la receta (la calculadora ya contempla litros = 0).
   milkInputs: z.array(z.object({ batchId: uuidSchema, liters: z.number().positive() })),
+  // Ricota del suero de una masa: la orden de esa masa. Al cerrar la ricota, sus kg × el
+  // recupero de la receta de la masa se le descuentan a la masa y entran como costo de la
+  // ricota. null/ausente = "suero sin masa" (no descuenta, como antes).
+  wheyFromOrderId: uuidSchema.nullable().optional(),
   notes: z.string().max(2000).optional(),
   // Si el sistema detecta una orden igual (misma receta y mismos lotes) abierta hace pocos
   // minutos, frena y avisa: es casi seguro una doble carga. El front reenvía con este flag

@@ -20,6 +20,7 @@ import { DobleCostoAviso, ReprocesoRows, SinCostoAviso, useStockSources, type In
 import { OutputFields } from '@/components/production/output-fields';
 import { FormatOutputs, type FormatRow } from '@/components/production/format-outputs';
 import { EnvasesUsados, envaseSinBultos, envasesCorregidos, useEnvasesReceta } from '@/components/production/envases-usados';
+import { RicotaDelSueroFila, SueroMasaSelect, mostrarAvisos, useRicotaDelSuero } from '@/components/production/suero-masa';
 
 interface MilkBatch {
   id: string;
@@ -34,7 +35,7 @@ interface MilkInputRow {
 }
 
 // 'otro' = un subproducto en stock como origen (crema cruda → crema pasteurizada).
-// 'suero' = sin lote de origen (ricota del suero de la prensa): la orden no consume stock.
+// 'suero' = sin lote de origen (ricota del suero de la masa): la orden no consume stock.
 type SourceKind = 'leche' | 'masa' | 'otro' | 'suero';
 
 const SELECT_CLASS =
@@ -175,6 +176,8 @@ export default function EditProductionPage() {
   const [expectedYield, setExpectedYield] = useState('');
   // Envases corregidos a mano al cerrar (precargados de la orden: si no, al guardar se perdían).
   const [envases, setEnvases] = useState<Record<string, string>>({});
+  // Suero: masa de la que sale la ricota ('' = suero sin masa, no descuenta).
+  const [wheyFrom, setWheyFrom] = useState('');
 
   // Ficha de cada producto: define si se cuenta por bultos y cuántos kg trae uno.
   const productsQuery = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
@@ -185,6 +188,8 @@ export default function EditProductionPage() {
 
   const wasClosed = orderQuery.data?.status === 'closed';
   const envasesReceta = useEnvasesReceta(orderQuery.data?.recipeId, orderQuery.data?.recipeVersionId);
+  // Masa: la ricota del suero no se edita acá (la pone la orden de ricota).
+  const ricotaDelSuero = useRicotaDelSuero(orderQuery.data?.recipeId, orderQuery.data?.recipeVersionId);
 
   // Precargar el formulario con los datos de la orden una sola vez, cuando llega del servidor.
   useEffect(() => {
@@ -193,6 +198,7 @@ export default function EditProductionPage() {
     setRecipeId(order.recipeId);
     setStartedDate(order.startedAt.slice(0, 10));
     setNotes(order.notes ?? '');
+    setWheyFrom(order.wheyFromOrderId ?? '');
     const origen = detectSource(order.milkInputs);
     setSource(origen);
     const principales = order.milkInputs.filter((mi) => !isExtra(origen, mi));
@@ -248,6 +254,7 @@ export default function EditProductionPage() {
         operatorId: orderQuery.data!.operatorId,
         startedAt: new Date(`${startedDate}T12:00:00`).toISOString(),
         milkInputs: allInputs,
+        wheyFromOrderId: source === 'suero' && wheyFrom ? wheyFrom : null,
         notes: notes || undefined,
         // Solo si la orden estaba cerrada: mandar la producción real para recalcular el costo.
         ...(wasClosed
@@ -277,6 +284,7 @@ export default function EditProductionPage() {
     onSuccess: (r) => {
       queryClient.invalidateQueries();
       toast.success(`Orden ${r.code} actualizada`);
+      mostrarAvisos(r);
       router.push('/produccion');
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : 'No se pudo guardar la orden. Probá de nuevo.'),
@@ -410,21 +418,24 @@ export default function EditProductionPage() {
             label="¿Con qué se elabora?"
             htmlFor="source"
             required
-            hint="Primero leche → masa; después masa (más reproceso, crema o ricota, si lleva) → mozzarella o queso. La crema cruda se pasteuriza eligiendo «Crema u otro subproducto». La ricota va con «Suero»."
+            hint="Primero leche → masa; después masa (más reproceso, crema o ricota, si lleva) → mozzarella o queso. La crema cruda se pasteuriza eligiendo «Crema u otro subproducto». La ricota va con «Suero de la masa»."
           >
             <select className={SELECT_CLASS} value={source} onChange={(e) => changeSource(e.target.value as SourceKind)}>
               <option value="leche">Leche cruda (paso 1: hacer masa)</option>
               <option value="masa">Masa en stock (paso 2: hacer mozzarella o queso)</option>
               <option value="otro">Crema u otro subproducto en stock (ej: pasteurizar crema)</option>
-              <option value="suero">Suero de la prensa, sin lote de origen (ej: ricota)</option>
+              <option value="suero">Suero de la masa (ej: ricota)</option>
             </select>
           </Field>
 
           {source === 'suero' && (
-            <p className="rounded-md bg-info/10 px-3 py-2 text-sm text-info">
-              El suero que sale al prensar la masa no se lleva como stock, así que esta orden no consume ningún lote.
-              El costo del lote es solo el de los insumos de la receta; el suero vale $0.
-            </p>
+            <SueroMasaSelect
+              fecha={startedDate}
+              value={wheyFrom}
+              auto={false}
+              currentCode={order.wheyFromOrderCode}
+              onChange={setWheyFrom}
+            />
           )}
 
           {source === 'leche' && silos.length > 0 && (
@@ -559,7 +570,10 @@ export default function EditProductionPage() {
             {byproductOutputs.length > 0 && (
               <div className="flex flex-col gap-4 border-t border-border-subtle pt-4">
                 <p className="text-sm font-medium text-foreground">Subproductos (opcional)</p>
-                {byproductOutputs.map((o) => (
+                {byproductOutputs.map((o) => {
+                  const ricota = ricotaDelSuero.find((b) => b.destinationProductId === o.productId);
+                  if (ricota) return <RicotaDelSueroFila key={o.productId} order={order} name={ricota.name} />;
+                  return (
                   <OutputFields
                     key={o.productId}
                     output={o}
@@ -570,7 +584,8 @@ export default function EditProductionPage() {
                     onKg={(v) => setQuantities((q) => ({ ...q, [o.productId]: v }))}
                     onBultos={(v) => setBultos((b) => ({ ...b, [o.productId]: v }))}
                   />
-                ))}
+                  );
+                })}
               </div>
             )}
 

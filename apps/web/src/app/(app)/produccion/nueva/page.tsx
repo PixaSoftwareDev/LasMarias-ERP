@@ -16,6 +16,7 @@ import { ApiError } from '@/lib/api-client';
 import { useAuth } from '@/hooks/use-auth';
 import { MetaLitrosField, MetaLitrosResumen, litrosSugeridos } from '@/components/production/meta-litros';
 import { DobleCostoAviso, ReprocesoRows, SinCostoAviso, useStockSources, type InputRow } from '@/components/production/stock-inputs';
+import { SueroMasaSelect, mostrarAvisos } from '@/components/production/suero-masa';
 
 interface MilkBatch {
   id: string;
@@ -30,8 +31,9 @@ interface MilkInputRow {
 }
 
 // 'otro' = un subproducto en stock como origen (crema cruda → crema pasteurizada).
-// 'suero' = SIN lote de origen: la ricota se hace con el suero de la prensa, que no se lleva
-// como stock. La orden se abre sin lotes (0 litros) y el costo es solo el de los insumos.
+// 'suero' = SIN lote de origen: la ricota se hace con el suero de la masa, que no se lleva
+// como stock. La orden se abre sin lotes (0 litros); si se elige la masa, el valor de la
+// ricota se le descuenta a esa masa y entra como costo de la ricota.
 type SourceKind = 'leche' | 'masa' | 'otro' | 'suero';
 
 // Mismo lenguaje visual que el resto de los selects de la app (fondo elevado + foco).
@@ -92,6 +94,9 @@ export default function NewProductionPage() {
   // El código de la orden y del lote sale de esta fecha (OP-YYYYMMDD / LM-PP-YYYYMMDD).
   const [startedDate, setStartedDate] = useState(todayLocal);
   const [notes, setNotes] = useState('');
+  // Suero: masa de la que sale ('' = suero sin masa). Se preselecciona si hay una sola.
+  const [wheyFrom, setWheyFrom] = useState('');
+  const [wheyTocado, setWheyTocado] = useState(false);
   const [inputs, setInputs] = useState<MilkInputRow[]>([{ batchId: '', liters: 0 }]);
   // Litros a elaborar (solo con leche): ayuda de carga, no se guarda (ver meta-litros.tsx).
   const [meta, setMeta] = useState('');
@@ -118,6 +123,7 @@ export default function NewProductionPage() {
         // Mediodía local: evita que el huso horario corra la fecha al día anterior/siguiente.
         startedAt: new Date(`${startedDate}T12:00:00`).toISOString(),
         milkInputs: allInputs,
+        wheyFromOrderId: source === 'suero' && wheyFrom ? wheyFrom : undefined,
         notes: notes || undefined,
         confirmDuplicate,
       }),
@@ -126,6 +132,7 @@ export default function NewProductionPage() {
       // Continuidad del pipeline: la orden recién abierta hay que CERRARLA cargando la
       // producción real. Llevamos directo a ese paso en vez de a la lista (CLAUDE.md §7).
       toast.success(`Orden ${r.code} abierta — ahora cargá la producción`);
+      mostrarAvisos(r);
       router.push(`/produccion/${r.id}/cerrar`);
     },
     onError: (e) => {
@@ -196,21 +203,26 @@ export default function NewProductionPage() {
             label="¿Con qué se elabora?"
             htmlFor="source"
             required
-            hint="Primero leche → masa; después masa (más reproceso, crema o ricota, si lleva) → mozzarella o queso. La crema cruda se pasteuriza eligiendo «Crema u otro subproducto». La ricota va con «Suero»."
+            hint="Primero leche → masa; después masa (más reproceso, crema o ricota, si lleva) → mozzarella o queso. La crema cruda se pasteuriza eligiendo «Crema u otro subproducto». La ricota va con «Suero de la masa»."
           >
             <select className={SELECT_CLASS} value={source} onChange={(e) => changeSource(e.target.value as SourceKind)}>
               <option value="leche">Leche cruda (paso 1: hacer masa)</option>
               <option value="masa">Masa en stock (paso 2: hacer mozzarella o queso)</option>
               <option value="otro">Crema u otro subproducto en stock (ej: pasteurizar crema)</option>
-              <option value="suero">Suero de la prensa, sin lote de origen (ej: ricota)</option>
+              <option value="suero">Suero de la masa (ej: ricota)</option>
             </select>
           </Field>
 
           {source === 'suero' && (
-            <p className="rounded-md bg-info/10 px-3 py-2 text-sm text-info">
-              El suero que sale al prensar la masa no se lleva como stock, así que esta orden se abre sin lote.
-              El costo del lote va a ser solo el de los insumos de la receta; el suero vale $0.
-            </p>
+            <SueroMasaSelect
+              fecha={startedDate}
+              value={wheyFrom}
+              auto={!wheyTocado}
+              onChange={(id) => {
+                setWheyFrom(id);
+                setWheyTocado(true);
+              }}
+            />
           )}
 
           {source === 'leche' && silos.length > 0 && (

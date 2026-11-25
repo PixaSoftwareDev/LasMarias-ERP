@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import {
   closeProductionInputSchema,
   openProductionInputSchema,
@@ -24,6 +24,13 @@ export class ProductionController {
   @Roles('admin', 'gerente', 'operario')
   list() {
     return this.production.list();
+  }
+
+  // Masas de un día y del anterior, para elegir de cuál suero salió la ricota.
+  @Get('whey-sources')
+  @Roles('admin', 'gerente', 'operario')
+  wheySources(@Query('fecha') fecha?: string) {
+    return this.production.wheySources(fecha);
   }
 
   @Get(':id')

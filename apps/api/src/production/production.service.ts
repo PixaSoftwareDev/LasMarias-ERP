@@ -17,8 +17,10 @@ import type {
   ProductionOrder,
   ProductionOutput,
   ProductionRecalcPreview,
+  RecipeByproduct,
   SaveProductionProgressInput,
   UpdateProductionInput,
+  WheyLink,
 } from '@lasmarias/shared-schemas';
 import { COSTO_FIJO_NOMBRE } from '@lasmarias/shared-schemas';
 import { ProductionOrderEntity } from './production-order.entity';
@@ -41,6 +43,27 @@ import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import { bultosForQuantity } from '../inventory/bultos-allocation';
 import { resolveInputCost } from './input-cost';
 import { lockBatches, lockBatchesOfProduct, lockDuplicateSignature, lockRow } from '../common/locks';
+
+// --- Ricota del suero (subproducto de la masa con destino "elaboracion") ---------------
+function wheyByproducts(version: { byproducts?: RecipeByproduct[] } | null | undefined): RecipeByproduct[] {
+  return (version?.byproducts ?? []).filter((b) => b.destination === 'elaboracion' && !!b.destinationProductId);
+}
+function wheyProductIds(version: { byproducts?: RecipeByproduct[] } | null | undefined): Set<string> {
+  return new Set(wheyByproducts(version).map((b) => b.destinationProductId!));
+}
+// Recupero ($/kg) de la ricota en la receta de la masa. null = sin subproducto o sin valor (> 0).
+function wheyRecupero(version: { byproducts?: RecipeByproduct[] } | null | undefined, productId: string): string | null {
+  const v = wheyByproducts(version).find((b) => b.destinationProductId === productId)?.referenceValuePerUnit;
+  return v != null && new Big(v).gt(0) ? new Big(v).toString() : null;
+}
+// $ para un aviso (solo texto: el cálculo ya se hizo con decimal exacto).
+function pesos(v: string | null): string {
+  if (v == null) return '-';
+  const [ent = '0', dec = '00'] = new Big(v).toFixed(2).split('.');
+  const neg = ent.startsWith('-');
+  const miles = (neg ? ent.slice(1) : ent).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${neg ? '-' : ''}$${miles},${dec}`;
+}
 
 // Leche (o masa) descontada al reservar una orden. Con estos datos el que abre/edita la orden
 // registra el movimiento de salida una vez que ya tiene el id de la orden.
@@ -68,7 +91,7 @@ export class ProductionService {
 
   async list(): Promise<ProductionOrder[]> {
     const rows = await this.orders.find({
-      relations: { recipe: true, operator: true },
+      relations: { recipe: true, operator: true, wheyFromOrder: true },
       order: { startedAt: 'DESC' },
       take: 200,
     });
@@ -78,7 +101,7 @@ export class ProductionService {
   async get(id: string): Promise<ProductionOrder> {
     const r = await this.orders.findOne({
       where: { id },
-      relations: { recipe: true, operator: true },
+      relations: { recipe: true, operator: true, wheyFromOrder: true },
     });
     if (!r) throw new NotFoundException(`Orden de producción ${id} no encontrada`);
     // ¿Esta orden tiene realmente descontada su leche? Lo dicen sus movimientos de salida.
@@ -102,11 +125,13 @@ export class ProductionService {
     const principalBatch = principal?.batchId
       ? await this.dataSource.getRepository(BatchEntity).findOne({ where: { id: principal.batchId } })
       : null;
+    const wheyRicotas = await this.wheyRicotasOf(this.dataSource.manager, r.id);
     return {
       ...dto,
       milkInputs: dto.milkInputs.map((m) => ({ ...m, category: categoria.get(m.batchId) ?? '' })),
       milkReserved: salidas > 0,
       warehouseId: principalBatch?.warehouseId ?? undefined,
+      ...(wheyRicotas.length > 0 && { wheyRicotas }),
     };
   }
 
@@ -307,7 +332,9 @@ export class ProductionService {
       .map((m) => `${m.batchId}:${m.liters}`)
       .sort()
       .join('|');
-    return `produccion:${input.recipeId}:${lotes}`;
+    // La ricota del suero se distingue por la masa de la que sale (sin lotes de leche, dos
+    // ricotas de masas distintas parecerían la misma carga).
+    return `produccion:${input.recipeId}:${lotes}:${input.wheyFromOrderId ?? ''}`;
   }
 
   async open(input: OpenProductionInput): Promise<ProductionOrder> {
@@ -332,6 +359,7 @@ export class ProductionService {
             ProductionService.firmaOrden({
               recipeId: o.recipeId,
               milkInputs: o.milkInputs.map((m) => ({ batchId: m.batchId, liters: m.liters })),
+              wheyFromOrderId: o.wheyFromOrderId,
             } as OpenProductionInput) === mia,
         );
         if (dup)
@@ -342,6 +370,10 @@ export class ProductionService {
       }
 
       const plan = await this.reserveMilkAndPlan(manager, input);
+      // Ricota del suero de una masa: se valida la masa elegida (avisa si no va a descontar).
+      const avisos = input.wheyFromOrderId
+        ? await this.validateWheySource(manager, input.wheyFromOrderId, plan.recipe.productId)
+        : [];
 
       // Generar código de orden de producción: OP-YYYYMMDD-NNNN
       const code = await this.nextOrderCode(manager, new Date(input.startedAt));
@@ -357,6 +389,7 @@ export class ProductionService {
         expectedOutputs: plan.expectedOutputs,
         actualOutputs: [],
         totalMilkLiters: String(plan.totalLiters),
+        wheyFromOrderId: input.wheyFromOrderId ?? null,
         notes: input.notes ?? null,
         // ingredientes y byproducts ya están en el snapshot de la versión
       });
@@ -367,9 +400,9 @@ export class ProductionService {
 
       const reloaded = await manager.getRepository(ProductionOrderEntity).findOne({
         where: { id: saved.id },
-        relations: { recipe: true, operator: true },
+        relations: { recipe: true, operator: true, wheyFromOrder: true },
       });
-      return this.toDto(reloaded!);
+      return this.withAvisos(this.toDto(reloaded!), avisos);
     });
   }
 
@@ -393,6 +426,13 @@ export class ProductionService {
         throw new ForbiddenException(`La orden ${order.code} está cancelada y no se puede editar.`);
 
       const wasClosed = order.status === 'closed';
+
+      // Una masa con ricota hecha con su suero no puede cambiar de receta: la ricota se costeó
+      // con el valor de recupero de ESTA receta.
+      if (input.recipeId !== order.recipeId) await this.assertSinRicotaVinculada(manager, order, 'cambiarle la receta');
+      // Ricota que ya le descontó su valor a una masa cerrada que pasó a mozzarella: no se toca.
+      const masaPrevia = wasClosed && order.costBreakdown?.suero?.aplicado ? order.wheyFromOrderId : null;
+      if (masaPrevia) await this.assertMasaSinUsar(manager, masaPrevia, order.code);
 
       // Deshacer el efecto anterior de la orden en el stock, según su estado.
       if (wasClosed) {
@@ -426,6 +466,11 @@ export class ProductionService {
       order.expectedOutputs = plan.expectedOutputs;
       order.totalMilkLiters = String(plan.totalLiters);
       order.notes = input.notes ?? null;
+      // Origen "suero de la masa": ausente = se mantiene; null = suero sin masa.
+      if (input.wheyFromOrderId !== undefined) order.wheyFromOrderId = input.wheyFromOrderId;
+      const avisos = order.wheyFromOrderId
+        ? await this.validateWheySource(manager, order.wheyFromOrderId, plan.recipe.productId, order.id)
+        : [];
       // El código de la orden se conserva (se asignó al abrir); no se regenera aunque cambie la fecha.
 
       // Registrar la salida de la leche recién reservada (para ambos estados: si más tarde se
@@ -442,28 +487,36 @@ export class ProductionService {
         const versionEntity = await manager
           .getRepository(RecipeVersionEntity)
           .findOneByOrFail({ id: order.recipeVersionId });
-        await this.applyClose(
-          manager,
-          order,
-          {
-            actualOutputs: input.actualOutputs,
-            warehouseId: input.warehouseId,
-            expectedYieldKgPerLiter: input.expectedYieldKgPerLiter,
-            envases: input.envases,
-            notes: input.notes,
-          },
-          recipeEntity,
-          versionEntity,
+        avisos.push(
+          ...(await this.applyClose(
+            manager,
+            order,
+            {
+              actualOutputs: input.actualOutputs,
+              warehouseId: input.warehouseId,
+              expectedYieldKgPerLiter: input.expectedYieldKgPerLiter,
+              envases: input.envases,
+              notes: input.notes,
+            },
+            recipeEntity,
+            versionEntity,
+          )),
         );
+        // La masa a la que antes se le descontaba esta ricota se vuelve a poner al día
+        // (si la ricota cambió de masa, de kg o se desvinculó). Si no cambió nada, no hace nada.
+        if (masaPrevia) {
+          const cambio = await this.syncWheyMasa(manager, masaPrevia);
+          if (cambio) avisos.push(cambio);
+        }
       } else {
         await orderRepo.save(order);
       }
 
       const reloaded = await orderRepo.findOne({
         where: { id: order.id },
-        relations: { recipe: true, operator: true },
+        relations: { recipe: true, operator: true, wheyFromOrder: true },
       });
-      return this.toDto(reloaded!);
+      return this.withAvisos(this.toDto(reloaded!), avisos);
     });
   }
 
@@ -497,12 +550,17 @@ export class ProductionService {
       // que es cuando se calcula el costo y se generan los lotes de producto.
       const esperados = new Map(order.expectedOutputs.map((o) => [o.productId, o]));
       const principalProductId = order.expectedOutputs.find((o) => o.isPrincipal)?.productId;
+      const ricotaDelSuero = wheyProductIds(order.recipeVersion);
       const deseados: { productId: string; quantity: number; bultos?: number }[] = [];
       for (const o of input.outputs) {
         const esperado = esperados.get(o.productId);
         if (!esperado || esperado.isPrincipal)
           throw new BadRequestException(
             'Acá se guardan solo los subproductos (por ejemplo, la crema). Los kg del producto se cargan al cerrar la orden.',
+          );
+        if (ricotaDelSuero.has(o.productId))
+          throw new BadRequestException(
+            `${esperado.productName} no se carga acá: se suma sola cuando se cierra la orden de ricota hecha con este suero.`,
           );
         if (o.quantity <= 0) continue;
         deseados.push(o);
@@ -668,13 +726,13 @@ export class ProductionService {
       if (order.status === 'closed') throw new ForbiddenException(`La orden ${order.code} ya está cerrada`);
       if (order.status === 'cancelled') throw new ForbiddenException(`La orden ${order.code} fue cancelada`);
 
-      await this.applyClose(manager, order, input, order.recipe, order.recipeVersion);
+      const avisos = await this.applyClose(manager, order, input, order.recipe, order.recipeVersion);
 
       const reloaded = await manager.getRepository(ProductionOrderEntity).findOne({
         where: { id: order.id },
-        relations: { recipe: true, operator: true },
+        relations: { recipe: true, operator: true, wheyFromOrder: true },
       });
-      return this.toDto(reloaded!);
+      return this.withAvisos(this.toDto(reloaded!), avisos);
     });
   }
 
@@ -688,7 +746,8 @@ export class ProductionService {
     input: CloseProductionInput,
     recipe: RecipeEntity,
     version: RecipeVersionEntity,
-  ): Promise<void> {
+  ): Promise<string[]> {
+      const avisos: string[] = [];
       // --- 1. Descontar la materia prima principal (leche o masa) y recolectar su costo ---
       // primaryInputs alimenta la calculadora: cada lote consumido con su costo unitario.
       // En leche→masa son litros de leche ($/litro); en masa→mozzarella son kg de masa
@@ -833,6 +892,21 @@ export class ProductionService {
       // Cantidades reales de subproductos (por nombre, desde lo que carga el operario).
       const byproductActuals = this.byproductActuals(order, input.actualOutputs);
 
+      // MASA: la ricota hecha con su suero (subproducto destino "elaboracion") no la carga el
+      // operario: sus kg son los de las ricotas ya cerradas con este suero (lo que se carga a
+      // mano para ese subproducto se ignora). No genera lote: solo descuenta su valor.
+      const ricotaProductIds = wheyProductIds(version);
+      const wheyOutputs = await this.wheyOutputsFor(manager, order.id, version);
+      for (const w of wheyOutputs) byproductActuals[w.productName] = w.kg;
+
+      // RICOTA hecha con el suero de una masa: lo que se le descuenta a la masa entra acá como
+      // costo (línea "Suero de OP-…": kg de ricota × recupero de la receta de la masa).
+      const wheyLink = order.wheyFromOrderId
+        ? await this.wheyLineForRicota(manager, order.wheyFromOrderId, recipe.productId, kgProductoTotal)
+        : null;
+      if (wheyLink?.line) primaryInputs.push(wheyLink.line);
+      if (wheyLink?.aviso) avisos.push(wheyLink.aviso);
+
       // Estándar: solo si hay rendimiento esperado. Se carga a mano AL CERRAR (pedido #12);
       // si la receta vieja todavía traía uno, se usa como fallback. Sin esperado → solo real.
       const expectedYield =
@@ -957,6 +1031,7 @@ export class ProductionService {
       for (const o of input.actualOutputs) {
         if (o.isPrincipal || o.isFormat || o.quantity <= 0) continue;
         if (o.productId === principalProductId) continue; // sin producto propio: solo descuenta costo
+        if (ricotaProductIds.has(o.productId)) continue; // ricota del suero: la pone su propia orden
 
         // Lote ya creado por "guardar lo de hoy": se ajusta a la cantidad final y se recuelga
         // del lote de producto. Pudo haberse consumido en el medio (la crema ya pasteurizada):
@@ -1045,8 +1120,9 @@ export class ProductionService {
       const insumosFaltantes = await this.consumirInsumos(manager, order, version, realCost.detalleInsumos);
 
       const actualOutputs: ProductionOutput[] = input.actualOutputs
-        // Un formato en 0 kg no produjo nada: no se guarda.
+        // Un formato en 0 kg no produjo nada: no se guarda. La ricota del suero va aparte.
         .filter((o) => !(o.isFormat && !(o.quantity > 0)))
+        .filter((o) => o.isPrincipal || o.isFormat || !ricotaProductIds.has(o.productId))
         .map((o) => {
           const exp = order.expectedOutputs.find((e) => e.productId === o.productId);
           const formato = o.isFormat ? formatos.find((f) => f.productId === o.productId) : undefined;
@@ -1067,6 +1143,7 @@ export class ProductionService {
             batchCode: batch?.code,
           };
         });
+      actualOutputs.push(...wheyOutputs.filter((w) => new Big(w.kg).gt(0)).map((w) => w.output));
 
       // --- 5. Cerrar la orden y persistir el costo ---
       order.status = 'closed';
@@ -1083,9 +1160,19 @@ export class ProductionService {
         expectedYieldKgPerLiter: expectedYield,
         ...(Object.keys(envases).length > 0 && { envases }),
         ...(insumosFaltantes.length > 0 && { insumosFaltantes }),
+        ...(wheyLink && { suero: wheyLink.suero }),
       };
       if (input.notes) order.notes = input.notes;
       await manager.getRepository(ProductionOrderEntity).save(order);
+
+      // Ricota con descuento aplicado y masa YA cerrada: la masa se recalcula con el descuento
+      // (misma versión, mismos precios; stock no se mueve). Si la masa sigue abierta, lo toma
+      // ella sola al cerrar.
+      if (wheyLink?.suero.aplicado && wheyLink.masaCerrada) {
+        const cambio = await this.syncWheyMasa(manager, wheyLink.suero.orderId);
+        if (cambio) avisos.push(cambio);
+      }
+      return avisos;
   }
 
   // Borra una orden deshaciendo su efecto en stock. NO recalcula ningún costo: solo
@@ -1103,6 +1190,13 @@ export class ProductionService {
       const order = await orderRepo.findOne({ where: { id } });
       if (!order) throw new NotFoundException(`Orden de producción ${id} no encontrada`);
 
+      // Masa con ricota hecha con su suero: primero se borra/desvincula la ricota.
+      await this.assertSinRicotaVinculada(manager, order, 'borrarla');
+      // Ricota que le descontó su valor a una masa: si la masa ya pasó a mozzarella, no se
+      // puede borrar; si no, al borrarla la masa vuelve a su costo sin el descuento.
+      const masaVinculada = order.status === 'closed' && order.costBreakdown?.suero?.aplicado ? order.wheyFromOrderId : null;
+      if (masaVinculada) await this.assertMasaSinUsar(manager, masaVinculada, order.code);
+
       if (order.status === 'open' || order.status === 'in_progress') {
         // Si "guardar lo de hoy" ya creó lotes de subproducto (la crema), se revierten
         // primero (con guard: si ya se usaron, no se puede borrar la orden).
@@ -1116,6 +1210,7 @@ export class ProductionService {
       if (order.status === 'closed') {
         await this.reverseClosedOrderEffects(manager, order);
         await orderRepo.remove(order);
+        if (masaVinculada) await this.syncWheyMasa(manager, masaVinculada);
         return { deleted: true as const, code: order.code };
       }
 
@@ -1296,7 +1391,7 @@ export class ProductionService {
 
   // Kg reales de cada subproducto, por nombre (lo que carga el operario al cerrar).
   private byproductActuals(order: ProductionOrderEntity, actualOutputs: CloseProductionInput['actualOutputs']) {
-    const actuals: Record<string, number> = {};
+    const actuals: Record<string, number | string> = {};
     for (const o of actualOutputs) {
       if (o.isPrincipal || o.isFormat) continue;
       // Solo entre los subproductos: una receta vieja podía dejar el subproducto con el
@@ -1359,13 +1454,14 @@ export class ProductionService {
             expectedYieldKgPerLiter: cost.expectedYield,
             ...(order.costBreakdown?.envases && { envases: order.costBreakdown.envases }),
             ...(insumosFaltantes.length > 0 && { insumosFaltantes }),
+            ...(order.costBreakdown?.suero && { suero: order.costBreakdown.suero }),
           },
         },
       );
 
       const reloaded = await manager.getRepository(ProductionOrderEntity).findOne({
         where: { id },
-        relations: { recipe: true, operator: true },
+        relations: { recipe: true, operator: true, wheyFromOrder: true },
       });
       return this.toDto(reloaded!);
     });
@@ -1403,41 +1499,25 @@ export class ProductionService {
     }
 
     const old = order.costBreakdown;
-    const detalleInputs = old.real.detalleInputs;
-    const detalleInsumos = old.real.detalleInsumos;
-    if (!detalleInputs || !detalleInsumos)
-      throw new BadRequestException(
-        `La orden ${order.code} es de antes de que se guardara el detalle del costo: no se puede recalcular sola.`,
-      );
-    const totalLiters = Number(order.totalMilkLiters);
-    const kgProductoTotal = String(order.totalPrincipalKg ?? 0);
+    const { cost, bultos, detalleInsumos } = await this.recostClosedOrder(manager, order, version);
     const envases = old.envases ?? {};
-    const ingredients = await this.priceIngredients(manager, version, order.startedAt, detalleInsumos, envases);
-    const bultos = order.actualOutputs
-      .filter((o) => o.isPrincipal || o.isFormat)
-      .reduce((acc, o) => acc + (o.bultos ?? 0), 0);
     // Igual que al cerrar: un envase "por bulto" sin bultos cargados daría 0 envases sin avisar.
     const envasePorBulto = version.ingredients.find((i) => i.basis === 'per_bulto' && envases[i.productId] == null);
     if (!bloqueo && envasePorBulto && bultos === 0)
       bloqueo = `No se puede recalcular: la receta usa ${envasePorBulto.productName} por bulto y esta orden no tiene los bultos cargados. Editá la orden y cargalos.`;
-    // Los costos fijos no están en la receta: se mantienen tal cual cerró la orden.
-    const fijoPrevio = detalleInsumos.find((l) => l.name === COSTO_FIJO_NOMBRE);
-    if (fijoPrevio)
-      ingredients.push({ name: fijoPrevio.name, quantity: fijoPrevio.cantidad, unitCost: fijoPrevio.unitCost, basis: 'fixed_per_order' });
-    const expectedYield = expectedYieldFromBreakdown(old, order.recipeVersion?.standardWastePercent ?? 0);
-    const cost = {
-      ...computeOrderCost({
-        totalLiters,
-        kgProductoTotal,
-        bultos,
-        primaryInputs: primaryInputsFromBreakdown(detalleInputs),
-        ingredients,
-        version,
-        byproductActuals: this.byproductActuals(order, order.actualOutputs),
-        expectedYield,
-      }),
-      expectedYield,
-    };
+    // Masa con ricota del suero ya costeada: la ricota pagó el recupero de la receta vieja. Si
+    // la receta nueva le pone otro valor, el descuento de la masa y el costo de la ricota
+    // dejarían de coincidir.
+    if (!bloqueo) {
+      for (const [productId, kg] of await this.wheyKgByProduct(manager, order.id, order.recipeVersion)) {
+        if (kg.eq(0)) continue;
+        if (wheyRecupero(order.recipeVersion, productId) !== wheyRecupero(version, productId)) {
+          bloqueo =
+            'No se puede recalcular: la receta corregida cambia el valor de la ricota del suero, y la ricota ya se costeó con el valor anterior.';
+          break;
+        }
+      }
+    }
 
     // Insumos que cambian (comparando el detalle real de antes y de después).
     const linea = (l: CostDetailLine | undefined) => (l ? { cantidad: l.cantidad, subtotal: l.subtotal } : null);
@@ -1467,6 +1547,327 @@ export class ProductionService {
       bloqueo,
     };
     return { preview, order, version, cost };
+  }
+
+  // Vuelve a correr la calculadora sobre una orden CERRADA con la versión indicada, con los
+  // mismos lotes de origen, kg, precios y costos fijos con que cerró (lo guardado en su
+  // desglose). Lo usan "Recalcular con la receta corregida" y el descuento de la ricota del
+  // suero a una masa ya cerrada. No toca stock ni guarda nada.
+  private async recostClosedOrder(
+    manager: import('typeorm').EntityManager,
+    order: ProductionOrderEntity,
+    version: RecipeVersionEntity,
+  ) {
+    const old = order.costBreakdown!;
+    const detalleInputs = old.real.detalleInputs;
+    const detalleInsumos = old.real.detalleInsumos;
+    if (!detalleInputs || !detalleInsumos)
+      throw new BadRequestException(
+        `La orden ${order.code} es de antes de que se guardara el detalle del costo: no se puede recalcular sola.`,
+      );
+    const totalLiters = Number(order.totalMilkLiters);
+    const kgProductoTotal = String(order.totalPrincipalKg ?? 0);
+    const envases = old.envases ?? {};
+    const ingredients = await this.priceIngredients(manager, version, order.startedAt, detalleInsumos, envases);
+    const bultos = order.actualOutputs
+      .filter((o) => o.isPrincipal || o.isFormat)
+      .reduce((acc, o) => acc + (o.bultos ?? 0), 0);
+    // Los costos fijos no están en la receta: se mantienen tal cual cerró la orden.
+    const fijoPrevio = detalleInsumos.find((l) => l.name === COSTO_FIJO_NOMBRE);
+    if (fijoPrevio)
+      ingredients.push({ name: fijoPrevio.name, quantity: fijoPrevio.cantidad, unitCost: fijoPrevio.unitCost, basis: 'fixed_per_order' });
+    const expectedYield = expectedYieldFromBreakdown(old, order.recipeVersion?.standardWastePercent ?? 0);
+    // La ricota del suero: kg de las ricotas cerradas con este suero (igual que al cerrar).
+    const byproductActuals = this.byproductActuals(order, order.actualOutputs);
+    for (const w of await this.wheyOutputsFor(manager, order.id, version)) byproductActuals[w.productName] = w.kg;
+    const cost = {
+      ...computeOrderCost({
+        totalLiters,
+        kgProductoTotal,
+        bultos,
+        primaryInputs: primaryInputsFromBreakdown(detalleInputs),
+        ingredients,
+        version,
+        byproductActuals,
+        expectedYield,
+      }),
+      expectedYield,
+    };
+    return { cost, bultos, detalleInsumos };
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // Ricota del suero de la masa (nov 2026). La ricota se hace con el suero de la masa del
+  // día. El costo se CONSERVA: lo que se le descuenta a la masa (kg de ricota × recupero de la
+  // receta de la masa, subproducto con destino "elaboracion") entra como costo de la ricota en
+  // una línea "Suero de OP-…". La calculadora no cambia: solo cambian los datos que recibe.
+  //   - Masa abierta al cerrar la ricota: la masa toma el descuento cuando cierra.
+  //   - Masa cerrada e intacta (o solo vendida): se recalcula con el descuento.
+  //   - Masa que ya pasó a mozzarella: no se toca; la ricota queda solo con sus insumos.
+  // Candado: ricota y masa se bloquean siempre en ese orden (ricota → masa); el cierre de la
+  // masa solo bloquea la masa, así nunca se pierde ni se duplica el descuento.
+  // ---------------------------------------------------------------------------------------
+
+  // Masas que se pueden elegir como origen del suero: las de ese día y del anterior.
+  async wheySources(
+    fecha?: string,
+  ): Promise<{ id: string; code: string; recipeName: string; startedAt: string; status: string }[]> {
+    const dia = fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? fecha : null;
+    const rows: { id: string; code: string; name: string; started_at: Date; status: string }[] =
+      await this.dataSource.query(
+        `SELECT o.id, o.code, r.name, o.started_at, o.status
+           FROM production_orders o
+           JOIN recipes r ON r.id = o.recipe_id
+           JOIN products p ON p.id = r.product_id
+          WHERE p.category = 'intermedio' AND o.status <> 'cancelled'
+            AND (o.started_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                BETWEEN COALESCE($1::date, (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date) - 1
+                    AND COALESCE($1::date, (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date)
+          ORDER BY o.started_at DESC, o.code DESC`,
+        [dia],
+      );
+    return rows.map((r) => ({
+      id: r.id,
+      code: r.code,
+      recipeName: r.name,
+      startedAt: new Date(r.started_at).toISOString(),
+      status: r.status,
+    }));
+  }
+
+  private withAvisos(dto: ProductionOrder, avisos: string[]): ProductionOrder {
+    return avisos.length > 0 ? { ...dto, avisos } : dto;
+  }
+
+  // kg de ricota por producto de las ricotas CERRADAS que le descontaron su valor a esta masa.
+  // Sin subproducto "elaboracion" en la versión no hay nada que buscar.
+  private async wheyKgByProduct(
+    manager: import('typeorm').EntityManager,
+    masaId: string,
+    version: { byproducts?: RecipeByproduct[] } | null | undefined,
+  ): Promise<Map<string, Big>> {
+    const kgs = new Map<string, Big>();
+    if (wheyByproducts(version).length === 0) return kgs;
+    const rows: { product_id: string; kg: string | null }[] =
+      (await manager.query(
+        `SELECT r.product_id, o.cost_breakdown->'suero'->>'kg' AS kg
+           FROM production_orders o JOIN recipes r ON r.id = o.recipe_id
+          WHERE o.whey_from_order_id = $1 AND o.status = 'closed'
+            AND o.cost_breakdown->'suero'->>'aplicado' = 'true'`,
+        [masaId],
+      )) ?? [];
+    for (const row of rows) kgs.set(row.product_id, (kgs.get(row.product_id) ?? new Big(0)).plus(row.kg ?? 0));
+    return kgs;
+  }
+
+  // Subproductos "ricota del suero" de una masa con sus kg reales (los de las ricotas cerradas).
+  private async wheyOutputsFor(
+    manager: import('typeorm').EntityManager,
+    masaId: string,
+    version: { byproducts?: RecipeByproduct[] } | null | undefined,
+  ): Promise<{ productName: string; kg: string; output: ProductionOutput }[]> {
+    const bps = wheyByproducts(version);
+    if (bps.length === 0) return [];
+    const kgs = await this.wheyKgByProduct(manager, masaId, version);
+    return bps.map((bp) => {
+      const kg = kgs.get(bp.destinationProductId!) ?? new Big(0);
+      return {
+        productName: bp.name,
+        kg: kg.toString(),
+        output: {
+          productId: bp.destinationProductId!,
+          productName: bp.name,
+          quantity: Number(kg.toString()),
+          unit: bp.unit,
+          isPrincipal: false,
+        },
+      };
+    });
+  }
+
+  // Ricotas hechas con el suero de esta masa (detalle de la masa).
+  private async wheyRicotasOf(manager: import('typeorm').EntityManager, masaId: string) {
+    const rows: {
+      id: string;
+      code: string;
+      status: ProductionOrder['status'];
+      kg: string | null;
+      aplicado: string | null;
+    }[] =
+      (await manager.query(
+        `SELECT id, code, status, cost_breakdown->'suero'->>'kg' AS kg, cost_breakdown->'suero'->>'aplicado' AS aplicado
+           FROM production_orders WHERE whey_from_order_id = $1 AND status <> 'cancelled' ORDER BY code`,
+        [masaId],
+      )) ?? [];
+    return rows.map((r) => ({
+      id: r.id,
+      code: r.code,
+      status: r.status,
+      kg: r.status === 'closed' ? r.kg : null,
+      aplicado: r.status === 'closed' && r.aplicado === 'true',
+    }));
+  }
+
+  // Masa con ricota vinculada: no se borra ni cambia de receta hasta borrar/desvincular la ricota.
+  private async assertSinRicotaVinculada(
+    manager: import('typeorm').EntityManager,
+    order: ProductionOrderEntity,
+    accion: string,
+  ): Promise<void> {
+    const ricotas = await this.wheyRicotasOf(manager, order.id);
+    if (ricotas.length === 0) return;
+    const codes = ricotas.map((r) => r.code).join(', ');
+    throw new BadRequestException(
+      `La ricota ${codes} se hizo con el suero de ${order.code}. Para ${accion}, primero borrá esa ricota o cambiale el origen a "Suero sin masa".`,
+    );
+  }
+
+  // ¿Lo producido por la masa (lote principal o formatos) ya entró a otra elaboración CERRADA?
+  // Una orden todavía abierta que la reservó no cuenta: toma el costo del lote recién al cerrar.
+  private async masaUsadaEnOtraElaboracion(
+    manager: import('typeorm').EntityManager,
+    masa: ProductionOrderEntity,
+  ): Promise<boolean> {
+    const ids = masa.actualOutputs.filter((o) => (o.isPrincipal || o.isFormat) && o.batchId).map((o) => o.batchId!);
+    if (ids.length === 0) return false;
+    // Primero se bloquean los lotes de la masa: una mozzarella que está cerrando con ellos los
+    // tiene tomados y ya leyó su costo. Esperamos a que termine y recién ahí miramos; si no,
+    // no la veríamos y el valor de la ricota quedaría cobrado dos veces (masa vieja + ricota).
+    await lockBatches(manager, ids);
+    const rows: unknown[] =
+      (await manager.query(
+        `SELECT 1 FROM inventory_movements m JOIN production_orders o ON o.id = m.reference_id
+          WHERE m.batch_id = ANY($1::uuid[]) AND m.type = 'out' AND m.reference_type = 'production_order'
+            AND m.reference_id <> $2 AND o.status = 'closed' LIMIT 1`,
+        [ids, masa.id],
+      )) ?? [];
+    return rows.length > 0;
+  }
+
+  // Ricota que ya le descontó su valor a una masa: si esa masa ya pasó a mozzarella, la ricota
+  // no se puede editar ni borrar (cambiaría un costo que ya se heredó).
+  private async assertMasaSinUsar(
+    manager: import('typeorm').EntityManager,
+    masaId: string,
+    ricotaCode: string,
+  ): Promise<void> {
+    await lockRow(manager, 'production_orders', masaId);
+    const masa = await manager.getRepository(ProductionOrderEntity).findOne({ where: { id: masaId } });
+    if (masa?.status === 'closed' && (await this.masaUsadaEnOtraElaboracion(manager, masa)))
+      throw new BadRequestException(
+        `La ricota ${ricotaCode} ya le descontó su valor a la masa ${masa.code}, que ya pasó a mozzarella: no se puede modificar.`,
+      );
+  }
+
+  // Al abrir/editar la ricota: la masa elegida tiene que existir, ser masa y no estar
+  // cancelada. Si su receta no tiene la ricota con valor de recupero, avisa (no bloquea).
+  private async validateWheySource(
+    manager: import('typeorm').EntityManager,
+    masaId: string,
+    ricotaProductId: string,
+    selfId?: string,
+  ): Promise<string[]> {
+    if (masaId === selfId) throw new BadRequestException('Una orden no puede usar su propio suero.');
+    const masa = await manager
+      .getRepository(ProductionOrderEntity)
+      .findOne({ where: { id: masaId }, relations: { recipe: true, recipeVersion: true } });
+    if (!masa) throw new BadRequestException('No se encontró la masa elegida. Elegí otra o "Suero sin masa".');
+    if (masa.status === 'cancelled') throw new BadRequestException(`La masa ${masa.code} está cancelada: elegí otra.`);
+    const product = await manager.getRepository(ProductEntity).findOne({ where: { id: masa.recipe.productId } });
+    if (product?.category !== 'intermedio')
+      throw new BadRequestException(`${masa.code} no es una orden de masa: elegí la masa de cuyo suero salió la ricota.`);
+    if (wheyRecupero(masa.recipeVersion, ricotaProductId) == null)
+      return [`La receta de la masa ${masa.code} no tiene valor para esta ricota: no se le va a descontar nada.`];
+    return [];
+  }
+
+  // Al cerrar la ricota: la línea "Suero de OP-…" (kg ricota × recupero de la VERSIÓN de la
+  // masa) y el bloque `suero` del desglose. Bloquea la masa hasta el fin de la transacción.
+  private async wheyLineForRicota(
+    manager: import('typeorm').EntityManager,
+    masaId: string,
+    ricotaProductId: string,
+    kgRicota: string,
+  ): Promise<{ line: PrimaryInput | null; suero: WheyLink; masaCerrada: boolean; aviso?: string }> {
+    await lockRow(manager, 'production_orders', masaId);
+    const masa = await manager
+      .getRepository(ProductionOrderEntity)
+      .findOne({ where: { id: masaId }, relations: { recipeVersion: true } });
+    if (!masa || masa.status === 'cancelled')
+      throw new BadRequestException(
+        'La masa de cuyo suero salió esta ricota ya no existe o está cancelada. Editá la ricota y elegí otra masa o "Suero sin masa".',
+      );
+    const kg = new Big(kgRicota);
+    const recupero = wheyRecupero(masa.recipeVersion, ricotaProductId);
+    const masaCerrada = masa.status === 'closed';
+    const base = {
+      orderId: masa.id,
+      orderCode: masa.code,
+      kg: kg.toString(),
+      unitValue: recupero ?? '0',
+      valor: kg.times(recupero ?? 0).toFixed(2),
+    };
+    if (recupero == null)
+      return {
+        line: null,
+        masaCerrada,
+        suero: { ...base, aplicado: false, motivo: `La receta de la masa ${masa.code} no tiene valor para esta ricota` },
+      };
+    if (masaCerrada && (await this.masaUsadaEnOtraElaboracion(manager, masa))) {
+      const motivo = `La masa ${masa.code} ya pasó a mozzarella: el valor de la ricota no se le descontó`;
+      return { line: null, masaCerrada, suero: { ...base, aplicado: false, motivo }, aviso: motivo };
+    }
+    return {
+      line: { name: `Suero de ${masa.code}`, quantity: kg.toString(), unitCost: recupero },
+      masaCerrada,
+      suero: { ...base, aplicado: true },
+    };
+  }
+
+  // Pone al día una masa CERRADA con las ricotas de su suero: si los kg de ricota cambiaron,
+  // la recalcula (misma versión, mismos lotes/precios guardados) y actualiza el costo de la
+  // orden y de sus lotes de producto. Stock no se mueve. Devuelve el aviso, o null si no cambió.
+  private async syncWheyMasa(manager: import('typeorm').EntityManager, masaId: string): Promise<string | null> {
+    await lockRow(manager, 'production_orders', masaId);
+    const repo = manager.getRepository(ProductionOrderEntity);
+    const masa = await repo.findOne({ where: { id: masaId }, relations: { recipe: true, recipeVersion: true } });
+    if (!masa || masa.status !== 'closed' || !masa.costBreakdown) return null;
+    const version = masa.recipeVersion;
+    const whey = await this.wheyOutputsFor(manager, masa.id, version);
+    if (whey.length === 0) return null;
+    const actual = (productId: string) =>
+      masa.actualOutputs.find((o) => !o.isPrincipal && !o.isFormat && o.productId === productId)?.quantity ?? 0;
+    if (whey.every((w) => new Big(w.kg).eq(actual(w.output.productId)))) return null;
+    if (await this.masaUsadaEnOtraElaboracion(manager, masa))
+      throw new BadRequestException(
+        `La masa ${masa.code} ya pasó a mozzarella: no se puede cambiar la ricota de su suero.`,
+      );
+
+    const ricotaIds = wheyProductIds(version);
+    masa.actualOutputs = [
+      ...masa.actualOutputs.filter((o) => o.isPrincipal || o.isFormat || !ricotaIds.has(o.productId)),
+      ...whey.filter((w) => new Big(w.kg).gt(0)).map((w) => w.output),
+    ];
+    const { cost } = await this.recostClosedOrder(manager, masa, version);
+    const antes = masa.unitCost;
+    masa.totalCost = cost.real.costoNeto;
+    masa.unitCost = cost.real.costoPorKg;
+    masa.costBreakdown = { ...masa.costBreakdown, real: cost.real, estandar: cost.estandar, variance: cost.variance };
+    await repo.save(masa);
+
+    // Lote principal y formatos heredan el costo/kg nuevo (lo ya vendido se recostea solo:
+    // la rentabilidad lee el costo del lote). El stock no se mueve.
+    const lotes = masa.actualOutputs.filter((o) => (o.isPrincipal || o.isFormat) && o.batchId).map((o) => o.batchId!);
+    await lockBatches(manager, lotes);
+    for (const batchId of lotes)
+      await manager.getRepository(BatchEntity).update({ id: batchId }, { unitCost: cost.real.costoPorKg });
+
+    const despues = cost.real.costoPorKg;
+    const accion =
+      antes != null && despues != null && new Big(despues).gt(antes)
+        ? 'se le sacó el descuento de la ricota'
+        : 'se le descontó la ricota';
+    return `A la masa ${masa.code} ${accion}: pasó de ${pesos(antes)}/kg a ${pesos(despues)}/kg`;
   }
 
   // Secuencia atómica por día con pg_advisory_xact_lock (mismo patrón que recepciones).
@@ -1510,6 +1911,8 @@ export class ProductionService {
       totalCost: e.totalCost ? Number(e.totalCost) : undefined,
       unitCost: e.unitCost ? Number(e.unitCost) : undefined,
       costBreakdown: e.costBreakdown ?? undefined,
+      wheyFromOrderId: e.wheyFromOrderId ?? undefined,
+      wheyFromOrderCode: e.wheyFromOrder?.code ?? undefined,
       notes: e.notes ?? undefined,
       createdAt: e.createdAt.toISOString(),
       updatedAt: e.updatedAt.toISOString(),
