@@ -226,7 +226,7 @@ export default function CloseProductionPage({ params }: { params: { id: string }
         <SueroResultado order={closedOrder} />
 
         {closedOrder.costBreakdown ? (
-          <ProductionCostPanel breakdown={closedOrder.costBreakdown} />
+          <ProductionCostPanel breakdown={closedOrder.costBreakdown} fijosMasa={closedOrder.costosFijosMasa} />
         ) : (
           <Card className="p-6 text-center text-sm text-foreground-muted">
             Esta orden no tiene desglose de costo disponible.

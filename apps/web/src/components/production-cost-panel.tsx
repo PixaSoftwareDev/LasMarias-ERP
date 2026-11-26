@@ -63,10 +63,12 @@ function varianceTone(value: string | null | undefined): 'good' | 'bad' | 'neutr
 
 interface Props {
   breakdown: ProductionCostBreakdown;
+  // Costos fijos que ya vienen dentro del costo de la masa (mozzarella, cheddar…).
+  fijosMasa?: { total: string; porKg: string | null; sinFijos: string[] };
   className?: string;
 }
 
-export function ProductionCostPanel({ breakdown, className }: Props) {
+export function ProductionCostPanel({ breakdown, fijosMasa, className }: Props) {
   const { real, estandar, variance } = breakdown;
   const hasWarnings = real.warnings.length > 0;
   // Línea de costos fijos de planta (si la orden la tiene): se muestra aparte del resto de insumos.
@@ -118,6 +120,20 @@ export function ProductionCostPanel({ breakdown, className }: Props) {
             <dt className="text-foreground-muted">Costo de leche / masa</dt>
             <dd className="font-medium">{pesos(real.costoInputs)}</dd>
           </div>
+          {fijosMasa && Number(fijosMasa.total) > 0 && (
+            <div className="flex items-center justify-between border-b border-border-subtle py-1.5 pl-4 text-sm">
+              <dt className="text-foreground-muted">
+                incluye costos fijos de la masa{fijosMasa.porKg ? ` (${pesos(fijosMasa.porKg)} por kg)` : ''}
+              </dt>
+              <dd>{pesos(fijosMasa.total)}</dd>
+            </div>
+          )}
+          {fijosMasa && fijosMasa.sinFijos.length > 0 && (
+            <p className="flex items-start gap-2 py-1.5 text-sm text-amber-800 sm:col-span-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
+              <span>Masa sin costos fijos: {fijosMasa.sinFijos.join(', ')}</span>
+            </p>
+          )}
           <div className="flex items-center justify-between border-b border-border-subtle py-1.5">
             <dt className="text-foreground-muted">Costo de insumos</dt>
             <dd className="font-medium">{pesos(real.costoInsumos)}</dd>

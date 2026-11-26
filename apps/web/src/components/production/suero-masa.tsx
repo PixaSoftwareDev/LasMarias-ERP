@@ -39,10 +39,13 @@ export function SueroMasaSelect({
     enabled: !!fecha,
   });
   const opciones = masas.data ?? [];
-  const soloUna = opciones.length === 1 ? opciones[0]!.id : null;
+  // Se propone la masa del MISMO día de la ricota (el suero es de esa masa). Si ese día no hay
+  // masa y solo hay una del día anterior, esa. Con varias del mismo día no se adivina.
+  const delDia = opciones.filter((m) => diaArgentina(m.startedAt) === fecha);
+  const propuesta = delDia.length === 1 ? delDia[0]!.id : delDia.length === 0 && opciones.length === 1 ? opciones[0]!.id : null;
   useEffect(() => {
-    if (auto && soloUna && value === '') onChange(soloUna);
-  }, [auto, soloUna, value, onChange]);
+    if (auto && propuesta && value === '') onChange(propuesta);
+  }, [auto, propuesta, value, onChange]);
 
   // Al editar, la masa elegida puede ser de otro día: se muestra igual.
   const fuera = value && !opciones.some((m) => m.id === value);
@@ -61,6 +64,11 @@ export function SueroMasaSelect({
       </select>
     </Field>
   );
+}
+
+// Fecha (AAAA-MM-DD) en hora argentina, para comparar con la fecha de la ricota.
+function diaArgentina(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
 }
 
 // Subproductos de una versión de receta que se elaboran en otra orden (la ricota del suero).
