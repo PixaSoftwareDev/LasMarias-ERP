@@ -42,6 +42,7 @@ import { UsersService } from '../users/users.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 import { bultosForQuantity } from '../inventory/bultos-allocation';
 import { resolveInputCost } from './input-cost';
+import { fijosHeredados } from './fijos-heredados';
 import { lockBatches, lockBatchesOfProduct, lockDuplicateSignature, lockRow } from '../common/locks';
 
 // --- Ricota del suero (subproducto de la masa con destino "elaboracion") ---------------
@@ -126,8 +127,10 @@ export class ProductionService {
       ? await this.dataSource.getRepository(BatchEntity).findOne({ where: { id: principal.batchId } })
       : null;
     const wheyRicotas = await this.wheyRicotasOf(this.dataSource.manager, r.id);
+    const costosFijosMasa = await this.costosFijosDeLaMasa(dto, categoria);
     return {
       ...dto,
+      ...(costosFijosMasa && { costosFijosMasa }),
       milkInputs: dto.milkInputs.map((m) => ({ ...m, category: categoria.get(m.batchId) ?? '' })),
       milkReserved: salidas > 0,
       warehouseId: principalBatch?.warehouseId ?? undefined,
@@ -1633,6 +1636,33 @@ export class ProductionService {
       startedAt: new Date(r.started_at).toISOString(),
       status: r.status,
     }));
+  }
+
+  // Orden cerrada hecha con masa: cuánto de costos fijos trae dentro del costo de la masa.
+  // Solo para mostrar (ver fijos-heredados.ts); el costo de la orden no cambia.
+  private async costosFijosDeLaMasa(dto: ProductionOrder, categoria: Map<string, string>) {
+    if (dto.status !== 'closed' || !dto.totalPrincipalKg) return null;
+    const masas = dto.milkInputs.filter((m) => categoria.get(m.batchId) === 'intermedio');
+    if (masas.length === 0) return null;
+    const rows: { batch_id: string; code: string; kg: string | null; fijo: string | null }[] =
+      await this.dataSource.query(
+        `SELECT b.id AS batch_id, b.code, o.total_principal_kg AS kg,
+                (SELECT l->>'subtotal' FROM jsonb_array_elements(o.cost_breakdown->'real'->'detalleInsumos') l
+                  WHERE l->>'name' = $2 LIMIT 1) AS fijo
+           FROM batches b
+           JOIN production_orders o ON o.status = 'closed'
+            AND o.actual_outputs @> jsonb_build_array(jsonb_build_object('batchId', b.id::text))
+          WHERE b.id = ANY($1::uuid[])`,
+        [masas.map((m) => m.batchId), COSTO_FIJO_NOMBRE],
+      );
+    const porLote = new Map(rows.map((x) => [x.batch_id, x]));
+    return fijosHeredados(
+      masas.map((m) => {
+        const o = porLote.get(m.batchId);
+        return { code: o?.code ?? m.batchCode ?? '', kgConsumidos: m.liters, fijoMasa: o?.fijo ?? null, kgMasa: o?.kg ?? 0 };
+      }),
+      dto.totalPrincipalKg,
+    );
   }
 
   private withAvisos(dto: ProductionOrder, avisos: string[]): ProductionOrder {

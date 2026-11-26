@@ -166,6 +166,11 @@ export const productionOrderSchema = z.object({
       }),
     )
     .optional(),
+  // Solo en el detalle de una orden cerrada hecha con masa: costos fijos que ya trae dentro
+  // del costo de la masa (para mostrarlos; no se vuelven a sumar). sinFijos = masas sin ellos.
+  costosFijosMasa: z
+    .object({ total: z.string(), porKg: z.string().nullable(), sinFijos: z.array(z.string()) })
+    .optional(),
   // Avisos de la última operación (abrir/editar/cerrar/borrar). Solo en la respuesta.
   avisos: z.array(z.string()).optional(),
   notes: z.string().max(2000).optional(),
