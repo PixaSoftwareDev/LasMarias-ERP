@@ -25,7 +25,7 @@ import { rateForCurrency } from '@/features/currency';
 import { DateRangeFilter } from '@/components/ui/date-range';
 import { TableSkeleton } from '@/components/ui/skeleton';
 import { DeQueLoteSale } from '@/components/sales/de-que-lote-sale';
-import { ivaFactor, resumenReparto, usaBultos, type FilaReparto, type SalesOrder, type Currency, type PriceBasis } from '@lasmarias/shared-schemas';
+import { ivaFactor, juntarRenglones, resumenReparto, usaBultos, type FilaReparto, type SalesOrder, type Currency, type PriceBasis } from '@lasmarias/shared-schemas';
 
 // Condición de pago del despacho. El tipo vive en el schema como enum inline de
 // createSalesOrderInput; lo reflejamos acá para el selector.
@@ -300,6 +300,20 @@ export default function SalesPage() {
     );
   }
 
+  // Dos renglones del mismo producto al mismo precio: se juntan en el primero, con sus lotes.
+  function juntarLineas(destino: number, origen: number) {
+    const prev = lines;
+    const a = lines[destino]!;
+    setLines(
+      lines
+        .map((l, i) => (i === destino ? { ...a, batchId: undefined, lotes: undefined, ...juntarRenglones(a, lines[origen]!) } : l))
+        .filter((_, i) => i !== origen),
+    );
+    toast('Quedó en un solo renglón', {
+      action: { label: 'Deshacer', onClick: () => setLines(prev) },
+    });
+  }
+
   function removeLine(idx: number) {
     const prev = lines;
     const removed = lines[idx];
@@ -489,6 +503,14 @@ export default function SalesPage() {
                 const lineUnit = stock?.unit ?? '';
                 // Bultos solo en lo que se despacha embolsado (masa, quesos, subproductos).
                 const conBultos = usaBultos(product?.category);
+                // El mismo producto más arriba: si se cobra igual, se ofrece juntarlos.
+                const repetidoEn = row.productId ? lines.findIndex((o, i) => i < idx && o.productId === row.productId) : -1;
+                const arriba = lines[repetidoEn];
+                const sePuedeJuntar =
+                  !!arriba &&
+                  arriba.unitPrice === row.unitPrice &&
+                  arriba.priceBasis === row.priceBasis &&
+                  arriba.fatPct === row.fatPct;
                 return (
                   <div key={idx} className="rounded-lg border border-border-subtle p-3">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr),170px,150px,auto]">
@@ -632,12 +654,22 @@ export default function SalesPage() {
                         Precio $0. Si es masa usada para hacer mozzarella, cargala en Producción; si es merma, usá &quot;Dar de baja&quot; en Stock.
                       </p>
                     )}
-                    {row.productId && lines.findIndex((o) => o.productId === row.productId) < idx && (
-                      <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-amber-700">
-                        <TriangleAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-                        Este producto ya está en otro renglón. Si va al mismo precio, sumalo ahí y elegí
-                        &quot;Repartir entre varios lotes&quot;: así el remito sale en un solo renglón.
-                      </p>
+                    {repetidoEn >= 0 && (
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-amber-700">
+                        <span className="flex items-center gap-1.5">
+                          <TriangleAlert className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                          Este producto ya está en otro renglón.
+                        </span>
+                        {sePuedeJuntar && (
+                          <button
+                            type="button"
+                            className="min-h-touch border-primary-600 text-primary-700 hover:bg-primary-50 rounded-md border px-3 text-sm font-medium transition-colors"
+                            onClick={() => juntarLineas(repetidoEn, idx)}
+                          >
+                            Juntar en un renglón
+                          </button>
+                        )}
+                      </div>
                     )}
                     {row.productId && row.quantity > 0 && (
                       <DeQueLoteSale
