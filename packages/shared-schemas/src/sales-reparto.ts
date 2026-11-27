@@ -45,18 +45,22 @@ export function resumenReparto(
   const bultos = conBultos ? filas.reduce((acc, f) => acc + (f.bultos ?? 0), 0) : null;
 
   if (filas.some((f) => !f.batchId)) errores.push('Elegí el lote en cada fila.');
-  if (filas.some((f) => f.batchId && !(f.quantity > 0))) errores.push(`Cargá los ${unidad} de cada lote.`);
+  if (filas.some((f) => f.batchId && !(f.quantity > 0)))
+    errores.push(`Cargá los ${unidad} de cada lote.`);
   for (const f of filas) {
     const lote = lotes.find((l) => l.batchId === f.batchId);
     if (!lote) continue;
     if (toMil(f.quantity) > toMil(lote.remaining))
       errores.push(`El lote ${lote.batchCode} tiene ${fmt(lote.remaining)} ${unidad}.`);
     if (f.bultos != null && lote.bultos != null && f.bultos > lote.bultos)
-      avisos.push(`El lote ${lote.batchCode} figura con ${lote.bultos} bultos y pusiste ${f.bultos}.`);
+      avisos.push(
+        `El lote ${lote.batchCode} figura con ${lote.bultos} bultos y pusiste ${f.bultos}.`,
+      );
   }
   const faltanMil = toMil(total) - kgMil;
   if (faltanMil > 0) errores.push(`Faltan repartir ${fmt(fromMil(faltanMil))} ${unidad}.`);
-  if (faltanMil < 0) errores.push(`Te pasaste ${fmt(fromMil(-faltanMil))} ${unidad} del total del renglón.`);
+  if (faltanMil < 0)
+    errores.push(`Te pasaste ${fmt(fromMil(-faltanMil))} ${unidad} del total del renglón.`);
   // Los bultos se marcan cuando los kg ya cierran: mientras se reparte, "Llevás X de Y" alcanza.
   if (faltanMil === 0 && bultos != null && totalBultos != null && bultos !== totalBultos)
     errores.push(`Los bultos repartidos suman ${bultos} y el renglón dice ${totalBultos}.`);
@@ -76,14 +80,64 @@ export function filaSugerida(
 ): { quantity: number; bultos?: number } | null {
   if (filas[idx]!.quantity > 0) return null;
   const otras = filas.filter((_, i) => i !== idx);
-  const faltaMil = toMil(total) - otras.reduce((acc, f) => acc + (f.quantity > 0 ? toMil(f.quantity) : 0), 0);
+  const faltaMil =
+    toMil(total) - otras.reduce((acc, f) => acc + (f.quantity > 0 ? toMil(f.quantity) : 0), 0);
   if (faltaMil <= 0) return null;
   const tomaMil = Math.min(faltaMil, toMil(lote.remaining));
   const quantity = fromMil(tomaMil);
-  if (tomaMil === toMil(lote.remaining) && lote.bultos != null) return { quantity, bultos: lote.bultos };
+  if (tomaMil === toMil(lote.remaining) && lote.bultos != null)
+    return { quantity, bultos: lote.bultos };
   if (tomaMil === faltaMil && totalBultos != null) {
     const faltanBultos = totalBultos - otras.reduce((acc, f) => acc + (f.bultos ?? 0), 0);
     if (faltanBultos >= 0) return { quantity, bultos: faltanBultos };
   }
   return { quantity };
+}
+
+// Con qué filas arranca "Repartir entre varios lotes". Si ya había un lote elegido, entra con
+// lo que ese lote puede dar y deja una fila libre para el resto (audio del dueño, 27/11/2026:
+// puso el total, eligió un lote y no supo cómo seguir).
+export function repartoInicial(
+  total: number,
+  totalBultos: number | undefined,
+  elegido?: LoteDisponible,
+): FilaReparto[] {
+  const vacia: FilaReparto = { batchId: '', quantity: 0 };
+  if (!elegido) return [vacia];
+  const primera: FilaReparto = { batchId: elegido.batchId, quantity: 0 };
+  Object.assign(primera, filaSugerida(total, totalBultos, [primera], 0, elegido));
+  return toMil(primera.quantity) < toMil(total) ? [primera, vacia] : [primera];
+}
+
+// Un renglón de venta, en lo que hace falta para juntar dos del mismo producto.
+export interface RenglonLotes {
+  quantity: number;
+  bultos?: number;
+  batchId?: string;
+  lotes?: FilaReparto[];
+}
+
+// Junta dos renglones del mismo producto en uno: suma kg y bultos, y arma el reparto con los
+// lotes que cada renglón tenía elegidos. Si ninguno eligió lote, queda en "el más viejo
+// primero". Si uno solo eligió, lo del otro queda como "faltan repartir" para que lo complete.
+export function juntarRenglones(a: RenglonLotes, b: RenglonLotes): RenglonLotes {
+  const quantity = fromMil(toMil(a.quantity) + toMil(b.quantity));
+  const bultos =
+    a.bultos == null && b.bultos == null ? undefined : (a.bultos ?? 0) + (b.bultos ?? 0);
+  const filasDe = (r: RenglonLotes): FilaReparto[] =>
+    r.lotes ?? (r.batchId ? [{ batchId: r.batchId, quantity: r.quantity, bultos: r.bultos }] : []);
+  const filas: FilaReparto[] = [];
+  for (const f of [...filasDe(a), ...filasDe(b)]) {
+    const misma = f.batchId ? filas.find((o) => o.batchId === f.batchId) : undefined;
+    if (!misma) {
+      filas.push({ ...f });
+      continue;
+    }
+    // El mismo lote en los dos renglones: una sola fila con la suma.
+    misma.quantity = fromMil(toMil(misma.quantity) + toMil(f.quantity));
+    if (misma.bultos != null || f.bultos != null)
+      misma.bultos = (misma.bultos ?? 0) + (f.bultos ?? 0);
+  }
+  if (filas.length === 0) return { quantity, bultos };
+  return { quantity, bultos, lotes: filas };
 }

@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { CircleCheck, PackageCheck, Plus, Trash2, TriangleAlert } from 'lucide-react';
+import { CircleCheck, PackageCheck, Plus, Split, Trash2, TriangleAlert } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { inventoryApi } from '@/features/api';
 import { formatDate } from '@/lib/utils';
 import {
   filaSugerida,
+  repartoInicial,
   resumenReparto,
   type FilaReparto,
   type LoteDisponible,
@@ -21,7 +22,6 @@ import {
 //    muestra dos renglones del mismo producto.
 // El descuento real lo hace el backend al registrar la venta.
 
-const REPARTIR = '__repartir';
 const kg = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 3 });
 
 export interface CambioLote {
@@ -99,10 +99,11 @@ export function DeQueLoteSale({
       .join(' · ');
   const elegido = batchId ? lotes.find((b) => b.batchId === batchId) : undefined;
 
-  function elegirModo(valor: string) {
-    if (valor === REPARTIR) onChange({ batchId: undefined, lotes: [{ batchId: '', quantity: 0 }] });
-    else onChange({ batchId: valor || undefined, lotes: undefined });
-  }
+  // "Repartir" va como botón a la vista: dentro del desplegable, debajo de los lotes, no se
+  // encontraba (audio del dueño, 27/11/2026).
+  const hayVarios = lotes.length > 1;
+  const repartir = () =>
+    onChange({ batchId: undefined, lotes: repartoInicial(quantity, bultos, elegido) });
 
   return (
     <div className="border-border-subtle bg-surface-subtle/60 mt-2 space-y-1.5 rounded-lg border px-3 py-2.5 text-xs">
@@ -110,12 +111,12 @@ export function DeQueLoteSale({
         <span className="flex items-center gap-1.5">
           <PackageCheck className="h-3.5 w-3.5" aria-hidden="true" /> De qué lote sale
         </span>
-        {lotes.length > 1 && (
+        {hayVarios && !filas && (
           <select
             aria-label="Elegir de qué lote sale"
             className="min-h-touch border-border bg-surface-elevated text-foreground max-w-full rounded-md border px-2 text-sm font-normal normal-case tracking-normal"
-            value={filas ? REPARTIR : (batchId ?? '')}
-            onChange={(e) => elegirModo(e.target.value)}
+            value={batchId ?? ''}
+            onChange={(e) => onChange({ batchId: e.target.value || undefined, lotes: undefined })}
           >
             <option value="">El más viejo primero</option>
             {lotes.map((b) => (
@@ -123,10 +124,27 @@ export function DeQueLoteSale({
                 {etiqueta(b)}
               </option>
             ))}
-            <option value={REPARTIR}>Repartir entre varios lotes</option>
           </select>
         )}
       </label>
+      {hayVarios &&
+        (filas ? (
+          <button
+            type="button"
+            className="min-h-touch text-primary-700 font-medium underline-offset-2 hover:underline"
+            onClick={() => onChange({ batchId: undefined, lotes: undefined })}
+          >
+            Sacar de un solo lote
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="min-h-touch border-primary-600 text-primary-700 hover:bg-primary-50 flex items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors"
+            onClick={repartir}
+          >
+            <Split className="h-4 w-4" aria-hidden="true" /> Repartir entre varios lotes
+          </button>
+        ))}
 
       {filas ? (
         <Reparto
@@ -151,7 +169,7 @@ export function DeQueLoteSale({
             )}
             {elegido.remaining < quantity ? (
               <Aviso>
-                Ese lote tiene {kg(elegido.remaining)} {unit}. Bajá la cantidad o elegí
+                Ese lote tiene {kg(elegido.remaining)} {unit}. Bajá la cantidad o tocá
                 &quot;Repartir entre varios lotes&quot;.
               </Aviso>
             ) : (
